@@ -1,0 +1,293 @@
+package httpclient
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+)
+
+const (
+	DefaultTimeout   = 30 * time.Second
+	DefaultRetries   = 2
+	DefaultMaxBody   = int64(16 << 20)
+	defaultRetryWait = 100 * time.Millisecond
+)
+
+type Client struct {
+	baseURL   *url.URL
+	token     string
+	http      *http.Client
+	retries   int
+	maxBody   int64
+	userAgent string
+	retryWait func(context.Context, time.Duration) error
+}
+
+type Options struct {
+	HTTPClient *http.Client
+	Timeout    time.Duration
+	Retries    int
+	MaxBody    int64
+	UserAgent  string
+}
+
+type HTTPError struct {
+	StatusCode int
+	Status     string
+	Body       string
+}
+
+func (e *HTTPError) Error() string {
+	if e.Body == "" {
+		return fmt.Sprintf("InvokeAI returned %s", e.Status)
+	}
+	return fmt.Sprintf("InvokeAI returned %s: %s", e.Status, e.Body)
+}
+
+func (e *HTTPError) AuthenticationFailure() bool {
+	return e.StatusCode == http.StatusUnauthorized || e.StatusCode == http.StatusForbidden
+}
+
+type NetworkError struct {
+	Method string
+	URL    string
+	Err    error
+}
+
+func (e *NetworkError) Error() string {
+	return fmt.Sprintf("%s %s: %v", e.Method, e.URL, e.Err)
+}
+
+func (e *NetworkError) Unwrap() error { return e.Err }
+
+// OutcomeUnknownError means a state-changing request may have reached InvokeAI,
+// but Bediz did not receive a conclusive response. Callers must inspect remote
+// state before deciding whether to submit the operation again.
+type OutcomeUnknownError struct {
+	Method string
+	URL    string
+	Err    error
+}
+
+func (e *OutcomeUnknownError) Error() string {
+	return fmt.Sprintf("outcome unknown for %s %s: %v", e.Method, e.URL, e.Err)
+}
+
+func (e *OutcomeUnknownError) Unwrap() error { return e.Err }
+
+func New(baseURL, token string, options Options) (*Client, error) {
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse base url: %w", err)
+	}
+	if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return nil, errors.New("base url must be an absolute http or https url")
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return nil, errors.New("base url must not include credentials, a query, or a fragment")
+	}
+
+	timeout := options.Timeout
+	if timeout == 0 {
+		timeout = DefaultTimeout
+	}
+	if timeout < 0 {
+		return nil, errors.New("timeout must be positive")
+	}
+	httpClient := options.HTTPClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: timeout}
+	}
+	retries := options.Retries
+	if retries < 0 {
+		return nil, errors.New("retries cannot be negative")
+	}
+	if retries == 0 && options.HTTPClient == nil {
+		retries = DefaultRetries
+	}
+	maxBody := options.MaxBody
+	if maxBody == 0 {
+		maxBody = DefaultMaxBody
+	}
+	if maxBody < 0 {
+		return nil, errors.New("maximum response body size must be positive")
+	}
+	userAgent := options.UserAgent
+	if userAgent == "" {
+		userAgent = "bediz/dev"
+	}
+
+	return &Client{
+		baseURL:   parsed,
+		token:     token,
+		http:      httpClient,
+		retries:   retries,
+		maxBody:   maxBody,
+		userAgent: userAgent,
+		retryWait: wait,
+	}, nil
+}
+
+func (c *Client) BaseURL() string { return c.baseURL.String() }
+
+func (c *Client) HasToken() bool { return c.token != "" }
+
+func (c *Client) GetJSON(ctx context.Context, path string, target any) error {
+	return c.DoJSON(ctx, http.MethodGet, path, nil, target)
+}
+
+func (c *Client) DoJSON(ctx context.Context, method, path string, requestBody, target any) error {
+	var body []byte
+	var err error
+	if requestBody != nil {
+		body, err = json.Marshal(requestBody)
+		if err != nil {
+			return fmt.Errorf("encode request: %w", err)
+		}
+	}
+
+	requestURL, err := c.resolve(path)
+	if err != nil {
+		return err
+	}
+	safeRead := method == http.MethodGet || method == http.MethodHead
+	attempts := 1
+	if safeRead {
+		attempts += c.retries
+	}
+	for attempt := 0; attempt < attempts; attempt++ {
+		response, doErr := c.do(ctx, method, requestURL, body)
+		if doErr != nil {
+			if attempt+1 < attempts && ctx.Err() == nil {
+				if err := c.retryWait(ctx, defaultRetryWait*time.Duration(attempt+1)); err != nil {
+					return err
+				}
+				continue
+			}
+			if !safeRead {
+				return &OutcomeUnknownError{Method: method, URL: requestURL, Err: doErr}
+			}
+			return &NetworkError{Method: method, URL: requestURL, Err: doErr}
+		}
+
+		responseBody, readErr := readBody(response.Body, c.maxBody)
+		response.Body.Close()
+		if readErr != nil {
+			if !safeRead {
+				return &OutcomeUnknownError{Method: method, URL: requestURL, Err: readErr}
+			}
+			return readErr
+		}
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			httpErr := &HTTPError{
+				StatusCode: response.StatusCode,
+				Status:     response.Status,
+				Body:       compactBody(responseBody),
+			}
+			if attempt+1 < attempts && retryableStatus(response.StatusCode) {
+				if err := c.retryWait(ctx, defaultRetryWait*time.Duration(attempt+1)); err != nil {
+					return err
+				}
+				continue
+			}
+			return httpErr
+		}
+		if target == nil || len(responseBody) == 0 {
+			return nil
+		}
+		decoder := json.NewDecoder(bytes.NewReader(responseBody))
+		if err := decoder.Decode(target); err != nil {
+			if !safeRead {
+				return &OutcomeUnknownError{Method: method, URL: requestURL, Err: fmt.Errorf("decode response: %w", err)}
+			}
+			return fmt.Errorf("decode response from %s: %w", requestURL, err)
+		}
+		return nil
+	}
+	return errors.New("request attempts exhausted")
+}
+
+func (c *Client) do(ctx context.Context, method, requestURL string, body []byte) (*http.Response, error) {
+	request, err := http.NewRequestWithContext(ctx, method, requestURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("User-Agent", c.userAgent)
+	if len(body) > 0 {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	if c.token != "" {
+		request.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	return c.http.Do(request)
+}
+
+func (c *Client) resolve(path string) (string, error) {
+	if path == "" {
+		return "", errors.New("request path is required")
+	}
+	parsed, err := url.Parse(path)
+	if err != nil {
+		return "", fmt.Errorf("parse request path: %w", err)
+	}
+	if parsed.IsAbs() || parsed.Host != "" {
+		return "", errors.New("request path must be relative")
+	}
+	if parsed.Fragment != "" {
+		return "", errors.New("request path must not include a fragment")
+	}
+	joined, err := url.JoinPath(c.baseURL.String(), strings.TrimPrefix(parsed.Path, "/"))
+	if err != nil {
+		return "", fmt.Errorf("join request path: %w", err)
+	}
+	joinedURL, err := url.Parse(joined)
+	if err != nil {
+		return "", fmt.Errorf("parse joined request url: %w", err)
+	}
+	joinedURL.RawQuery = parsed.RawQuery
+	return joinedURL.String(), nil
+}
+
+func readBody(reader io.Reader, max int64) ([]byte, error) {
+	limited := io.LimitReader(reader, max+1)
+	body, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, fmt.Errorf("read response body: %w", err)
+	}
+	if int64(len(body)) > max {
+		return nil, fmt.Errorf("response body exceeds %d bytes", max)
+	}
+	return body, nil
+}
+
+func compactBody(body []byte) string {
+	const max = 2048
+	value := strings.TrimSpace(string(body))
+	if len(value) > max {
+		return value[:max] + "…"
+	}
+	return value
+}
+
+func retryableStatus(status int) bool {
+	return status == http.StatusBadGateway || status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout
+}
+
+func wait(ctx context.Context, duration time.Duration) error {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
