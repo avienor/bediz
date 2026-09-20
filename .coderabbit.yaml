@@ -1,0 +1,128 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+language: "en-US"
+early_access: false
+tone_instructions: "Be direct, concise, and evidence-based. Prioritize correctness, contract compliance, security, deterministic behavior, and tests over style nits."
+
+reviews:
+  profile: "assertive"
+  request_changes_workflow: false
+
+  high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  high_level_summary_instructions: |
+    Summarize the user-visible behavior, public contract changes, compatibility
+    impact, and verification performed. Call out deviations from docs/spec/v1.md
+    and any ADRs added or superseded.
+
+  review_status: true
+  review_details: true
+  collapse_walkthrough: true
+  changed_files_summary: true
+  sequence_diagrams: false
+  estimate_code_review_effort: true
+  assess_linked_issues: true
+  related_issues: true
+  related_prs: true
+  suggested_labels: false
+  suggested_reviewers: false
+  in_progress_fortune: false
+  poem: false
+  enable_prompt_for_ai_agents: true
+
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 0
+    ignore_title_keywords:
+      - "WIP"
+      - "DO NOT MERGE"
+      - "[skip review]"
+    labels:
+      - "!do-not-review"
+
+  path_instructions:
+    - path: "**/*.go"
+      instructions: |
+        Treat docs/spec/v1.md and accepted ADRs as the product contract. Review
+        for deterministic behavior, explicit validation, stable error semantics,
+        context cancellation, bounded resource use, and idiomatic Go 1.24.
+        Require focused tests for behavior changes. Do not request abstractions
+        or compatibility layers that are not needed by the current V1 scope.
+
+    - path: "**/*_test.go"
+      instructions: |
+        Check that tests exercise observable behavior and failure paths, remain
+        deterministic, avoid timing-dependent assertions, and cover regressions
+        introduced by the change. Prefer standard-library test facilities and
+        table-driven tests when they make cases clearer.
+
+    - path: "internal/httpclient/**"
+      instructions: |
+        Treat request safety as critical. Read-only requests may retry only under
+        the documented bounded policy. State-changing requests must never be
+        retried automatically, and ambiguous transport or response failures must
+        preserve the unknown-outcome classification. Check context propagation,
+        response-body limits and closure, URL resolution, authentication handling,
+        and that tokens or sensitive bodies cannot leak into errors or logs.
+
+    - path: "internal/config/**"
+      instructions: |
+        Preserve flag > environment > file > default precedence. Configuration
+        writes must remain atomic and user-only, and tokens must never appear in
+        normal output, errors, or logs. Review filesystem behavior across failure
+        paths and reject malformed or ambiguous configuration explicitly.
+
+    - path: "internal/result/**"
+      instructions: |
+        Treat the versioned JSON envelope, stable error codes, warning shape, and
+        exit-code mapping as public API. Flag accidental field omission or null
+        changes, stdout contamination, unstable error classification, and any
+        breaking change that lacks a schema-version decision.
+
+    - path: "internal/{capability,doctor}/**"
+      instructions: |
+        Verify claims against the capability matrix and the supported InvokeAI
+        range. Endpoint presence alone must not imply graph capability. Diagnostics
+        must distinguish connectivity, authentication, schema incompatibility,
+        missing components, and unsupported versions without overstating readiness.
+
+    - path: "{cmd,internal/cli}/**"
+      instructions: |
+        Keep CLI flags and request documents aligned with the same typed operation
+        semantics. Machine mode must emit exactly one final JSON object on stdout;
+        progress and diagnostics belong on stderr. Check documented exit codes,
+        non-interactive behavior, cancellation, and secret redaction.
+
+    - path: "docs/spec/**"
+      instructions: |
+        Review specifications for internal consistency, deterministic and testable
+        requirements, compatibility with accepted ADRs, and clear separation of
+        creative-agent decisions from controller behavior. Flag scope creep beyond
+        V1 and requirements that contradict the implementation without an explicit
+        migration plan.
+
+    - path: "docs/adr/**"
+      instructions: |
+        Check that each ADR records a durable architectural decision, is consistent
+        with CONTEXT.md and docs/spec/v1.md, and explicitly supersedes any conflicting
+        prior decision. Separate architectural rationale from implementation detail.
+
+    - path: "{README.md,CONTEXT.md}"
+      instructions: |
+        Keep terminology and examples consistent with the implemented CLI, the V1
+        specification, and accepted ADRs. Flag aspirational features presented as
+        shipped behavior and any command, precedence rule, or safety claim that the
+        code and tests do not support.
+
+  tools:
+    golangci-lint:
+      enabled: true
+    markdownlint:
+      enabled: true
+    yamllint:
+      enabled: true
+
+chat:
+  auto_reply: true
