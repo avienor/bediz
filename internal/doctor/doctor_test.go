@@ -118,6 +118,9 @@ func TestRunDoesNotDeriveSchemaIssuesWhenOpenAPIRequestFails(t *testing.T) {
 	assertIssuePresent(t, report, "invokeai_http_error")
 	assertIssueAbsent(t, report, "missing_endpoint")
 	assertIssueAbsent(t, report, "incompatible_invocation")
+	assertCapabilityFailurePresent(t, report, "openapi_unavailable")
+	assertCapabilityFailurePrefixAbsent(t, report, "missing_endpoint:")
+	assertCapabilityFailurePrefixAbsent(t, report, "incompatible_invocation:")
 }
 
 func TestRunDoesNotDeriveComponentIssuesWhenModelsRequestFails(t *testing.T) {
@@ -144,6 +147,8 @@ func TestRunDoesNotDeriveComponentIssuesWhenModelsRequestFails(t *testing.T) {
 
 	assertIssuePresent(t, report, "invokeai_http_error")
 	assertIssueAbsent(t, report, "missing_component")
+	assertCapabilityFailurePresent(t, report, "models_unavailable")
+	assertCapabilityFailurePrefixAbsent(t, report, "missing_component:")
 }
 
 func TestFailureClassifiesInvokeAIHTTPError(t *testing.T) {
@@ -210,6 +215,50 @@ func TestFailureClassifiesInvalidInvokeAIResponse(t *testing.T) {
 	}
 }
 
+func TestFailureClassifiesInvalidVersionPayloads(t *testing.T) {
+	tests := []struct {
+		name         string
+		version      string
+		expectedCode string
+	}{
+		{name: "empty version", version: "", expectedCode: "invalid_version_response"},
+		{name: "unparsable version", version: "latest", expectedCode: "invalid_invokeai_version"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			document := openAPIFixture("")
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/app/version":
+					_ = json.NewEncoder(w).Encode(map[string]string{"version": test.version})
+				case "/openapi.json":
+					_ = json.NewEncoder(w).Encode(document)
+				case "/api/v2/models/":
+					_ = json.NewEncoder(w).Encode(map[string]any{"models": []map[string]string{
+						{"key": "main", "name": "Anima", "base": "anima", "type": "main"},
+						{"key": "vae", "name": "VAE", "base": "anima", "type": "vae"},
+						{"key": "encoder", "name": "Qwen3", "base": "any", "type": "qwen3_encoder"},
+					}})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			report := Run(context.Background(), client, version.Info{Version: "test"})
+			exitCode, code, _ := Failure(report)
+
+			if exitCode != result.ExitInvokeAIFailure || code != test.expectedCode {
+				t.Fatalf("failure = (%d, %q), want (%d, %q)", exitCode, code, result.ExitInvokeAIFailure, test.expectedCode)
+			}
+		})
+	}
+}
+
 func assertIssuePresent(t *testing.T, report Report, code string) {
 	t.Helper()
 	for _, issue := range report.Issues {
@@ -225,6 +274,29 @@ func assertIssueAbsent(t *testing.T, report Report, code string) {
 	for _, issue := range report.Issues {
 		if issue.Code == code {
 			t.Fatalf("unexpected issue %q: %#v", code, report.Issues)
+		}
+	}
+}
+
+func assertCapabilityFailurePresent(t *testing.T, report Report, failure string) {
+	t.Helper()
+	for _, capabilityReport := range report.Capabilities {
+		for _, candidate := range capabilityReport.Failures {
+			if candidate == failure {
+				return
+			}
+		}
+	}
+	t.Fatalf("capability failure %q not found: %#v", failure, report.Capabilities)
+}
+
+func assertCapabilityFailurePrefixAbsent(t *testing.T, report Report, prefix string) {
+	t.Helper()
+	for _, capabilityReport := range report.Capabilities {
+		for _, failure := range capabilityReport.Failures {
+			if strings.HasPrefix(failure, prefix) {
+				t.Fatalf("unexpected capability failure prefix %q: %#v", prefix, report.Capabilities)
+			}
 		}
 	}
 }

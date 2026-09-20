@@ -309,19 +309,27 @@ func buildCapabilities(report Report) []CapabilityReport {
 		if !report.InvokeAI.SupportedVersion {
 			failures = append(failures, "unsupported_version")
 		}
-		for _, requirement := range entry.Endpoints {
-			if !endpointAvailable(report.OpenAPI.Endpoints, requirement) {
-				failures = append(failures, "missing_endpoint:"+requirement.Method+" "+requirement.Path)
+		if !report.OpenAPI.Available {
+			failures = append(failures, "openapi_unavailable")
+		} else {
+			for _, requirement := range entry.Endpoints {
+				if !endpointAvailable(report.OpenAPI.Endpoints, requirement) {
+					failures = append(failures, "missing_endpoint:"+requirement.Method+" "+requirement.Path)
+				}
+			}
+			for _, requirement := range entry.Invocations {
+				if !invocationAvailable(report.OpenAPI.Invocations, requirement.Schema) {
+					failures = append(failures, "incompatible_invocation:"+requirement.Type)
+				}
 			}
 		}
-		for _, requirement := range entry.Invocations {
-			if !invocationAvailable(report.OpenAPI.Invocations, requirement.Schema) {
-				failures = append(failures, "incompatible_invocation:"+requirement.Type)
-			}
-		}
-		for _, requirement := range entry.Models {
-			if !modelRequirementSatisfied(report.Models.Requirements, requirement.Name) {
-				failures = append(failures, "missing_component:"+requirement.Name)
+		if !report.Models.Available {
+			failures = append(failures, "models_unavailable")
+		} else {
+			for _, requirement := range entry.Models {
+				if !modelRequirementSatisfied(report.Models.Requirements, requirement.Name) {
+					failures = append(failures, "missing_component:"+requirement.Name)
+				}
 			}
 		}
 		capabilities = append(capabilities, CapabilityReport{
@@ -440,7 +448,10 @@ func Failure(report Report) (int, string, string) {
 		}
 	}
 	for _, issue := range report.Issues {
-		if issue.Code == "invokeai_http_error" || issue.Code == "invalid_invokeai_response" {
+		if issue.Code == "invokeai_http_error" ||
+			issue.Code == "invalid_invokeai_response" ||
+			issue.Code == "invalid_version_response" ||
+			issue.Code == "invalid_invokeai_version" {
 			return result.ExitInvokeAIFailure, issue.Code, issue.Message
 		}
 	}

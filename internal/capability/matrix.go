@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 const SupportedInvokeAIRange = ">= 6.14.1, < 6.15.0"
@@ -89,7 +90,7 @@ var Matrix = []Entry{
 	},
 }
 
-var versionPattern = regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)(?:-(?P<prerelease>[0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$`)
+var versionPattern = regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?P<prerelease>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`)
 
 func SupportsInvokeAI(version string) (bool, error) {
 	major, minor, patch, err := parseVersion(version)
@@ -108,6 +109,11 @@ func parseVersion(value string) (int, int, int, error) {
 	if matches == nil {
 		return 0, 0, 0, fmt.Errorf("invalid InvokeAI version %q", value)
 	}
+	for _, identifier := range strings.Split(matches[versionPattern.SubexpIndex("prerelease")], ".") {
+		if len(identifier) > 1 && identifier[0] == '0' && isNumericIdentifier(identifier) {
+			return 0, 0, 0, fmt.Errorf("invalid InvokeAI version %q", value)
+		}
+	}
 	values := make([]int, 3)
 	for i := range values {
 		parsed, err := strconv.Atoi(matches[i+1])
@@ -117,4 +123,13 @@ func parseVersion(value string) (int, int, int, error) {
 		values[i] = parsed
 	}
 	return values[0], values[1], values[2], nil
+}
+
+func isNumericIdentifier(value string) bool {
+	for _, character := range value {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
 }
