@@ -89,12 +89,16 @@ var Matrix = []Entry{
 	},
 }
 
-var versionPattern = regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$`)
+var versionPattern = regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)(?:-(?P<prerelease>[0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$`)
 
 func SupportsInvokeAI(version string) (bool, error) {
 	major, minor, patch, err := parseVersion(version)
 	if err != nil {
 		return false, err
+	}
+	matches := versionPattern.FindStringSubmatch(version)
+	if matches[versionPattern.SubexpIndex("prerelease")] != "" {
+		return false, nil
 	}
 	return major == 6 && minor == 14 && patch >= 1, nil
 }

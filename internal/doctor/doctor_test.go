@@ -10,6 +10,7 @@ import (
 
 	"github.com/avienor/bediz/internal/capability"
 	"github.com/avienor/bediz/internal/httpclient"
+	"github.com/avienor/bediz/internal/result"
 	"github.com/avienor/bediz/internal/version"
 )
 
@@ -90,6 +91,141 @@ func TestRunClassifiesRejectedAuthentication(t *testing.T) {
 	exitCode, code, _ := Failure(report)
 	if exitCode != 5 || code != "authentication_failed" {
 		t.Fatalf("failure = (%d, %q)", exitCode, code)
+	}
+}
+
+func TestRunDoesNotDeriveSchemaIssuesWhenOpenAPIRequestFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_ = json.NewEncoder(w).Encode(map[string]string{"version": "6.14.1"})
+		case "/openapi.json":
+			http.Error(w, "failed", http.StatusInternalServerError)
+		case "/api/v2/models/":
+			_ = json.NewEncoder(w).Encode(map[string]any{"models": []map[string]string{}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report := Run(context.Background(), client, version.Info{Version: "test"})
+
+	assertIssuePresent(t, report, "invokeai_http_error")
+	assertIssueAbsent(t, report, "missing_endpoint")
+	assertIssueAbsent(t, report, "incompatible_invocation")
+}
+
+func TestRunDoesNotDeriveComponentIssuesWhenModelsRequestFails(t *testing.T) {
+	document := openAPIFixture("")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_ = json.NewEncoder(w).Encode(map[string]string{"version": "6.14.1"})
+		case "/openapi.json":
+			_ = json.NewEncoder(w).Encode(document)
+		case "/api/v2/models/":
+			http.Error(w, "failed", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report := Run(context.Background(), client, version.Info{Version: "test"})
+
+	assertIssuePresent(t, report, "invokeai_http_error")
+	assertIssueAbsent(t, report, "missing_component")
+}
+
+func TestFailureClassifiesInvokeAIHTTPError(t *testing.T) {
+	document := openAPIFixture("")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			http.Error(w, "failed", http.StatusInternalServerError)
+		case "/openapi.json":
+			_ = json.NewEncoder(w).Encode(document)
+		case "/api/v2/models/":
+			_ = json.NewEncoder(w).Encode(map[string]any{"models": []map[string]string{
+				{"key": "main", "name": "Anima", "base": "anima", "type": "main"},
+				{"key": "vae", "name": "VAE", "base": "anima", "type": "vae"},
+				{"key": "encoder", "name": "Qwen3", "base": "any", "type": "qwen3_encoder"},
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report := Run(context.Background(), client, version.Info{Version: "test"})
+	exitCode, code, _ := Failure(report)
+
+	if exitCode != result.ExitInvokeAIFailure || code != "invokeai_http_error" {
+		t.Fatalf("failure = (%d, %q), want (%d, %q)", exitCode, code, result.ExitInvokeAIFailure, "invokeai_http_error")
+	}
+}
+
+func TestFailureClassifiesInvalidInvokeAIResponse(t *testing.T) {
+	document := openAPIFixture("")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte("not-json"))
+		case "/openapi.json":
+			_ = json.NewEncoder(w).Encode(document)
+		case "/api/v2/models/":
+			_ = json.NewEncoder(w).Encode(map[string]any{"models": []map[string]string{
+				{"key": "main", "name": "Anima", "base": "anima", "type": "main"},
+				{"key": "vae", "name": "VAE", "base": "anima", "type": "vae"},
+				{"key": "encoder", "name": "Qwen3", "base": "any", "type": "qwen3_encoder"},
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report := Run(context.Background(), client, version.Info{Version: "test"})
+	exitCode, code, _ := Failure(report)
+
+	if exitCode != result.ExitInvokeAIFailure || code != "invalid_invokeai_response" {
+		t.Fatalf("failure = (%d, %q), want (%d, %q)", exitCode, code, result.ExitInvokeAIFailure, "invalid_invokeai_response")
+	}
+}
+
+func assertIssuePresent(t *testing.T, report Report, code string) {
+	t.Helper()
+	for _, issue := range report.Issues {
+		if issue.Code == code {
+			return
+		}
+	}
+	t.Fatalf("issue %q not found: %#v", code, report.Issues)
+}
+
+func assertIssueAbsent(t *testing.T, report Report, code string) {
+	t.Helper()
+	for _, issue := range report.Issues {
+		if issue.Code == code {
+			t.Fatalf("unexpected issue %q: %#v", code, report.Issues)
+		}
 	}
 }
 

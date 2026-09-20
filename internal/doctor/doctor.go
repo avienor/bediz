@@ -11,6 +11,7 @@ import (
 
 	"github.com/avienor/bediz/internal/capability"
 	"github.com/avienor/bediz/internal/httpclient"
+	"github.com/avienor/bediz/internal/result"
 	"github.com/avienor/bediz/internal/version"
 )
 
@@ -169,21 +170,23 @@ func Run(ctx context.Context, client *httpclient.Client, bedizVersion version.In
 		appendRequestIssue(&report, "openapi", openAPIErr)
 	}
 	report.OpenAPI.Endpoints, report.OpenAPI.Invocations = inspectOpenAPI(document)
-	for _, check := range report.OpenAPI.Endpoints {
-		if !check.Available {
-			report.Issues = append(report.Issues, Issue{
-				Code:    "missing_endpoint",
-				Message: fmt.Sprintf("required endpoint %s %s is not available", check.Method, check.Path),
-			})
+	if openAPIErr == nil {
+		for _, check := range report.OpenAPI.Endpoints {
+			if !check.Available {
+				report.Issues = append(report.Issues, Issue{
+					Code:    "missing_endpoint",
+					Message: fmt.Sprintf("required endpoint %s %s is not available", check.Method, check.Path),
+				})
+			}
 		}
-	}
-	for _, check := range report.OpenAPI.Invocations {
-		if !check.Available || len(check.MissingProperties) > 0 {
-			report.Issues = append(report.Issues, Issue{
-				Code:    "incompatible_invocation",
-				Message: fmt.Sprintf("required invocation %s is unavailable or incompatible", check.Type),
-				Details: map[string]any{"schema": check.Schema, "missing_properties": check.MissingProperties},
-			})
+		for _, check := range report.OpenAPI.Invocations {
+			if !check.Available || len(check.MissingProperties) > 0 {
+				report.Issues = append(report.Issues, Issue{
+					Code:    "incompatible_invocation",
+					Message: fmt.Sprintf("required invocation %s is unavailable or incompatible", check.Type),
+					Details: map[string]any{"schema": check.Schema, "missing_properties": check.MissingProperties},
+				})
+			}
 		}
 	}
 
@@ -210,13 +213,15 @@ func Run(ctx context.Context, client *httpclient.Client, bedizVersion version.In
 		appendRequestIssue(&report, "models", modelsErr)
 	}
 	report.Models.Relevant, report.Models.Requirements = inspectModels(models.Models)
-	for _, requirement := range report.Models.Requirements {
-		if !requirement.Satisfied {
-			report.Issues = append(report.Issues, Issue{
-				Code:    "missing_component",
-				Message: fmt.Sprintf("%s is required", requirement.Name),
-				Details: map[string]any{"available": requirement.Available, "required": requirement.Required},
-			})
+	if modelsErr == nil {
+		for _, requirement := range report.Models.Requirements {
+			if !requirement.Satisfied {
+				report.Issues = append(report.Issues, Issue{
+					Code:    "missing_component",
+					Message: fmt.Sprintf("%s is required", requirement.Name),
+					Details: map[string]any{"available": requirement.Available, "required": requirement.Required},
+				})
+			}
 		}
 	}
 
@@ -431,13 +436,18 @@ func modelRequirementSatisfied(checks []ModelRequirement, name string) bool {
 func Failure(report Report) (int, string, string) {
 	for _, issue := range report.Issues {
 		if issue.Code == "connection_failed" || issue.Code == "authentication_failed" {
-			return 5, issue.Code, issue.Message
+			return result.ExitConnection, issue.Code, issue.Message
+		}
+	}
+	for _, issue := range report.Issues {
+		if issue.Code == "invokeai_http_error" || issue.Code == "invalid_invokeai_response" {
+			return result.ExitInvokeAIFailure, issue.Code, issue.Message
 		}
 	}
 	if !report.Ready {
-		return 4, "unsupported_capability", "InvokeAI is not ready for the registered Bediz capabilities"
+		return result.ExitUnsupportedCapability, "unsupported_capability", "InvokeAI is not ready for the registered Bediz capabilities"
 	}
-	return 0, "", ""
+	return result.ExitSuccess, "", ""
 }
 
 func (r Report) Human(w io.Writer) {

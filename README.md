@@ -7,7 +7,7 @@ The current implementation is the first V1 foundation slice. It includes:
 - per-user connection configuration with flag, environment, file, and default precedence;
 - a bounded HTTP client with bearer authentication, safe-read retries, and unknown-outcome classification for mutations;
 - the versioned JSON result and error envelope;
-- `doctor`, which checks InvokeAI 6.14.x version compatibility, required OpenAPI endpoints and invocation fields, Anima component models, and UI synchronization capability.
+- `doctor`, which checks InvokeAI version compatibility (`>= 6.14.1, < 6.15.0`), required OpenAPI endpoints and invocation fields, Anima component models, and UI synchronization capability.
 
 Generation and management commands will be added in the later V1 slices described by the specification.
 

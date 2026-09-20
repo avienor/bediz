@@ -62,6 +62,14 @@ func (c *CLI) newRootCommand(exitCode *int) *cobra.Command {
 	root.SetOut(c.stdout)
 	root.SetErr(c.stderr)
 	root.PersistentFlags().BoolVar(&jsonOutput, "json", false, "write one JSON result envelope")
+	defaultHelp := root.HelpFunc()
+	root.SetHelpFunc(func(command *cobra.Command, args []string) {
+		if jsonOutput {
+			*exitCode = c.fail(commandOperation(command), true, result.ExitInvalidRequest, "invalid_request", "help is not available in JSON mode", nil)
+			return
+		}
+		defaultHelp(command, args)
+	})
 
 	root.AddCommand(c.newDoctorCommand(exitCode, &jsonOutput))
 	root.AddCommand(c.newConfigCommand(exitCode, &jsonOutput))
@@ -324,19 +332,24 @@ func (c *CLI) writeConfigView(operation string, jsonOutput bool, view configView
 		}
 		return result.ExitSuccess
 	}
-	fmt.Fprintf(c.stdout, "Configuration: %s\n", view.Path)
-	if view.Stored.URL == "" {
-		fmt.Fprintln(c.stdout, "Stored URL: not set")
-	} else {
-		fmt.Fprintf(c.stdout, "Stored URL: %s\n", view.Stored.URL)
+	storedURL := "not set"
+	if view.Stored.URL != "" {
+		storedURL = view.Stored.URL
 	}
-	fmt.Fprintf(c.stdout, "Stored token: %s\n", configured(view.Stored.TokenConfigured))
-	fmt.Fprintf(c.stdout, "Effective URL: %s (%s)\n", view.Effective.URL, view.Effective.URLSource)
-	fmt.Fprintf(c.stdout, "Effective token: %s", configured(view.Effective.TokenConfigured))
+	effectiveToken := configured(view.Effective.TokenConfigured)
 	if view.Effective.TokenSource != "" {
-		fmt.Fprintf(c.stdout, " (%s)", view.Effective.TokenSource)
+		effectiveToken += fmt.Sprintf(" (%s)", view.Effective.TokenSource)
 	}
-	fmt.Fprintln(c.stdout)
+	output := strings.Join([]string{
+		fmt.Sprintf("Configuration: %s", view.Path),
+		fmt.Sprintf("Stored URL: %s", storedURL),
+		fmt.Sprintf("Stored token: %s", configured(view.Stored.TokenConfigured)),
+		fmt.Sprintf("Effective URL: %s (%s)", view.Effective.URL, view.Effective.URLSource),
+		fmt.Sprintf("Effective token: %s", effectiveToken),
+	}, "\n")
+	if _, err := fmt.Fprintln(c.stdout, output); err != nil {
+		return c.fail(operation, false, result.ExitInvokeAIFailure, "output_write_failed", err.Error(), nil)
+	}
 	return result.ExitSuccess
 }
 

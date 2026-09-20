@@ -11,6 +11,7 @@ func TestSupportsInvokeAI(t *testing.T) {
 		{version: "6.14.1", want: true},
 		{version: "6.14.9", want: true},
 		{version: "6.14.1+build", want: true},
+		{version: "6.14.1-rc1", want: false},
 		{version: "6.14.0", want: false},
 		{version: "6.15.0", want: false},
 		{version: "7.0.0", want: false},
