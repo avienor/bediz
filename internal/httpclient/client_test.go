@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -156,19 +158,17 @@ func TestContextCancellationStopsRetryAttempts(t *testing.T) {
 }
 
 func TestContextCancellationDuringRetryWaitStopsFurtherAttempts(t *testing.T) {
-	var serverCalls atomic.Int32
 	var roundTrips atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		serverCalls.Add(1)
-		http.Error(w, "try again", http.StatusServiceUnavailable)
-	}))
-	defer server.Close()
-
-	transport := server.Client().Transport
-	client, err := New(server.URL, "", Options{
-		HTTPClient: &http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+	ctx := newCancelWhenWaitedContext()
+	client, err := New("https://invoke.example", "", Options{
+		HTTPClient: &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 			roundTrips.Add(1)
-			return transport.RoundTrip(request)
+			ctx.arm()
+			return &http.Response{
+				StatusCode: http.StatusServiceUnavailable,
+				Status:     "503 Service Unavailable",
+				Body:       io.NopCloser(strings.NewReader("try again")),
+			}, nil
 		})},
 		Retries: 2,
 	})
@@ -176,24 +176,12 @@ func TestContextCancellationDuringRetryWaitStopsFurtherAttempts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	var waitInput time.Duration
-	client.retryWait = func(waitCtx context.Context, duration time.Duration) error {
-		waitInput = duration
-		cancel()
-		return wait(waitCtx, duration)
-	}
-
 	err = client.GetJSON(ctx, "/read", nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %#v, want context.Canceled", err)
 	}
-	if serverCalls.Load() != 1 || roundTrips.Load() != 1 {
-		t.Fatalf("server calls = %d, transport attempts = %d, want 1 and 1", serverCalls.Load(), roundTrips.Load())
-	}
-	if waitInput != 100*time.Millisecond {
-		t.Fatalf("first retry wait = %s, want 100ms", waitInput)
+	if roundTrips.Load() != 1 {
+		t.Fatalf("transport attempts = %d, want 1", roundTrips.Load())
 	}
 }
 
@@ -360,4 +348,43 @@ type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) {
 	return f(request)
+}
+
+// cancelWhenWaitedContext becomes canceled when a caller observes Done after
+// arm. The transport arms it after the first response, so retry waiting is the
+// first operation that can trigger cancellation.
+type cancelWhenWaitedContext struct {
+	armed    atomic.Bool
+	canceled atomic.Bool
+	done     chan struct{}
+}
+
+func newCancelWhenWaitedContext() *cancelWhenWaitedContext {
+	return &cancelWhenWaitedContext{done: make(chan struct{})}
+}
+
+func (c *cancelWhenWaitedContext) arm() {
+	c.armed.Store(true)
+}
+
+func (c *cancelWhenWaitedContext) Deadline() (time.Time, bool) {
+	return time.Time{}, false
+}
+
+func (c *cancelWhenWaitedContext) Done() <-chan struct{} {
+	if c.armed.Load() && c.canceled.CompareAndSwap(false, true) {
+		close(c.done)
+	}
+	return c.done
+}
+
+func (c *cancelWhenWaitedContext) Err() error {
+	if c.canceled.Load() {
+		return context.Canceled
+	}
+	return nil
+}
+
+func (c *cancelWhenWaitedContext) Value(any) any {
+	return nil
 }

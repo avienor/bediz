@@ -10,9 +10,9 @@
 
 **Escalate when:** A fallback argument performs I/O, mutation, allocation whose eager execution matters, or error-producing computation; an option's zero value needs semantics other than the currently accepted default; or exact human output would change.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Eligible zero-value fallback chains use `cmp.Or` only with inert arguments.
-- [ ] HTTP defaults, negative-value validation, and custom-client retry defaults remain unchanged.
-- [ ] Human-readable unknown and unset values remain byte-for-byte unchanged.
-- [ ] Focused fallback tests and all repository verification commands pass.
+- [x] Eligible zero-value fallback chains use `cmp.Or` only with inert arguments.
+- [x] HTTP defaults, negative-value validation, and custom-client retry defaults remain unchanged.
+- [x] Human-readable unknown and unset values remain byte-for-byte unchanged.
+- [x] Focused fallback tests and all repository verification commands pass.

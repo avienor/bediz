@@ -1364,8 +1364,9 @@ func TestImagesUploadRejectsUnreadableFileContentBeforeConnecting(t *testing.T) 
 	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
 		t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
 	}
-	if envelope.OK || envelope.Operation != "images.upload" || envelope.Error == nil || envelope.Error.Code != "invalid_request" {
-		t.Fatalf("unexpected envelope: %#v", envelope)
+	if envelope.OK || envelope.Operation != "images.upload" || envelope.Error == nil || envelope.Error.Code != "invalid_request" ||
+		!strings.HasPrefix(envelope.Error.Message, "read upload file:") {
+		t.Fatalf("unexpected envelope: %#v; error = %#v", envelope, envelope.Error)
 	}
 }
 
