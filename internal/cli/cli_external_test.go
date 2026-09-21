@@ -13,7 +13,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -573,6 +575,7 @@ func TestImagesGetClassifiesMissingImage(t *testing.T) {
 
 func TestQueueListJSONReturnsOnlyRequestedSummaryPage(t *testing.T) {
 	isolateUserConfigDir(t)
+	var summaries atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/queue/default/item_ids":
@@ -581,6 +584,7 @@ func TestQueueListJSONReturnsOnlyRequestedSummaryPage(t *testing.T) {
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"item_ids": []int{9, 8, 7}, "total_count": 3})
 		case "/api/v1/queue/default/item_summaries_by_ids":
+			summaries.Add(1)
 			if r.Method != http.MethodPost {
 				t.Errorf("summary method = %s, want POST", r.Method)
 			}
@@ -609,8 +613,8 @@ func TestQueueListJSONReturnsOnlyRequestedSummaryPage(t *testing.T) {
 
 	exitCode := app.Run(t.Context(), []string{"queue", "list", "--offset", "1", "--limit", "1", "--url", server.URL, "--json"})
 
-	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
-		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
+	if exitCode != result.ExitSuccess || stderr.Len() != 0 || summaries.Load() != 1 {
+		t.Fatalf("exit code = %d, summary requests = %d, stderr = %q, stdout = %q", exitCode, summaries.Load(), stderr.String(), stdout.String())
 	}
 	var envelope struct {
 		OK        bool   `json:"ok"`
@@ -668,6 +672,111 @@ func TestQueueListPreservesNewestFirstItemIDOrder(t *testing.T) {
 	}
 	if len(envelope.Data.Items) != 2 || envelope.Data.Items[0].ItemID != 9 || envelope.Data.Items[1].ItemID != 8 {
 		t.Fatalf("queue items are not newest first: %#v", envelope.Data.Items)
+	}
+}
+
+func TestQueueListKeepsFinalPageWithinAvailableItemIDs(t *testing.T) {
+	isolateUserConfigDir(t)
+	var summaries atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/queue/default/item_ids":
+			_ = json.NewEncoder(w).Encode(map[string]any{"item_ids": []int{9, 8, 7}, "total_count": 3})
+		case "/api/v1/queue/default/item_summaries_by_ids":
+			summaries.Add(1)
+			var body struct {
+				ItemIDs []int `json:"item_ids"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode summary request: %v", err)
+				return
+			}
+			if !reflect.DeepEqual(body.ItemIDs, []int{7}) {
+				t.Errorf("hydrated item ids = %v, want [7]", body.ItemIDs)
+			}
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"item_id": 7, "status": "completed", "batch_id": "batch-7", "created_at": "oldest"},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{"queue", "list", "--offset", "2", "--limit", "5", "--url", server.URL, "--json"})
+
+	if exitCode != result.ExitSuccess || stderr.Len() != 0 || summaries.Load() != 1 {
+		t.Fatalf("exit code = %d, summary requests = %d, stderr = %q, stdout = %q", exitCode, summaries.Load(), stderr.String(), stdout.String())
+	}
+	var envelope struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Offset int              `json:"offset"`
+			Limit  int              `json:"limit"`
+			Total  int              `json:"total"`
+			Items  []map[string]any `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
+	}
+	if !envelope.OK || envelope.Data.Offset != 2 || envelope.Data.Limit != 5 || envelope.Data.Total != 3 ||
+		len(envelope.Data.Items) != 1 || envelope.Data.Items[0]["item_id"] != float64(7) {
+		t.Fatalf("unexpected envelope: %#v", envelope)
+	}
+}
+
+func TestQueueListSkipsHydrationWhenOffsetIsPastAvailableItemIDs(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		offset int
+	}{
+		{name: "offset at available item count", offset: 3},
+		{name: "offset beyond available item count", offset: 10},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			isolateUserConfigDir(t)
+			var summaries atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/queue/default/item_ids":
+					_ = json.NewEncoder(w).Encode(map[string]any{"item_ids": []int{9, 8, 7}, "total_count": 3})
+				case "/api/v1/queue/default/item_summaries_by_ids":
+					summaries.Add(1)
+					http.Error(w, "summaries are outside the requested page", http.StatusInternalServerError)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			app := cli.New(&stdout, &stderr)
+
+			exitCode := app.Run(t.Context(), []string{"queue", "list", "--offset", strconv.Itoa(test.offset), "--limit", "2", "--url", server.URL, "--json"})
+
+			if exitCode != result.ExitSuccess || stderr.Len() != 0 || summaries.Load() != 0 {
+				t.Fatalf("exit code = %d, summary requests = %d, stderr = %q, stdout = %q", exitCode, summaries.Load(), stderr.String(), stdout.String())
+			}
+			var envelope struct {
+				OK   bool `json:"ok"`
+				Data struct {
+					Offset int              `json:"offset"`
+					Limit  int              `json:"limit"`
+					Total  int              `json:"total"`
+					Items  []map[string]any `json:"items"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+				t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
+			}
+			if !envelope.OK || envelope.Data.Offset != test.offset || envelope.Data.Limit != 2 || envelope.Data.Total != 3 || len(envelope.Data.Items) != 0 {
+				t.Fatalf("unexpected envelope: %#v", envelope)
+			}
+		})
 	}
 }
 
@@ -806,6 +915,76 @@ func TestQueueGetSucceedsWhenHistoricalOutputImageIsMissing(t *testing.T) {
 	}
 	if len(envelope.Data.Item.Images) != 0 {
 		t.Fatalf("missing historical output must be omitted, got %#v", envelope.Data.Item.Images)
+	}
+}
+
+func TestQueueGetCollectsUniqueOutputImageNamesInLexicographicOrder(t *testing.T) {
+	isolateUserConfigDir(t)
+	var requests struct {
+		sync.Mutex
+		names []string
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/queue/default/i/8":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"item_id": 8, "queue_id": "default", "batch_id": "batch-8", "session_id": "session-8", "status": "completed", "priority": 0,
+				"created_at": "created", "updated_at": "updated",
+				"session": map[string]any{"results": map[string]any{
+					"node-1": map[string]any{"type": "image_output", "image": map[string]any{"image_name": "zulu.png"}},
+					"node-2": map[string]any{"type": "image_output", "image": map[string]any{"image_name": "alpha.png"}},
+					"node-3": map[string]any{"type": "image_output", "image": map[string]any{"image_name": "alpha.png"}},
+					"node-4": map[string]any{"type": "integer_output", "value": 42},
+				}},
+			})
+		case strings.HasPrefix(r.URL.Path, "/api/v1/images/i/"):
+			name := strings.TrimPrefix(r.URL.Path, "/api/v1/images/i/")
+			requests.Lock()
+			requests.names = append(requests.names, name)
+			requests.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"image_name": name, "image_url": "api/v1/images/i/" + name + "/full", "thumbnail_url": "api/v1/images/i/" + name + "/thumbnail",
+				"image_origin": "internal", "image_category": "general", "width": 512, "height": 512,
+				"created_at": "created", "updated_at": "updated", "is_intermediate": false, "starred": false, "has_workflow": true,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{"queue", "get", "8", "--url", server.URL, "--json"})
+
+	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
+		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
+	}
+	requests.Lock()
+	requested := requests.names
+	requests.Unlock()
+	if !reflect.DeepEqual(requested, []string{"alpha.png", "zulu.png"}) {
+		t.Fatalf("output image requests = %v, want [alpha.png zulu.png]", requested)
+	}
+	var envelope struct {
+		Data struct {
+			Item struct {
+				Images []struct {
+					ImageName string `json:"image_name"`
+				} `json:"images"`
+			} `json:"item"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
+	}
+	var names []string
+	for _, image := range envelope.Data.Item.Images {
+		names = append(names, image.ImageName)
+	}
+	if !reflect.DeepEqual(names, []string{"alpha.png", "zulu.png"}) {
+		t.Fatalf("output images = %v, want [alpha.png zulu.png]", names)
 	}
 }
 

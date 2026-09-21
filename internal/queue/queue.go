@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
-	"sort"
+	"slices"
 
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/images"
@@ -147,10 +148,7 @@ func List(ctx context.Context, client *httpclient.Client, request ListRequest) (
 	if request.Offset >= len(ids.ItemIDs) {
 		return result, nil
 	}
-	end := request.Offset + request.Limit
-	if end > len(ids.ItemIDs) {
-		end = len(ids.ItemIDs)
-	}
+	end := min(request.Offset+request.Limit, len(ids.ItemIDs))
 	page := ids.ItemIDs[request.Offset:end]
 	var records []summaryRecord
 	if err := client.QueryJSON(ctx, basePath+"/item_summaries_by_ids", summariesRequest{ItemIDs: page}, &records); err != nil {
@@ -224,20 +222,15 @@ func Get(ctx context.Context, client *httpclient.Client, request GetRequest) (Ge
 		}
 	}
 
-	imageNames := make([]string, 0)
-	seen := make(map[string]bool)
+	imageNames := make(map[string]struct{}, len(response.Session.Results))
 	for _, raw := range response.Session.Results {
 		var output outputRecord
 		if err := json.Unmarshal(raw, &output); err != nil || output.Type != "image_output" || output.Image.ImageName == "" {
 			continue
 		}
-		if !seen[output.Image.ImageName] {
-			imageNames = append(imageNames, output.Image.ImageName)
-			seen[output.Image.ImageName] = true
-		}
+		imageNames[output.Image.ImageName] = struct{}{}
 	}
-	sort.Strings(imageNames)
-	for _, imageName := range imageNames {
+	for _, imageName := range slices.Sorted(maps.Keys(imageNames)) {
 		image, err := images.Get(ctx, client, images.GetRequest{SchemaVersion: 1, ImageName: imageName})
 		if err != nil {
 			if httpError, ok := errors.AsType[*httpclient.HTTPError](err); ok && httpError.StatusCode == http.StatusNotFound {
