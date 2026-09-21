@@ -1,12 +1,13 @@
 package doctor
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/avienor/bediz/internal/capability"
@@ -294,11 +295,8 @@ func inspectModels(models []ModelSummary) ([]ModelSummary, []ModelRequirement) {
 			Satisfied: count >= requirement.MinimumCount,
 		})
 	}
-	sort.Slice(relevant, func(i, j int) bool {
-		if relevant[i].Type == relevant[j].Type {
-			return relevant[i].Name < relevant[j].Name
-		}
-		return relevant[i].Type < relevant[j].Type
+	slices.SortFunc(relevant, func(a, b ModelSummary) int {
+		return cmp.Or(cmp.Compare(a.Type, b.Type), cmp.Compare(a.Name, b.Name))
 	})
 	return relevant, checks
 }
@@ -405,16 +403,7 @@ func uniqueModelRequirements() []capability.ModelRequirement {
 }
 
 func modelMatches(model ModelSummary, requirement capability.ModelRequirement) bool {
-	return contains(requirement.Types, model.Type) && contains(requirement.Bases, model.Base)
-}
-
-func contains(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(requirement.Types, model.Type) && slices.Contains(requirement.Bases, model.Base)
 }
 
 func endpointAvailable(checks []EndpointCheck, requirement capability.EndpointRequirement) bool {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -166,6 +167,67 @@ func TestRunAllowsReadOnlyInspectionOnEndpointCompatibleUntestedVersion(t *testi
 	}
 	if compatibility["images.upload"] || compatibility["generate"] {
 		t.Fatalf("mutating capabilities should require the supported range: %#v", report.Capabilities)
+	}
+}
+
+func TestRunOrdersRelevantModelsByTypeThenName(t *testing.T) {
+	document := openAPIFixture("")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_ = json.NewEncoder(w).Encode(map[string]string{"version": "6.14.1"})
+		case "/openapi.json":
+			_ = json.NewEncoder(w).Encode(document)
+		case "/api/v2/models/":
+			_ = json.NewEncoder(w).Encode(map[string]any{"models": []map[string]string{
+				{"key": "vae-b", "name": "Zeta VAE", "base": "anima", "type": "vae"},
+				{"key": "main-b", "name": "Zeta", "base": "anima", "type": "main"},
+				{"key": "encoder", "name": "Qwen3", "base": "any", "type": "qwen3_encoder"},
+				{"key": "vae-a", "name": "Alpha VAE", "base": "anima", "type": "vae"},
+				{"key": "near-miss", "name": "Anima V2", "base": "anima-v2", "type": "main"},
+				{"key": "main-a", "name": "Alpha", "base": "anima", "type": "main"},
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report := Run(t.Context(), client, version.Info{Version: "test"})
+
+	wantRelevant := []ModelSummary{
+		{Key: "main-a", Name: "Alpha", Base: "anima", Type: "main"},
+		{Key: "main-b", Name: "Zeta", Base: "anima", Type: "main"},
+		{Key: "encoder", Name: "Qwen3", Base: "any", Type: "qwen3_encoder"},
+		{Key: "vae-a", Name: "Alpha VAE", Base: "anima", Type: "vae"},
+		{Key: "vae-b", Name: "Zeta VAE", Base: "anima", Type: "vae"},
+	}
+	if !reflect.DeepEqual(report.Models.Relevant, wantRelevant) {
+		t.Fatalf("relevant models = %#v, want %#v", report.Models.Relevant, wantRelevant)
+	}
+	wantAvailable := map[string]int{"Anima main model": 2, "Anima-compatible VAE": 2, "Qwen3 text encoder": 1}
+	availableByName := make(map[string]int)
+	for _, requirement := range report.Models.Requirements {
+		if !requirement.Satisfied {
+			t.Fatalf("requirement %q not satisfied by fixture: %#v", requirement.Name, report.Models.Requirements)
+		}
+		availableByName[requirement.Name] = requirement.Available
+	}
+	for name, want := range wantAvailable {
+		if availableByName[name] != want {
+			t.Fatalf("available %s models = %d, want %d: %#v", name, availableByName[name], want, report.Models.Requirements)
+		}
+	}
+	compatibility := make(map[string]bool)
+	for _, entry := range report.Capabilities {
+		compatibility[entry.Operation] = entry.Compatible
+	}
+	if !compatibility["generate"] || !compatibility["models.list"] {
+		t.Fatalf("readiness regressed for sample models: %#v", report.Capabilities)
 	}
 }
 

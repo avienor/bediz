@@ -55,7 +55,8 @@ func TestListSortsModelsByNameThenKey(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"models": []map[string]any{
 			{"key": "same-b", "name": "Same"},
 			{"key": "same-a", "name": "Same"},
-			{"key": "earlier", "name": "Earlier"},
+			{"key": "z-earlier", "name": "Earlier"},
+			{"key": "a-later", "name": "Later"},
 		}})
 	}))
 	defer server.Close()
@@ -69,8 +70,11 @@ func TestListSortsModelsByNameThenKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := []string{result.Models[0].Key, result.Models[1].Key, result.Models[2].Key}
-	if want := []string{"earlier", "same-a", "same-b"}; !reflect.DeepEqual(got, want) {
+	got := make([]string, 0, len(result.Models))
+	for _, model := range result.Models {
+		got = append(got, model.Key)
+	}
+	if want := []string{"z-earlier", "a-later", "same-a", "same-b"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("model order = %v, want %v", got, want)
 	}
 }
