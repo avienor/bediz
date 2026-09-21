@@ -1,7 +1,6 @@
 package images_test
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -54,7 +53,7 @@ func TestUploadUsesImageContentTypeForMisleadingExtension(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := images.Upload(context.Background(), client, images.UploadRequest{SchemaVersion: 1, Path: imagePath})
+	result, err := images.Upload(t.Context(), client, images.UploadRequest{SchemaVersion: 1, Path: imagePath})
 
 	if err != nil {
 		t.Fatal(err)

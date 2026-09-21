@@ -1,7 +1,6 @@
 package models_test
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -35,7 +34,7 @@ func TestListAppliesExactModelFilters(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := models.List(context.Background(), client, models.ListRequest{
+	result, err := models.List(t.Context(), client, models.ListRequest{
 		SchemaVersion: 1,
 		BaseModels:    []string{"anima", "sdxl"},
 		ModelType:     "main",
@@ -65,7 +64,7 @@ func TestListSortsModelsByNameThenKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := models.List(context.Background(), client, models.ListRequest{SchemaVersion: 1})
+	result, err := models.List(t.Context(), client, models.ListRequest{SchemaVersion: 1})
 
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +86,7 @@ func TestListRejectsUnsupportedSchemaVersionBeforeRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = models.List(context.Background(), client, models.ListRequest{SchemaVersion: 2})
+	_, err = models.List(t.Context(), client, models.ListRequest{SchemaVersion: 2})
 
 	if _, ok := errors.AsType[*operation.InvalidRequestError](err); !ok {
 		t.Fatalf("error = %v, want invalid request", err)

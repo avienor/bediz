@@ -1,7 +1,6 @@
 package httpclient
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -35,7 +34,7 @@ func TestGetJSONSendsBearerTokenAndJoinsBasePath(t *testing.T) {
 	var response struct {
 		Version string `json:"version"`
 	}
-	if err := client.GetJSON(context.Background(), "/api/v1/app/version?detail=full", &response); err != nil {
+	if err := client.GetJSON(t.Context(), "/api/v1/app/version?detail=full", &response); err != nil {
 		t.Fatal(err)
 	}
 	if response.Version != "6.14.1" {
@@ -59,7 +58,7 @@ func TestGetRetriesTransientStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	var response map[string]bool
-	if err := client.GetJSON(context.Background(), "/read", &response); err != nil {
+	if err := client.GetJSON(t.Context(), "/read", &response); err != nil {
 		t.Fatal(err)
 	}
 	if calls.Load() != 3 || !response["ok"] {
@@ -83,7 +82,7 @@ func TestReadOnlyPostRetriesTransientStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	var response map[string]bool
-	if err := client.QueryJSON(context.Background(), "/query", map[string]any{"ids": []int{1}}, &response); err != nil {
+	if err := client.QueryJSON(t.Context(), "/query", map[string]any{"ids": []int{1}}, &response); err != nil {
 		t.Fatal(err)
 	}
 	if calls.Load() != 2 || !response["ok"] {
@@ -103,7 +102,7 @@ func TestMutationIsNeverRetried(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = client.DoJSON(context.Background(), http.MethodPost, "/mutate", map[string]bool{"go": true}, nil)
+	err = client.DoJSON(t.Context(), http.MethodPost, "/mutate", map[string]bool{"go": true}, nil)
 	if err == nil {
 		t.Fatal("expected request to fail")
 	}
@@ -125,7 +124,7 @@ func TestMutationConnectionLossHasUnknownOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = client.DoJSON(context.Background(), http.MethodPost, "/mutate", map[string]bool{"go": true}, nil)
+	err = client.DoJSON(t.Context(), http.MethodPost, "/mutate", map[string]bool{"go": true}, nil)
 	if _, ok := errors.AsType[*OutcomeUnknownError](err); !ok {
 		t.Fatalf("error = %T %v, want OutcomeUnknownError", err, err)
 	}
@@ -143,7 +142,7 @@ func TestAuthenticationFailureIsClassified(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = client.GetJSON(context.Background(), "/private", nil)
+	err = client.GetJSON(t.Context(), "/private", nil)
 	if httpErr, ok := errors.AsType[*HTTPError](err); !ok || !httpErr.AuthenticationFailure() {
 		t.Fatalf("error = %#v", err)
 	}
