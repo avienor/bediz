@@ -126,8 +126,7 @@ func TestMutationConnectionLossHasUnknownOutcome(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = client.DoJSON(context.Background(), http.MethodPost, "/mutate", map[string]bool{"go": true}, nil)
-	var unknown *OutcomeUnknownError
-	if !errors.As(err, &unknown) {
+	if _, ok := errors.AsType[*OutcomeUnknownError](err); !ok {
 		t.Fatalf("error = %T %v, want OutcomeUnknownError", err, err)
 	}
 	if calls.Load() != 1 {
@@ -145,8 +144,7 @@ func TestAuthenticationFailureIsClassified(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = client.GetJSON(context.Background(), "/private", nil)
-	var httpErr *HTTPError
-	if !errors.As(err, &httpErr) || !httpErr.AuthenticationFailure() {
+	if httpErr, ok := errors.AsType[*HTTPError](err); !ok || !httpErr.AuthenticationFailure() {
 		t.Fatalf("error = %#v", err)
 	}
 }

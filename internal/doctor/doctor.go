@@ -204,8 +204,7 @@ func Run(ctx context.Context, client *httpclient.Client, bedizVersion version.In
 			report.InvokeAI.ConnectionStatus = "ok"
 		}
 	} else {
-		var httpErr *httpclient.HTTPError
-		if errors.As(modelsErr, &httpErr) && httpErr.AuthenticationFailure() {
+		if httpErr, ok := errors.AsType[*httpclient.HTTPError](modelsErr); ok && httpErr.AuthenticationFailure() {
 			report.InvokeAI.AuthenticationStatus = "rejected"
 		} else {
 			report.InvokeAI.AuthenticationStatus = "unknown"
@@ -348,14 +347,14 @@ func buildCapabilities(report Report) []CapabilityReport {
 }
 
 func appendRequestIssue(report *Report, check string, err error) {
-	var httpErr *httpclient.HTTPError
-	var networkErr *httpclient.NetworkError
+	httpErr, httpErrMatched := errors.AsType[*httpclient.HTTPError](err)
+	networkErr, networkErrMatched := errors.AsType[*httpclient.NetworkError](err)
 	switch {
-	case errors.As(err, &httpErr) && httpErr.AuthenticationFailure():
+	case httpErrMatched && httpErr.AuthenticationFailure():
 		report.Issues = append(report.Issues, Issue{Code: "authentication_failed", Message: fmt.Sprintf("%s check was rejected by InvokeAI", check), Details: map[string]any{"status": httpErr.StatusCode}})
-	case errors.As(err, &networkErr):
+	case networkErrMatched:
 		report.Issues = append(report.Issues, Issue{Code: "connection_failed", Message: fmt.Sprintf("%s check could not reach InvokeAI", check), Details: map[string]any{"error": networkErr.Err.Error()}})
-	case errors.As(err, &httpErr):
+	case httpErrMatched:
 		report.Issues = append(report.Issues, Issue{Code: "invokeai_http_error", Message: fmt.Sprintf("%s check failed", check), Details: map[string]any{"status": httpErr.StatusCode}})
 	default:
 		report.Issues = append(report.Issues, Issue{Code: "invalid_invokeai_response", Message: fmt.Sprintf("%s check failed: %v", check, err)})

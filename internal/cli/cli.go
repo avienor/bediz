@@ -509,38 +509,33 @@ func (c *CLI) executeImagesUpload(ctx context.Context, jsonOutput bool, options 
 }
 
 func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
-	var invalid *operation.InvalidRequestError
-	if errors.As(err, &invalid) {
+	if invalid, ok := errors.AsType[*operation.InvalidRequestError](err); ok {
 		return c.fail(operationName, jsonOutput, result.ExitInvalidRequest, "invalid_request", invalid.Error(), nil)
 	}
-	var unsupported *operation.UnsupportedCapabilityError
-	if errors.As(err, &unsupported) {
+	if unsupported, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); ok {
 		return c.fail(operationName, jsonOutput, result.ExitUnsupportedCapability, "unsupported_capability", unsupported.Error(), nil)
 	}
-	var unknown *httpclient.OutcomeUnknownError
-	if errors.As(err, &unknown) {
+	if _, ok := errors.AsType[*httpclient.OutcomeUnknownError](err); ok {
 		return c.fail(operationName, jsonOutput, result.ExitInvokeAIFailure, "outcome_unknown", "InvokeAI may have accepted the operation; inspect remote state before retrying", nil)
 	}
 	if errors.Is(err, context.Canceled) {
 		return c.fail(operationName, jsonOutput, result.ExitInterrupted, "interrupted", "operation was interrupted locally", nil)
 	}
-	var network *httpclient.NetworkError
-	if errors.As(err, &network) {
+	if _, ok := errors.AsType[*httpclient.NetworkError](err); ok {
 		return c.fail(operationName, jsonOutput, result.ExitConnection, "connection_failed", "could not reach InvokeAI", nil)
 	}
-	var invalidResponse *httpclient.InvalidResponseError
-	if errors.As(err, &invalidResponse) {
+	if _, ok := errors.AsType[*httpclient.InvalidResponseError](err); ok {
 		return c.fail(operationName, jsonOutput, result.ExitInvokeAIFailure, "invalid_invokeai_response", "InvokeAI returned an invalid response", nil)
 	}
-	var httpErr *httpclient.HTTPError
-	if errors.As(err, &httpErr) && httpErr.AuthenticationFailure() {
-		return c.fail(operationName, jsonOutput, result.ExitConnection, "authentication_failed", "InvokeAI rejected authentication", map[string]any{"status": httpErr.StatusCode})
-	}
-	if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
-		return c.fail(operationName, jsonOutput, result.ExitInvokeAIFailure, "not_found", "the requested InvokeAI resource was not found", nil)
-	}
-	if errors.As(err, &httpErr) {
-		return c.fail(operationName, jsonOutput, result.ExitInvokeAIFailure, "invokeai_operation_failed", "InvokeAI rejected the operation", map[string]any{"status": httpErr.StatusCode})
+	if httpErr, ok := errors.AsType[*httpclient.HTTPError](err); ok {
+		switch {
+		case httpErr.AuthenticationFailure():
+			return c.fail(operationName, jsonOutput, result.ExitConnection, "authentication_failed", "InvokeAI rejected authentication", map[string]any{"status": httpErr.StatusCode})
+		case httpErr.StatusCode == http.StatusNotFound:
+			return c.fail(operationName, jsonOutput, result.ExitInvokeAIFailure, "not_found", "the requested InvokeAI resource was not found", nil)
+		default:
+			return c.fail(operationName, jsonOutput, result.ExitInvokeAIFailure, "invokeai_operation_failed", "InvokeAI rejected the operation", map[string]any{"status": httpErr.StatusCode})
+		}
 	}
 	return c.fail(operationName, jsonOutput, result.ExitInvokeAIFailure, "invokeai_operation_failed", err.Error(), nil)
 }

@@ -808,6 +808,85 @@ func TestQueueGetSucceedsWhenHistoricalOutputImageIsMissing(t *testing.T) {
 	}
 }
 
+// Output image failures reach the CLI wrapped by the queue hydration context
+// message, so classification must match through the error chain.
+func TestQueueGetClassifiesWrappedOutputImageFailures(t *testing.T) {
+	tests := []struct {
+		name         string
+		imageHandler func(t *testing.T, w http.ResponseWriter)
+		exitCode     int
+		errorCode    string
+	}{
+		{
+			name: "authentication failure",
+			imageHandler: func(_ *testing.T, w http.ResponseWriter) {
+				http.Error(w, "denied", http.StatusUnauthorized)
+			},
+			exitCode:  result.ExitConnection,
+			errorCode: "authentication_failed",
+		},
+		{
+			name: "connection failure",
+			imageHandler: func(t *testing.T, w http.ResponseWriter) {
+				conn, _, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					t.Errorf("hijack output image connection: %v", err)
+					return
+				}
+				_ = conn.Close()
+			},
+			exitCode:  result.ExitConnection,
+			errorCode: "connection_failed",
+		},
+		{
+			name: "invalid response",
+			imageHandler: func(_ *testing.T, w http.ResponseWriter) {
+				_, _ = w.Write([]byte("not-json"))
+			},
+			exitCode:  result.ExitInvokeAIFailure,
+			errorCode: "invalid_invokeai_response",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			isolateUserConfigDir(t)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/queue/default/i/8":
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"item_id": 8, "queue_id": "default", "batch_id": "batch-8", "session_id": "session-8", "status": "completed", "priority": 0,
+						"created_at": "created", "updated_at": "updated",
+						"session": map[string]any{"results": map[string]any{
+							"node-1": map[string]any{"type": "image_output", "image": map[string]any{"image_name": "output.png"}},
+						}},
+					})
+				case "/api/v1/images/i/output.png":
+					test.imageHandler(t, w)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			app := cli.New(&stdout, &stderr)
+
+			exitCode := app.Run(context.Background(), []string{"queue", "get", "8", "--url", server.URL, "--json"})
+
+			if exitCode != test.exitCode || stderr.Len() != 0 {
+				t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
+			}
+			var envelope result.Envelope
+			if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+				t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
+			}
+			if envelope.OK || envelope.Operation != "queue.get" || envelope.Error == nil || envelope.Error.Code != test.errorCode {
+				t.Fatalf("unexpected envelope: %#v", envelope)
+			}
+		})
+	}
+}
+
 func TestQueueGetDoesNotExposeInvokeAIErrorBodies(t *testing.T) {
 	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

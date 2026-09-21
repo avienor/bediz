@@ -240,8 +240,7 @@ func Get(ctx context.Context, client *httpclient.Client, request GetRequest) (Ge
 	for _, imageName := range imageNames {
 		image, err := images.Get(ctx, client, images.GetRequest{SchemaVersion: 1, ImageName: imageName})
 		if err != nil {
-			var httpError *httpclient.HTTPError
-			if errors.As(err, &httpError) && httpError.StatusCode == http.StatusNotFound {
+			if httpError, ok := errors.AsType[*httpclient.HTTPError](err); ok && httpError.StatusCode == http.StatusNotFound {
 				continue
 			}
 			return GetResult{}, fmt.Errorf("get output image %q: %w", imageName, err)

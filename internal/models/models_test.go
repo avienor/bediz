@@ -89,8 +89,7 @@ func TestListRejectsUnsupportedSchemaVersionBeforeRequest(t *testing.T) {
 
 	_, err = models.List(context.Background(), client, models.ListRequest{SchemaVersion: 2})
 
-	var invalidRequest *operation.InvalidRequestError
-	if !errors.As(err, &invalidRequest) {
+	if _, ok := errors.AsType[*operation.InvalidRequestError](err); !ok {
 		t.Fatalf("error = %v, want invalid request", err)
 	}
 	if requests.Load() != 0 {
