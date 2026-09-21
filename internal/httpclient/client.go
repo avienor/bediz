@@ -67,6 +67,17 @@ func (e *NetworkError) Error() string {
 
 func (e *NetworkError) Unwrap() error { return e.Err }
 
+type InvalidResponseError struct {
+	URL string
+	Err error
+}
+
+func (e *InvalidResponseError) Error() string {
+	return fmt.Sprintf("invalid response from %s: %v", e.URL, e.Err)
+}
+
+func (e *InvalidResponseError) Unwrap() error { return e.Err }
+
 // OutcomeUnknownError means a state-changing request may have reached InvokeAI,
 // but Bediz did not receive a conclusive response. Callers must inspect remote
 // state before deciding whether to submit the operation again.
@@ -139,11 +150,62 @@ func (c *Client) BaseURL() string { return c.baseURL.String() }
 
 func (c *Client) HasToken() bool { return c.token != "" }
 
+func (c *Client) ResolveURL(path string) (string, error) { return c.resolve(path) }
+
 func (c *Client) GetJSON(ctx context.Context, path string, target any) error {
-	return c.DoJSON(ctx, http.MethodGet, path, nil, target)
+	return c.doJSON(ctx, http.MethodGet, path, nil, target, true)
 }
 
 func (c *Client) DoJSON(ctx context.Context, method, path string, requestBody, target any) error {
+	safeRead := method == http.MethodGet || method == http.MethodHead
+	return c.doJSON(ctx, method, path, requestBody, target, safeRead)
+}
+
+// QueryJSON performs a semantically read-only POST request. Unlike a mutation,
+// a transient failure may be retried because repeating the query cannot change
+// InvokeAI state.
+func (c *Client) QueryJSON(ctx context.Context, path string, requestBody, target any) error {
+	return c.doJSON(ctx, http.MethodPost, path, requestBody, target, true)
+}
+
+func (c *Client) PostStream(ctx context.Context, path string, body io.Reader, contentType string, target any) error {
+	requestURL, err := c.resolve(path)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, body)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Content-Type", contentType)
+	request.Header.Set("User-Agent", c.userAgent)
+	if c.token != "" {
+		request.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	response, err := c.http.Do(request)
+	if err != nil {
+		return &OutcomeUnknownError{Method: http.MethodPost, URL: requestURL, Err: err}
+	}
+	responseBody, readErr := readBody(response.Body, c.maxBody)
+	_ = response.Body.Close()
+	if readErr != nil {
+		return &OutcomeUnknownError{Method: http.MethodPost, URL: requestURL, Err: readErr}
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return &HTTPError{StatusCode: response.StatusCode, Status: response.Status, Body: compactBody(responseBody)}
+	}
+	if target == nil || len(responseBody) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(responseBody, target); err != nil {
+		return &OutcomeUnknownError{Method: http.MethodPost, URL: requestURL, Err: fmt.Errorf("decode response: %w", err)}
+	}
+	return nil
+}
+
+func (c *Client) doJSON(ctx context.Context, method, path string, requestBody, target any, safeRead bool) error {
 	var body []byte
 	var err error
 	if requestBody != nil {
@@ -157,7 +219,6 @@ func (c *Client) DoJSON(ctx context.Context, method, path string, requestBody, t
 	if err != nil {
 		return err
 	}
-	safeRead := method == http.MethodGet || method == http.MethodHead
 	attempts := 1
 	if safeRead {
 		attempts += c.retries
@@ -183,7 +244,7 @@ func (c *Client) DoJSON(ctx context.Context, method, path string, requestBody, t
 			if !safeRead {
 				return &OutcomeUnknownError{Method: method, URL: requestURL, Err: readErr}
 			}
-			return readErr
+			return &InvalidResponseError{URL: requestURL, Err: readErr}
 		}
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
 			httpErr := &HTTPError{
@@ -207,7 +268,7 @@ func (c *Client) DoJSON(ctx context.Context, method, path string, requestBody, t
 			if !safeRead {
 				return &OutcomeUnknownError{Method: method, URL: requestURL, Err: fmt.Errorf("decode response: %w", err)}
 			}
-			return fmt.Errorf("decode response from %s: %w", requestURL, err)
+			return &InvalidResponseError{URL: requestURL, Err: fmt.Errorf("decode response: %w", err)}
 		}
 		return nil
 	}
