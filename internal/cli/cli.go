@@ -643,13 +643,12 @@ func (c *CLI) loadRequestDocument(path string, target any) error {
 		return fmt.Errorf("decode request document: %w", err)
 	}
 	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			return errors.New("request document must contain exactly one JSON value")
-		}
+	if err := decoder.Decode(&trailing); errors.Is(err, io.EOF) {
+		return nil
+	} else if err != nil {
 		return fmt.Errorf("decode request document: %w", err)
 	}
-	return nil
+	return errors.New("request document must contain exactly one JSON value")
 }
 
 type doctorOptions struct {

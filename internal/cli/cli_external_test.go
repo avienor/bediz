@@ -170,6 +170,7 @@ func TestModelsListRejectsNonCanonicalRequestDocuments(t *testing.T) {
 	}{
 		{name: "unknown field", request: `{"schema_version":1,"typo":true}`},
 		{name: "trailing value", request: `{"schema_version":1}{"schema_version":1}`},
+		{name: "malformed JSON", request: `{"schema_version":1`},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1159,6 +1160,32 @@ func TestImagesUploadRejectsNonRegularPathBeforeConnecting(t *testing.T) {
 		t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
 	}
 	if envelope.Error == nil || envelope.Error.Code != "invalid_request" {
+		t.Fatalf("unexpected envelope: %#v", envelope)
+	}
+}
+
+// /proc/self/mem names a regular file whose reads fail with EIO at offset zero,
+// so the only reachable invalid request is the non-EOF upload content read
+// failure; a swallowed read error would instead reach the connection attempt.
+func TestImagesUploadRejectsUnreadableFileContentBeforeConnecting(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the Linux proc filesystem provides a regular file whose reads fail")
+	}
+	isolateUserConfigDir(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{"images", "upload", "/proc/self/mem", "--url", "http://127.0.0.1:1", "--json"})
+
+	if exitCode != result.ExitInvalidRequest || stderr.Len() != 0 {
+		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
+	}
+	var envelope result.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
+	}
+	if envelope.OK || envelope.Operation != "images.upload" || envelope.Error == nil || envelope.Error.Code != "invalid_request" {
 		t.Fatalf("unexpected envelope: %#v", envelope)
 	}
 }
