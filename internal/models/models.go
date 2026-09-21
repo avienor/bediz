@@ -1,10 +1,11 @@
 package models
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net/url"
-	"sort"
+	"slices"
 
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/operation"
@@ -84,11 +85,8 @@ func List(ctx context.Context, client *httpclient.Client, request ListRequest) (
 			Description: model.Description,
 		})
 	}
-	sort.Slice(result.Models, func(i, j int) bool {
-		if result.Models[i].Name == result.Models[j].Name {
-			return result.Models[i].Key < result.Models[j].Key
-		}
-		return result.Models[i].Name < result.Models[j].Name
+	slices.SortFunc(result.Models, func(a, b Summary) int {
+		return cmp.Or(cmp.Compare(a.Name, b.Name), cmp.Compare(a.Key, b.Key))
 	})
 	return result, nil
 }

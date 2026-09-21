@@ -1,10 +1,10 @@
 package doctor
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -22,7 +22,7 @@ func TestRunReportsReadyAnimaCapability(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report := Run(context.Background(), client, version.Info{Version: "test"})
+	report := Run(t.Context(), client, version.Info{Version: "test"})
 	if !report.Ready {
 		t.Fatalf("report not ready: %#v", report.Issues)
 	}
@@ -51,7 +51,7 @@ func TestRunReportsInspectionAndUploadCapabilities(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report := Run(context.Background(), client, version.Info{Version: "test"})
+	report := Run(t.Context(), client, version.Info{Version: "test"})
 
 	got := make(map[string]bool)
 	for _, entry := range report.Capabilities {
@@ -95,6 +95,24 @@ func TestHumanOmitsEmptyCapabilityDimensions(t *testing.T) {
 	}
 }
 
+func TestHumanShowsUnknownInvokeAIVersionFallback(t *testing.T) {
+	report := Report{
+		Bediz:    version.Info{Version: "test"},
+		InvokeAI: InvokeAIReport{URL: "http://127.0.0.1:9090"},
+	}
+	var output strings.Builder
+	report.Human(&output)
+
+	want := "Bediz test\n" +
+		"InvokeAI unknown (http://127.0.0.1:9090, supported: false)\n" +
+		"Connection: ; authentication: \n" +
+		"OpenAPI: false; models: 0\n" +
+		"Status: not ready\n"
+	if output.String() != want {
+		t.Fatalf("human output = %q, want %q", output.String(), want)
+	}
+}
+
 func TestRunReportsQueueGetIncompatibleWithoutImageInspectionEndpoint(t *testing.T) {
 	document := openAPIFixture("")
 	paths := document["paths"].(map[string]any)
@@ -117,7 +135,7 @@ func TestRunReportsQueueGetIncompatibleWithoutImageInspectionEndpoint(t *testing
 		t.Fatal(err)
 	}
 
-	report := Run(context.Background(), client, version.Info{Version: "test"})
+	report := Run(t.Context(), client, version.Info{Version: "test"})
 
 	for _, entry := range report.Capabilities {
 		if entry.Operation == "queue.get" {
@@ -154,7 +172,7 @@ func TestRunAllowsReadOnlyInspectionOnEndpointCompatibleUntestedVersion(t *testi
 		t.Fatal(err)
 	}
 
-	report := Run(context.Background(), client, version.Info{Version: "test"})
+	report := Run(t.Context(), client, version.Info{Version: "test"})
 
 	compatibility := make(map[string]bool)
 	for _, entry := range report.Capabilities {
@@ -170,6 +188,67 @@ func TestRunAllowsReadOnlyInspectionOnEndpointCompatibleUntestedVersion(t *testi
 	}
 }
 
+func TestRunOrdersRelevantModelsByTypeThenName(t *testing.T) {
+	document := openAPIFixture("")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_ = json.NewEncoder(w).Encode(map[string]string{"version": "6.14.1"})
+		case "/openapi.json":
+			_ = json.NewEncoder(w).Encode(document)
+		case "/api/v2/models/":
+			_ = json.NewEncoder(w).Encode(map[string]any{"models": []map[string]string{
+				{"key": "vae-b", "name": "Zeta VAE", "base": "anima", "type": "vae"},
+				{"key": "main-b", "name": "Zeta", "base": "anima", "type": "main"},
+				{"key": "encoder", "name": "Qwen3", "base": "any", "type": "qwen3_encoder"},
+				{"key": "vae-a", "name": "Alpha VAE", "base": "anima", "type": "vae"},
+				{"key": "near-miss", "name": "Anima V2", "base": "anima-v2", "type": "main"},
+				{"key": "main-a", "name": "Alpha", "base": "anima", "type": "main"},
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report := Run(t.Context(), client, version.Info{Version: "test"})
+
+	wantRelevant := []ModelSummary{
+		{Key: "main-a", Name: "Alpha", Base: "anima", Type: "main"},
+		{Key: "main-b", Name: "Zeta", Base: "anima", Type: "main"},
+		{Key: "encoder", Name: "Qwen3", Base: "any", Type: "qwen3_encoder"},
+		{Key: "vae-a", Name: "Alpha VAE", Base: "anima", Type: "vae"},
+		{Key: "vae-b", Name: "Zeta VAE", Base: "anima", Type: "vae"},
+	}
+	if !reflect.DeepEqual(report.Models.Relevant, wantRelevant) {
+		t.Fatalf("relevant models = %#v, want %#v", report.Models.Relevant, wantRelevant)
+	}
+	wantAvailable := map[string]int{"Anima main model": 2, "Anima-compatible VAE": 2, "Qwen3 text encoder": 1}
+	availableByName := make(map[string]int)
+	for _, requirement := range report.Models.Requirements {
+		if !requirement.Satisfied {
+			t.Fatalf("requirement %q not satisfied by fixture: %#v", requirement.Name, report.Models.Requirements)
+		}
+		availableByName[requirement.Name] = requirement.Available
+	}
+	for name, want := range wantAvailable {
+		if availableByName[name] != want {
+			t.Fatalf("available %s models = %d, want %d: %#v", name, availableByName[name], want, report.Models.Requirements)
+		}
+	}
+	compatibility := make(map[string]bool)
+	for _, entry := range report.Capabilities {
+		compatibility[entry.Operation] = entry.Compatible
+	}
+	if !compatibility["generate"] || !compatibility["models.list"] {
+		t.Fatalf("readiness regressed for sample models: %#v", report.Capabilities)
+	}
+}
+
 func TestRunDetectsMissingInvocationField(t *testing.T) {
 	server := newInvokeAIServer(t, "scheduler")
 	defer server.Close()
@@ -178,7 +257,7 @@ func TestRunDetectsMissingInvocationField(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report := Run(context.Background(), client, version.Info{Version: "test"})
+	report := Run(t.Context(), client, version.Info{Version: "test"})
 	if report.Ready {
 		t.Fatal("report should not be ready")
 	}
@@ -217,7 +296,7 @@ func TestRunClassifiesRejectedAuthentication(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report := Run(context.Background(), client, version.Info{Version: "test"})
+	report := Run(t.Context(), client, version.Info{Version: "test"})
 	if report.InvokeAI.AuthenticationStatus != "rejected" {
 		t.Fatalf("authentication status = %q", report.InvokeAI.AuthenticationStatus)
 	}
@@ -246,7 +325,7 @@ func TestRunDoesNotDeriveSchemaIssuesWhenOpenAPIRequestFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report := Run(context.Background(), client, version.Info{Version: "test"})
+	report := Run(t.Context(), client, version.Info{Version: "test"})
 
 	assertIssuePresent(t, report, "invokeai_http_error")
 	assertIssueAbsent(t, report, "missing_endpoint")
@@ -276,7 +355,7 @@ func TestRunDoesNotDeriveComponentIssuesWhenModelsRequestFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report := Run(context.Background(), client, version.Info{Version: "test"})
+	report := Run(t.Context(), client, version.Info{Version: "test"})
 
 	assertIssuePresent(t, report, "invokeai_http_error")
 	assertIssueAbsent(t, report, "missing_component")
@@ -308,7 +387,7 @@ func TestFailureClassifiesInvokeAIHTTPError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report := Run(context.Background(), client, version.Info{Version: "test"})
+	report := Run(t.Context(), client, version.Info{Version: "test"})
 	exitCode, code, _ := Failure(report)
 
 	if exitCode != result.ExitInvokeAIFailure || code != "invokeai_http_error" {
@@ -340,7 +419,7 @@ func TestFailureClassifiesInvalidInvokeAIResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report := Run(context.Background(), client, version.Info{Version: "test"})
+	report := Run(t.Context(), client, version.Info{Version: "test"})
 	exitCode, code, _ := Failure(report)
 
 	if exitCode != result.ExitInvokeAIFailure || code != "invalid_invokeai_response" {
@@ -382,7 +461,7 @@ func TestFailureClassifiesInvalidVersionPayloads(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			report := Run(context.Background(), client, version.Info{Version: "test"})
+			report := Run(t.Context(), client, version.Info{Version: "test"})
 			exitCode, code, _ := Failure(report)
 
 			if exitCode != result.ExitInvokeAIFailure || code != test.expectedCode {

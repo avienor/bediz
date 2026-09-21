@@ -2,6 +2,7 @@ package images
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -233,7 +234,7 @@ func Upload(ctx context.Context, client *httpclient.Client, request UploadReques
 func uploadContentType(file *os.File, path string) (string, error) {
 	buffer := make([]byte, 512)
 	read, err := file.Read(buffer)
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return "", err
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {

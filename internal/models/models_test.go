@@ -1,7 +1,6 @@
 package models_test
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -35,7 +34,7 @@ func TestListAppliesExactModelFilters(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := models.List(context.Background(), client, models.ListRequest{
+	result, err := models.List(t.Context(), client, models.ListRequest{
 		SchemaVersion: 1,
 		BaseModels:    []string{"anima", "sdxl"},
 		ModelType:     "main",
@@ -56,7 +55,8 @@ func TestListSortsModelsByNameThenKey(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"models": []map[string]any{
 			{"key": "same-b", "name": "Same"},
 			{"key": "same-a", "name": "Same"},
-			{"key": "earlier", "name": "Earlier"},
+			{"key": "z-earlier", "name": "Earlier"},
+			{"key": "a-later", "name": "Later"},
 		}})
 	}))
 	defer server.Close()
@@ -65,13 +65,16 @@ func TestListSortsModelsByNameThenKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := models.List(context.Background(), client, models.ListRequest{SchemaVersion: 1})
+	result, err := models.List(t.Context(), client, models.ListRequest{SchemaVersion: 1})
 
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := []string{result.Models[0].Key, result.Models[1].Key, result.Models[2].Key}
-	if want := []string{"earlier", "same-a", "same-b"}; !reflect.DeepEqual(got, want) {
+	got := make([]string, 0, len(result.Models))
+	for _, model := range result.Models {
+		got = append(got, model.Key)
+	}
+	if want := []string{"z-earlier", "a-later", "same-a", "same-b"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("model order = %v, want %v", got, want)
 	}
 }
@@ -87,10 +90,9 @@ func TestListRejectsUnsupportedSchemaVersionBeforeRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = models.List(context.Background(), client, models.ListRequest{SchemaVersion: 2})
+	_, err = models.List(t.Context(), client, models.ListRequest{SchemaVersion: 2})
 
-	var invalidRequest *operation.InvalidRequestError
-	if !errors.As(err, &invalidRequest) {
+	if _, ok := errors.AsType[*operation.InvalidRequestError](err); !ok {
 		t.Fatalf("error = %v, want invalid request", err)
 	}
 	if requests.Load() != 0 {

@@ -13,7 +13,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -63,7 +65,7 @@ func TestModelsListJSONReturnsSafeModelSummaries(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"models", "list", "--url", server.URL, "--json"})
+	exitCode := app.Run(t.Context(), []string{"models", "list", "--url", server.URL, "--json"})
 
 	if exitCode != result.ExitSuccess {
 		t.Fatalf("exit code = %d, want %d; stderr = %q", exitCode, result.ExitSuccess, stderr.String())
@@ -111,7 +113,7 @@ func TestModelsListAcceptsRequestDocument(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"models", "list", "--request", requestPath, "--url", server.URL, "--json"})
+	exitCode := app.Run(t.Context(), []string{"models", "list", "--request", requestPath, "--url", server.URL, "--json"})
 
 	if exitCode != result.ExitSuccess {
 		t.Fatalf("exit code = %d, want %d; stderr = %q", exitCode, result.ExitSuccess, stderr.String())
@@ -135,7 +137,7 @@ func TestModelsListAcceptsRequestDocumentFromStandardInput(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.NewWithIO(strings.NewReader(`{"schema_version":1}`), &stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"models", "list", "--request", "-", "--url", server.URL, "--json"})
+	exitCode := app.Run(t.Context(), []string{"models", "list", "--request", "-", "--url", server.URL, "--json"})
 
 	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -148,7 +150,7 @@ func TestModelsListRejectsUnsupportedRequestSchemaVersion(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.NewWithIO(strings.NewReader(`{"schema_version":2}`), &stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"models", "list", "--request", "-", "--url", "http://127.0.0.1:1", "--json"})
+	exitCode := app.Run(t.Context(), []string{"models", "list", "--request", "-", "--url", "http://127.0.0.1:1", "--json"})
 
 	if exitCode != result.ExitInvalidRequest || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -170,6 +172,7 @@ func TestModelsListRejectsNonCanonicalRequestDocuments(t *testing.T) {
 	}{
 		{name: "unknown field", request: `{"schema_version":1,"typo":true}`},
 		{name: "trailing value", request: `{"schema_version":1}{"schema_version":1}`},
+		{name: "malformed JSON", request: `{"schema_version":1`},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -177,7 +180,7 @@ func TestModelsListRejectsNonCanonicalRequestDocuments(t *testing.T) {
 			var stderr bytes.Buffer
 			app := cli.NewWithIO(strings.NewReader(test.request), &stdout, &stderr)
 
-			exitCode := app.Run(context.Background(), []string{"models", "list", "--request", "-", "--url", "http://127.0.0.1:1", "--json"})
+			exitCode := app.Run(t.Context(), []string{"models", "list", "--request", "-", "--url", "http://127.0.0.1:1", "--json"})
 
 			if exitCode != result.ExitInvalidRequest || stderr.Len() != 0 {
 				t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -208,7 +211,7 @@ func TestModelsListFlagsCompileToTypedFilters(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{
+	exitCode := app.Run(t.Context(), []string{
 		"models", "list", "--base", "anima", "--base", "sdxl", "--type", "main", "--format", "checkpoint", "--name", "Exact Name",
 		"--url", server.URL, "--json",
 	})
@@ -228,7 +231,7 @@ func TestModelsListRejectsMixedRequestDocumentAndOperationFlags(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"models", "list", "--request", requestPath, "--base", "anima", "--json"})
+	exitCode := app.Run(t.Context(), []string{"models", "list", "--request", requestPath, "--base", "anima", "--json"})
 
 	if exitCode != result.ExitInvalidRequest || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", exitCode, stderr.String())
@@ -251,7 +254,7 @@ func TestModelsListClassifiesConnectionFailure(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"models", "list", "--url", url, "--json"})
+	exitCode := app.Run(t.Context(), []string{"models", "list", "--url", url, "--json"})
 
 	if exitCode != result.ExitConnection || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -275,7 +278,7 @@ func TestModelsListClassifiesAuthenticationFailure(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"models", "list", "--url", server.URL, "--token", "wrong", "--json"})
+	exitCode := app.Run(t.Context(), []string{"models", "list", "--url", server.URL, "--token", "wrong", "--json"})
 
 	if exitCode != result.ExitConnection || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -299,7 +302,7 @@ func TestModelsListClassifiesInvalidInvokeAIResponse(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"models", "list", "--url", server.URL, "--json"})
+	exitCode := app.Run(t.Context(), []string{"models", "list", "--url", server.URL, "--json"})
 
 	if exitCode != result.ExitInvokeAIFailure || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -315,7 +318,7 @@ func TestModelsListClassifiesInvalidInvokeAIResponse(t *testing.T) {
 
 func TestModelsListClassifiesLocalInterruption(t *testing.T) {
 	isolateUserConfigDir(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -361,7 +364,7 @@ func TestImagesListJSONReturnsPaginatedImageReferences(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"images", "list", "--url", server.URL, "--json"})
+	exitCode := app.Run(t.Context(), []string{"images", "list", "--url", server.URL, "--json"})
 
 	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -407,7 +410,7 @@ func TestImagesListFlagsCompileToTypedRequest(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{
+	exitCode := app.Run(t.Context(), []string{
 		"images", "list", "--offset", "10", "--limit", "5", "--board", "none", "--include-intermediate",
 		"--url", server.URL, "--json",
 	})
@@ -435,7 +438,7 @@ func TestImagesListAcceptsTypedRequestDocument(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.NewWithIO(strings.NewReader(request), &stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"images", "list", "--request", "-", "--url", server.URL, "--json"})
+	exitCode := app.Run(t.Context(), []string{"images", "list", "--request", "-", "--url", server.URL, "--json"})
 
 	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -448,7 +451,7 @@ func TestImagesListRejectsOutOfRangeLimitAsInvalidRequest(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"images", "list", "--limit", "101", "--url", "http://127.0.0.1:1", "--json"})
+	exitCode := app.Run(t.Context(), []string{"images", "list", "--limit", "101", "--url", "http://127.0.0.1:1", "--json"})
 
 	if exitCode != result.ExitInvalidRequest || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -480,7 +483,7 @@ func TestImagesGetJSONReturnsExactImageReference(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"images", "get", "image-1.png", "--url", server.URL, "--json"})
+	exitCode := app.Run(t.Context(), []string{"images", "get", "image-1.png", "--url", server.URL, "--json"})
 
 	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -519,7 +522,7 @@ func TestImagesGetAcceptsTypedRequestDocument(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.NewWithIO(strings.NewReader(`{"schema_version":1,"image_name":"from-request.png"}`), &stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"images", "get", "--request", "-", "--url", server.URL, "--json"})
+	exitCode := app.Run(t.Context(), []string{"images", "get", "--request", "-", "--url", server.URL, "--json"})
 
 	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -532,7 +535,7 @@ func TestImagesGetRejectsRequestWithoutImageName(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.NewWithIO(strings.NewReader(`{"schema_version":1}`), &stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"images", "get", "--request", "-", "--url", "http://127.0.0.1:1", "--json"})
+	exitCode := app.Run(t.Context(), []string{"images", "get", "--request", "-", "--url", "http://127.0.0.1:1", "--json"})
 
 	if exitCode != result.ExitInvalidRequest || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -556,7 +559,7 @@ func TestImagesGetClassifiesMissingImage(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"images", "get", "missing.png", "--url", server.URL, "--json"})
+	exitCode := app.Run(t.Context(), []string{"images", "get", "missing.png", "--url", server.URL, "--json"})
 
 	if exitCode != result.ExitInvokeAIFailure || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -572,6 +575,7 @@ func TestImagesGetClassifiesMissingImage(t *testing.T) {
 
 func TestQueueListJSONReturnsOnlyRequestedSummaryPage(t *testing.T) {
 	isolateUserConfigDir(t)
+	var summaries atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/queue/default/item_ids":
@@ -580,6 +584,7 @@ func TestQueueListJSONReturnsOnlyRequestedSummaryPage(t *testing.T) {
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"item_ids": []int{9, 8, 7}, "total_count": 3})
 		case "/api/v1/queue/default/item_summaries_by_ids":
+			summaries.Add(1)
 			if r.Method != http.MethodPost {
 				t.Errorf("summary method = %s, want POST", r.Method)
 			}
@@ -606,10 +611,10 @@ func TestQueueListJSONReturnsOnlyRequestedSummaryPage(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"queue", "list", "--offset", "1", "--limit", "1", "--url", server.URL, "--json"})
+	exitCode := app.Run(t.Context(), []string{"queue", "list", "--offset", "1", "--limit", "1", "--url", server.URL, "--json"})
 
-	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
-		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
+	if exitCode != result.ExitSuccess || stderr.Len() != 0 || summaries.Load() != 1 {
+		t.Fatalf("exit code = %d, summary requests = %d, stderr = %q, stdout = %q", exitCode, summaries.Load(), stderr.String(), stdout.String())
 	}
 	var envelope struct {
 		OK        bool   `json:"ok"`
@@ -650,7 +655,7 @@ func TestQueueListPreservesNewestFirstItemIDOrder(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"queue", "list", "--limit", "2", "--url", server.URL, "--json"})
+	exitCode := app.Run(t.Context(), []string{"queue", "list", "--limit", "2", "--url", server.URL, "--json"})
 
 	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -670,6 +675,111 @@ func TestQueueListPreservesNewestFirstItemIDOrder(t *testing.T) {
 	}
 }
 
+func TestQueueListKeepsFinalPageWithinAvailableItemIDs(t *testing.T) {
+	isolateUserConfigDir(t)
+	var summaries atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/queue/default/item_ids":
+			_ = json.NewEncoder(w).Encode(map[string]any{"item_ids": []int{9, 8, 7}, "total_count": 3})
+		case "/api/v1/queue/default/item_summaries_by_ids":
+			summaries.Add(1)
+			var body struct {
+				ItemIDs []int `json:"item_ids"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode summary request: %v", err)
+				return
+			}
+			if !reflect.DeepEqual(body.ItemIDs, []int{7}) {
+				t.Errorf("hydrated item ids = %v, want [7]", body.ItemIDs)
+			}
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"item_id": 7, "status": "completed", "batch_id": "batch-7", "created_at": "oldest"},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{"queue", "list", "--offset", "2", "--limit", "5", "--url", server.URL, "--json"})
+
+	if exitCode != result.ExitSuccess || stderr.Len() != 0 || summaries.Load() != 1 {
+		t.Fatalf("exit code = %d, summary requests = %d, stderr = %q, stdout = %q", exitCode, summaries.Load(), stderr.String(), stdout.String())
+	}
+	var envelope struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Offset int              `json:"offset"`
+			Limit  int              `json:"limit"`
+			Total  int              `json:"total"`
+			Items  []map[string]any `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
+	}
+	if !envelope.OK || envelope.Data.Offset != 2 || envelope.Data.Limit != 5 || envelope.Data.Total != 3 ||
+		len(envelope.Data.Items) != 1 || envelope.Data.Items[0]["item_id"] != float64(7) {
+		t.Fatalf("unexpected envelope: %#v", envelope)
+	}
+}
+
+func TestQueueListSkipsHydrationWhenOffsetIsPastAvailableItemIDs(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		offset int
+	}{
+		{name: "offset at available item count", offset: 3},
+		{name: "offset beyond available item count", offset: 10},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			isolateUserConfigDir(t)
+			var summaries atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/queue/default/item_ids":
+					_ = json.NewEncoder(w).Encode(map[string]any{"item_ids": []int{9, 8, 7}, "total_count": 3})
+				case "/api/v1/queue/default/item_summaries_by_ids":
+					summaries.Add(1)
+					http.Error(w, "summaries are outside the requested page", http.StatusInternalServerError)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			app := cli.New(&stdout, &stderr)
+
+			exitCode := app.Run(t.Context(), []string{"queue", "list", "--offset", strconv.Itoa(test.offset), "--limit", "2", "--url", server.URL, "--json"})
+
+			if exitCode != result.ExitSuccess || stderr.Len() != 0 || summaries.Load() != 0 {
+				t.Fatalf("exit code = %d, summary requests = %d, stderr = %q, stdout = %q", exitCode, summaries.Load(), stderr.String(), stdout.String())
+			}
+			var envelope struct {
+				OK   bool `json:"ok"`
+				Data struct {
+					Offset int              `json:"offset"`
+					Limit  int              `json:"limit"`
+					Total  int              `json:"total"`
+					Items  []map[string]any `json:"items"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+				t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
+			}
+			if !envelope.OK || envelope.Data.Offset != test.offset || envelope.Data.Limit != 2 || envelope.Data.Total != 3 || len(envelope.Data.Items) != 0 {
+				t.Fatalf("unexpected envelope: %#v", envelope)
+			}
+		})
+	}
+}
+
 func TestQueueListAcceptsTypedRequestDocument(t *testing.T) {
 	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -685,7 +795,7 @@ func TestQueueListAcceptsTypedRequestDocument(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.NewWithIO(strings.NewReader(request), &stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"queue", "list", "--request", "-", "--url", server.URL, "--json"})
+	exitCode := app.Run(t.Context(), []string{"queue", "list", "--request", "-", "--url", server.URL, "--json"})
 
 	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -698,7 +808,7 @@ func TestQueueListRejectsOutOfRangeLimitAsInvalidRequest(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"queue", "list", "--limit", "0", "--url", "http://127.0.0.1:1", "--json"})
+	exitCode := app.Run(t.Context(), []string{"queue", "list", "--limit", "0", "--url", "http://127.0.0.1:1", "--json"})
 
 	if exitCode != result.ExitInvalidRequest || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -741,7 +851,7 @@ func TestQueueGetJSONReturnsNormalizedItemAndOutputImages(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"queue", "get", "8", "--url", server.URL, "--json"})
+	exitCode := app.Run(t.Context(), []string{"queue", "get", "8", "--url", server.URL, "--json"})
 
 	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -788,7 +898,7 @@ func TestQueueGetSucceedsWhenHistoricalOutputImageIsMissing(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"queue", "get", "8", "--url", server.URL, "--json"})
+	exitCode := app.Run(t.Context(), []string{"queue", "get", "8", "--url", server.URL, "--json"})
 
 	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -808,6 +918,155 @@ func TestQueueGetSucceedsWhenHistoricalOutputImageIsMissing(t *testing.T) {
 	}
 }
 
+func TestQueueGetCollectsUniqueOutputImageNamesInLexicographicOrder(t *testing.T) {
+	isolateUserConfigDir(t)
+	var requests struct {
+		sync.Mutex
+		names []string
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/queue/default/i/8":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"item_id": 8, "queue_id": "default", "batch_id": "batch-8", "session_id": "session-8", "status": "completed", "priority": 0,
+				"created_at": "created", "updated_at": "updated",
+				"session": map[string]any{"results": map[string]any{
+					"node-1": map[string]any{"type": "image_output", "image": map[string]any{"image_name": "zulu.png"}},
+					"node-2": map[string]any{"type": "image_output", "image": map[string]any{"image_name": "alpha.png"}},
+					"node-3": map[string]any{"type": "image_output", "image": map[string]any{"image_name": "alpha.png"}},
+					"node-4": map[string]any{"type": "integer_output", "value": 42},
+				}},
+			})
+		case strings.HasPrefix(r.URL.Path, "/api/v1/images/i/"):
+			name := strings.TrimPrefix(r.URL.Path, "/api/v1/images/i/")
+			requests.Lock()
+			requests.names = append(requests.names, name)
+			requests.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"image_name": name, "image_url": "api/v1/images/i/" + name + "/full", "thumbnail_url": "api/v1/images/i/" + name + "/thumbnail",
+				"image_origin": "internal", "image_category": "general", "width": 512, "height": 512,
+				"created_at": "created", "updated_at": "updated", "is_intermediate": false, "starred": false, "has_workflow": true,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{"queue", "get", "8", "--url", server.URL, "--json"})
+
+	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
+		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
+	}
+	requests.Lock()
+	requested := requests.names
+	requests.Unlock()
+	if !reflect.DeepEqual(requested, []string{"alpha.png", "zulu.png"}) {
+		t.Fatalf("output image requests = %v, want [alpha.png zulu.png]", requested)
+	}
+	var envelope struct {
+		Data struct {
+			Item struct {
+				Images []struct {
+					ImageName string `json:"image_name"`
+				} `json:"images"`
+			} `json:"item"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
+	}
+	var names []string
+	for _, image := range envelope.Data.Item.Images {
+		names = append(names, image.ImageName)
+	}
+	if !reflect.DeepEqual(names, []string{"alpha.png", "zulu.png"}) {
+		t.Fatalf("output images = %v, want [alpha.png zulu.png]", names)
+	}
+}
+
+// Output image failures reach the CLI wrapped by the queue hydration context
+// message, so classification must match through the error chain.
+func TestQueueGetClassifiesWrappedOutputImageFailures(t *testing.T) {
+	tests := []struct {
+		name         string
+		imageHandler func(t *testing.T, w http.ResponseWriter)
+		exitCode     int
+		errorCode    string
+	}{
+		{
+			name: "authentication failure",
+			imageHandler: func(_ *testing.T, w http.ResponseWriter) {
+				http.Error(w, "denied", http.StatusUnauthorized)
+			},
+			exitCode:  result.ExitConnection,
+			errorCode: "authentication_failed",
+		},
+		{
+			name: "connection failure",
+			imageHandler: func(t *testing.T, w http.ResponseWriter) {
+				conn, _, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					t.Errorf("hijack output image connection: %v", err)
+					return
+				}
+				_ = conn.Close()
+			},
+			exitCode:  result.ExitConnection,
+			errorCode: "connection_failed",
+		},
+		{
+			name: "invalid response",
+			imageHandler: func(_ *testing.T, w http.ResponseWriter) {
+				_, _ = w.Write([]byte("not-json"))
+			},
+			exitCode:  result.ExitInvokeAIFailure,
+			errorCode: "invalid_invokeai_response",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			isolateUserConfigDir(t)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/queue/default/i/8":
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"item_id": 8, "queue_id": "default", "batch_id": "batch-8", "session_id": "session-8", "status": "completed", "priority": 0,
+						"created_at": "created", "updated_at": "updated",
+						"session": map[string]any{"results": map[string]any{
+							"node-1": map[string]any{"type": "image_output", "image": map[string]any{"image_name": "output.png"}},
+						}},
+					})
+				case "/api/v1/images/i/output.png":
+					test.imageHandler(t, w)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			app := cli.New(&stdout, &stderr)
+
+			exitCode := app.Run(t.Context(), []string{"queue", "get", "8", "--url", server.URL, "--json"})
+
+			if exitCode != test.exitCode || stderr.Len() != 0 {
+				t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
+			}
+			var envelope result.Envelope
+			if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+				t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
+			}
+			if envelope.OK || envelope.Operation != "queue.get" || envelope.Error == nil || envelope.Error.Code != test.errorCode {
+				t.Fatalf("unexpected envelope: %#v", envelope)
+			}
+		})
+	}
+}
+
 func TestQueueGetDoesNotExposeInvokeAIErrorBodies(t *testing.T) {
 	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -818,7 +1077,7 @@ func TestQueueGetDoesNotExposeInvokeAIErrorBodies(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"queue", "get", "8", "--url", server.URL, "--json"})
+	exitCode := app.Run(t.Context(), []string{"queue", "get", "8", "--url", server.URL, "--json"})
 
 	if exitCode != result.ExitInvokeAIFailure || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -853,7 +1112,7 @@ func TestQueueGetAcceptsTypedRequestDocument(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.NewWithIO(strings.NewReader(request), &stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"queue", "get", "--request", "-", "--url", server.URL, "--json"})
+	exitCode := app.Run(t.Context(), []string{"queue", "get", "--request", "-", "--url", server.URL, "--json"})
 
 	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -866,7 +1125,7 @@ func TestQueueGetRejectsRequestWithoutPositiveItemID(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.NewWithIO(strings.NewReader(`{"schema_version":1,"queue_id":"default"}`), &stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"queue", "get", "--request", "-", "--url", "http://127.0.0.1:1", "--json"})
+	exitCode := app.Run(t.Context(), []string{"queue", "get", "--request", "-", "--url", "http://127.0.0.1:1", "--json"})
 
 	if exitCode != result.ExitInvalidRequest || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -927,7 +1186,7 @@ func TestImagesUploadJSONUploadsOneValidatedLocalFile(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"images", "upload", imagePath, "--url", server.URL, "--json"})
+	exitCode := app.Run(t.Context(), []string{"images", "upload", imagePath, "--url", server.URL, "--json"})
 
 	if exitCode != result.ExitSuccess || stderr.Len() != 0 || uploads.Load() != 1 {
 		t.Fatalf("exit code = %d, uploads = %d, stderr = %q, stdout = %q", exitCode, uploads.Load(), stderr.String(), stdout.String())
@@ -976,7 +1235,7 @@ func TestImagesUploadAcceptsTypedRequestDocument(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.NewWithIO(bytes.NewReader(request), &stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"images", "upload", "--request", "-", "--url", server.URL, "--json"})
+	exitCode := app.Run(t.Context(), []string{"images", "upload", "--request", "-", "--url", server.URL, "--json"})
 
 	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -989,7 +1248,7 @@ func TestImagesUploadRejectsUnsupportedRequestSchemaVersion(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.NewWithIO(strings.NewReader(`{"schema_version":2,"path":"/tmp/source.png"}`), &stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"images", "upload", "--request", "-", "--url", "http://127.0.0.1:1", "--json"})
+	exitCode := app.Run(t.Context(), []string{"images", "upload", "--request", "-", "--url", "http://127.0.0.1:1", "--json"})
 
 	if exitCode != result.ExitInvalidRequest || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -1030,7 +1289,7 @@ func TestImagesUploadLostResponseReturnsUnknownOutcomeWithoutRetry(t *testing.T)
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"images", "upload", imagePath, "--url", server.URL, "--json"})
+	exitCode := app.Run(t.Context(), []string{"images", "upload", imagePath, "--url", server.URL, "--json"})
 
 	if exitCode != result.ExitInvokeAIFailure || stderr.Len() != 0 || uploads.Load() != 1 {
 		t.Fatalf("exit code = %d, uploads = %d, stderr = %q, stdout = %q", exitCode, uploads.Load(), stderr.String(), stdout.String())
@@ -1050,7 +1309,7 @@ func TestImagesUploadRejectsRelativePathBeforeConnecting(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"images", "upload", "relative.png", "--url", "http://127.0.0.1:1", "--json"})
+	exitCode := app.Run(t.Context(), []string{"images", "upload", "relative.png", "--url", "http://127.0.0.1:1", "--json"})
 
 	if exitCode != result.ExitInvalidRequest || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -1070,7 +1329,7 @@ func TestImagesUploadRejectsNonRegularPathBeforeConnecting(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"images", "upload", t.TempDir(), "--url", "http://127.0.0.1:1", "--json"})
+	exitCode := app.Run(t.Context(), []string{"images", "upload", t.TempDir(), "--url", "http://127.0.0.1:1", "--json"})
 
 	if exitCode != result.ExitInvalidRequest || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
@@ -1081,6 +1340,33 @@ func TestImagesUploadRejectsNonRegularPathBeforeConnecting(t *testing.T) {
 	}
 	if envelope.Error == nil || envelope.Error.Code != "invalid_request" {
 		t.Fatalf("unexpected envelope: %#v", envelope)
+	}
+}
+
+// /proc/self/mem names a regular file whose reads fail with EIO at offset zero,
+// so the only reachable invalid request is the non-EOF upload content read
+// failure; a swallowed read error would instead reach the connection attempt.
+func TestImagesUploadRejectsUnreadableFileContentBeforeConnecting(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the Linux proc filesystem provides a regular file whose reads fail")
+	}
+	isolateUserConfigDir(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{"images", "upload", "/proc/self/mem", "--url", "http://127.0.0.1:1", "--json"})
+
+	if exitCode != result.ExitInvalidRequest || stderr.Len() != 0 {
+		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
+	}
+	var envelope result.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
+	}
+	if envelope.OK || envelope.Operation != "images.upload" || envelope.Error == nil || envelope.Error.Code != "invalid_request" ||
+		!strings.HasPrefix(envelope.Error.Message, "read upload file:") {
+		t.Fatalf("unexpected envelope: %#v; error = %#v", envelope, envelope.Error)
 	}
 }
 
@@ -1104,7 +1390,7 @@ func TestImagesUploadRejectsUnsupportedInvokeAIVersionBeforeMutation(t *testing.
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"images", "upload", imagePath, "--url", server.URL, "--json"})
+	exitCode := app.Run(t.Context(), []string{"images", "upload", imagePath, "--url", server.URL, "--json"})
 
 	if exitCode != result.ExitUnsupportedCapability || uploads.Load() != 0 || stderr.Len() != 0 {
 		t.Fatalf("exit code = %d, uploads = %d, stderr = %q, stdout = %q", exitCode, uploads.Load(), stderr.String(), stdout.String())
@@ -1124,7 +1410,7 @@ func TestConfigSetJSONNeverPrintsToken(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"config", "set", "--token", "top-secret", "--json"})
+	exitCode := app.Run(t.Context(), []string{"config", "set", "--token", "top-secret", "--json"})
 
 	if exitCode != result.ExitSuccess {
 		t.Fatalf("exit code = %d, want %d; stderr = %q", exitCode, result.ExitSuccess, stderr.String())
@@ -1142,7 +1428,7 @@ func TestConfigSetJSONNeverPrintsToken(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	exitCode = app.Run(context.Background(), []string{"config", "get", "--json"})
+	exitCode = app.Run(t.Context(), []string{"config", "get", "--json"})
 	if exitCode != result.ExitSuccess {
 		t.Fatalf("get exit code = %d, want %d; stderr = %q", exitCode, result.ExitSuccess, stderr.String())
 	}
@@ -1168,13 +1454,38 @@ func TestConfigGetFailsWhenHumanOutputCannotBeWritten(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(errorWriter{}, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"config", "get"})
+	exitCode := app.Run(t.Context(), []string{"config", "get"})
 
 	if exitCode != result.ExitInvokeAIFailure {
 		t.Fatalf("exit code = %d, want %d", exitCode, result.ExitInvokeAIFailure)
 	}
 	if !strings.Contains(stderr.String(), "output_write_failed") {
 		t.Fatalf("stderr = %q, want output_write_failed", stderr.String())
+	}
+}
+
+func TestConfigGetHumanOutputShowsUnsetStoredValues(t *testing.T) {
+	isolateUserConfigDir(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{"config", "get"})
+
+	if exitCode != result.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d; stderr = %q", exitCode, result.ExitSuccess, stderr.String())
+	}
+	userConfigDir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Configuration: " + filepath.Join(userConfigDir, "bediz", "config.json") + "\n" +
+		"Stored URL: not set\n" +
+		"Stored token: not configured\n" +
+		"Effective URL: http://127.0.0.1:9090 (default)\n" +
+		"Effective token: not configured\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
 }
 
@@ -1196,7 +1507,7 @@ func TestInvalidCommandUsesJSONEnvelope(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"unknown", "--json"})
+	exitCode := app.Run(t.Context(), []string{"unknown", "--json"})
 
 	if exitCode != result.ExitInvalidRequest {
 		t.Fatalf("exit code = %d, want %d", exitCode, result.ExitInvalidRequest)
@@ -1218,7 +1529,7 @@ func TestGlobalJSONFlagBeforeVersion(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"--json", "version"})
+	exitCode := app.Run(t.Context(), []string{"--json", "version"})
 
 	if exitCode != result.ExitSuccess {
 		t.Fatalf("exit code = %d, want %d; stderr = %q", exitCode, result.ExitSuccess, stderr.String())
@@ -1240,7 +1551,7 @@ func TestConfigHelpListsNestedCommands(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"config", "--help"})
+	exitCode := app.Run(t.Context(), []string{"config", "--help"})
 
 	if exitCode != result.ExitSuccess {
 		t.Fatalf("exit code = %d, want %d; stderr = %q", exitCode, result.ExitSuccess, stderr.String())
@@ -1260,7 +1571,7 @@ func TestConfigGetHelpIsGeneratedByCommandTree(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"config", "get", "--help"})
+	exitCode := app.Run(t.Context(), []string{"config", "get", "--help"})
 
 	if exitCode != result.ExitSuccess {
 		t.Fatalf("exit code = %d, want %d; stderr = %q", exitCode, result.ExitSuccess, stderr.String())
@@ -1278,7 +1589,7 @@ func TestConfigSetHelpListsConfigurationFlags(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"config", "set", "--help"})
+	exitCode := app.Run(t.Context(), []string{"config", "set", "--help"})
 
 	if exitCode != result.ExitSuccess {
 		t.Fatalf("exit code = %d, want %d; stderr = %q", exitCode, result.ExitSuccess, stderr.String())
@@ -1298,7 +1609,7 @@ func TestDoctorHelpListsConnectionFlags(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"doctor", "--help"})
+	exitCode := app.Run(t.Context(), []string{"doctor", "--help"})
 
 	if exitCode != result.ExitSuccess {
 		t.Fatalf("exit code = %d, want %d; stderr = %q", exitCode, result.ExitSuccess, stderr.String())
@@ -1327,7 +1638,7 @@ func TestDoctorHelpInJSONModeUsesFailureEnvelope(t *testing.T) {
 			var stderr bytes.Buffer
 			app := cli.New(&stdout, &stderr)
 
-			exitCode := app.Run(context.Background(), test.args)
+			exitCode := app.Run(t.Context(), test.args)
 
 			if exitCode != result.ExitInvalidRequest {
 				t.Fatalf("exit code = %d, want %d", exitCode, result.ExitInvalidRequest)
@@ -1351,7 +1662,7 @@ func TestDoctorFlagErrorKeepsOperationInJSONEnvelope(t *testing.T) {
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
 
-	exitCode := app.Run(context.Background(), []string{"doctor", "--unknown", "--json"})
+	exitCode := app.Run(t.Context(), []string{"doctor", "--unknown", "--json"})
 
 	if exitCode != result.ExitInvalidRequest {
 		t.Fatalf("exit code = %d, want %d", exitCode, result.ExitInvalidRequest)

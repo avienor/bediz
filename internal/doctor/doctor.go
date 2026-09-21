@@ -1,12 +1,13 @@
 package doctor
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/avienor/bediz/internal/capability"
@@ -204,8 +205,7 @@ func Run(ctx context.Context, client *httpclient.Client, bedizVersion version.In
 			report.InvokeAI.ConnectionStatus = "ok"
 		}
 	} else {
-		var httpErr *httpclient.HTTPError
-		if errors.As(modelsErr, &httpErr) && httpErr.AuthenticationFailure() {
+		if httpErr, ok := errors.AsType[*httpclient.HTTPError](modelsErr); ok && httpErr.AuthenticationFailure() {
 			report.InvokeAI.AuthenticationStatus = "rejected"
 		} else {
 			report.InvokeAI.AuthenticationStatus = "unknown"
@@ -295,11 +295,8 @@ func inspectModels(models []ModelSummary) ([]ModelSummary, []ModelRequirement) {
 			Satisfied: count >= requirement.MinimumCount,
 		})
 	}
-	sort.Slice(relevant, func(i, j int) bool {
-		if relevant[i].Type == relevant[j].Type {
-			return relevant[i].Name < relevant[j].Name
-		}
-		return relevant[i].Type < relevant[j].Type
+	slices.SortFunc(relevant, func(a, b ModelSummary) int {
+		return cmp.Or(cmp.Compare(a.Type, b.Type), cmp.Compare(a.Name, b.Name))
 	})
 	return relevant, checks
 }
@@ -348,14 +345,14 @@ func buildCapabilities(report Report) []CapabilityReport {
 }
 
 func appendRequestIssue(report *Report, check string, err error) {
-	var httpErr *httpclient.HTTPError
-	var networkErr *httpclient.NetworkError
+	httpErr, httpErrMatched := errors.AsType[*httpclient.HTTPError](err)
+	networkErr, networkErrMatched := errors.AsType[*httpclient.NetworkError](err)
 	switch {
-	case errors.As(err, &httpErr) && httpErr.AuthenticationFailure():
+	case httpErrMatched && httpErr.AuthenticationFailure():
 		report.Issues = append(report.Issues, Issue{Code: "authentication_failed", Message: fmt.Sprintf("%s check was rejected by InvokeAI", check), Details: map[string]any{"status": httpErr.StatusCode}})
-	case errors.As(err, &networkErr):
+	case networkErrMatched:
 		report.Issues = append(report.Issues, Issue{Code: "connection_failed", Message: fmt.Sprintf("%s check could not reach InvokeAI", check), Details: map[string]any{"error": networkErr.Err.Error()}})
-	case errors.As(err, &httpErr):
+	case httpErrMatched:
 		report.Issues = append(report.Issues, Issue{Code: "invokeai_http_error", Message: fmt.Sprintf("%s check failed", check), Details: map[string]any{"status": httpErr.StatusCode}})
 	default:
 		report.Issues = append(report.Issues, Issue{Code: "invalid_invokeai_response", Message: fmt.Sprintf("%s check failed: %v", check, err)})
@@ -406,16 +403,7 @@ func uniqueModelRequirements() []capability.ModelRequirement {
 }
 
 func modelMatches(model ModelSummary, requirement capability.ModelRequirement) bool {
-	return contains(requirement.Types, model.Type) && contains(requirement.Bases, model.Base)
-}
-
-func contains(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(requirement.Types, model.Type) && slices.Contains(requirement.Bases, model.Base)
 }
 
 func endpointAvailable(checks []EndpointCheck, requirement capability.EndpointRequirement) bool {
@@ -492,8 +480,5 @@ func (r Report) Human(w io.Writer) {
 }
 
 func valueOrUnknown(value string) string {
-	if value == "" {
-		return "unknown"
-	}
-	return value
+	return cmp.Or(value, "unknown")
 }
