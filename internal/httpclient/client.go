@@ -223,7 +223,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, requestBody, t
 	if safeRead {
 		attempts += c.retries
 	}
-	for attempt := 0; attempt < attempts; attempt++ {
+	for attempt := range attempts {
 		response, doErr := c.do(ctx, method, requestURL, body)
 		if doErr != nil {
 			if attempt+1 < attempts && ctx.Err() == nil {

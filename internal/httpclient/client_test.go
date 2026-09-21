@@ -1,12 +1,14 @@
 package httpclient
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestGetJSONSendsBearerTokenAndJoinsBasePath(t *testing.T) {
@@ -90,6 +92,110 @@ func TestReadOnlyPostRetriesTransientStatus(t *testing.T) {
 	}
 }
 
+func TestGetRetriesExhaustConfiguredAttempts(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		http.Error(w, "try again", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "", Options{HTTPClient: server.Client(), Retries: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = client.GetJSON(t.Context(), "/read", nil)
+	if httpErr, ok := errors.AsType[*HTTPError](err); !ok || httpErr.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("error = %#v, want conclusive service unavailable failure", err)
+	}
+	if calls.Load() != 3 {
+		t.Fatalf("calls = %d, want 3", calls.Load())
+	}
+}
+
+func TestContextCancellationStopsRetryAttempts(t *testing.T) {
+	var serverCalls atomic.Int32
+	var roundTrips atomic.Int32
+	inFlight := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serverCalls.Add(1) == 1 {
+			http.Error(w, "try again", http.StatusServiceUnavailable)
+			return
+		}
+		close(inFlight)
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	transport := server.Client().Transport
+	client, err := New(server.URL, "", Options{
+		HTTPClient: &http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+			roundTrips.Add(1)
+			return transport.RoundTrip(request)
+		})},
+		Retries: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	results := make(chan error, 1)
+	go func() { results <- client.GetJSON(ctx, "/read", nil) }()
+	<-inFlight
+	cancel()
+
+	if err := <-results; !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %#v, want context.Canceled", err)
+	}
+	if serverCalls.Load() != 2 || roundTrips.Load() != 2 {
+		t.Fatalf("server calls = %d, transport attempts = %d, want 2 and 2", serverCalls.Load(), roundTrips.Load())
+	}
+}
+
+func TestContextCancellationDuringRetryWaitStopsFurtherAttempts(t *testing.T) {
+	var serverCalls atomic.Int32
+	var roundTrips atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		serverCalls.Add(1)
+		http.Error(w, "try again", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	transport := server.Client().Transport
+	client, err := New(server.URL, "", Options{
+		HTTPClient: &http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+			roundTrips.Add(1)
+			return transport.RoundTrip(request)
+		})},
+		Retries: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var waitInput time.Duration
+	client.retryWait = func(waitCtx context.Context, duration time.Duration) error {
+		waitInput = duration
+		cancel()
+		return wait(waitCtx, duration)
+	}
+
+	err = client.GetJSON(ctx, "/read", nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %#v, want context.Canceled", err)
+	}
+	if serverCalls.Load() != 1 || roundTrips.Load() != 1 {
+		t.Fatalf("server calls = %d, transport attempts = %d, want 1 and 1", serverCalls.Load(), roundTrips.Load())
+	}
+	if waitInput != 100*time.Millisecond {
+		t.Fatalf("first retry wait = %s, want 100ms", waitInput)
+	}
+}
+
 func TestMutationIsNeverRetried(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -103,8 +209,8 @@ func TestMutationIsNeverRetried(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = client.DoJSON(t.Context(), http.MethodPost, "/mutate", map[string]bool{"go": true}, nil)
-	if err == nil {
-		t.Fatal("expected request to fail")
+	if httpErr, ok := errors.AsType[*HTTPError](err); !ok || httpErr.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("error = %#v, want conclusive service unavailable failure", err)
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("mutation calls = %d, want 1", calls.Load())
