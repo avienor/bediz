@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/avienor/bediz/internal/capability"
 	"github.com/avienor/bediz/internal/httpclient"
@@ -164,16 +165,16 @@ func Upload(ctx context.Context, client *httpclient.Client, request UploadReques
 	}
 	info, err := file.Stat()
 	if err != nil {
-		file.Close()
+		_ = file.Close()
 		return GetResult{}, operation.InvalidRequest(fmt.Sprintf("inspect upload file: %v", err))
 	}
 	if !info.Mode().IsRegular() {
-		file.Close()
+		_ = file.Close()
 		return GetResult{}, operation.InvalidRequest("upload path must name a regular file")
 	}
 	fileContentType, err := uploadContentType(file, request.Path)
 	if err != nil {
-		file.Close()
+		_ = file.Close()
 		return GetResult{}, operation.InvalidRequest(fmt.Sprintf("read upload file: %v", err))
 	}
 
@@ -181,16 +182,16 @@ func Upload(ctx context.Context, client *httpclient.Client, request UploadReques
 		Version string `json:"version"`
 	}
 	if err := client.GetJSON(ctx, "/api/v1/app/version", &version); err != nil {
-		file.Close()
+		_ = file.Close()
 		return GetResult{}, err
 	}
 	supported, err := capability.SupportsInvokeAI(version.Version)
 	if err != nil {
-		file.Close()
+		_ = file.Close()
 		return GetResult{}, err
 	}
 	if !supported {
-		file.Close()
+		_ = file.Close()
 		return GetResult{}, operation.UnsupportedCapability(fmt.Sprintf("InvokeAI %s is outside the supported range %s", version.Version, capability.SupportedInvokeAIRange))
 	}
 
@@ -198,7 +199,7 @@ func Upload(ctx context.Context, client *httpclient.Client, request UploadReques
 	multipartWriter := multipart.NewWriter(writer)
 	formContentType := multipartWriter.FormDataContentType()
 	go func() {
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		header := make(textproto.MIMEHeader)
 		header.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{
 			"name":     "file",
@@ -230,11 +231,6 @@ func Upload(ctx context.Context, client *httpclient.Client, request UploadReques
 }
 
 func uploadContentType(file *os.File, path string) (string, error) {
-	contentType := mime.TypeByExtension(filepath.Ext(path))
-	if contentType != "" {
-		return contentType, nil
-	}
-
 	buffer := make([]byte, 512)
 	read, err := file.Read(buffer)
 	if err != nil && err != io.EOF {
@@ -243,7 +239,14 @@ func uploadContentType(file *os.File, path string) (string, error) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return "", err
 	}
-	return http.DetectContentType(buffer[:read]), nil
+	detected := http.DetectContentType(buffer[:read])
+	if strings.HasPrefix(detected, "image/") {
+		return detected, nil
+	}
+	if byExtension := mime.TypeByExtension(filepath.Ext(path)); strings.HasPrefix(byExtension, "image/") {
+		return byExtension, nil
+	}
+	return detected, nil
 }
 
 func normalizeReference(client *httpclient.Client, image imageRecord) (Reference, error) {

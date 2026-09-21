@@ -189,7 +189,7 @@ func (c *Client) PostStream(ctx context.Context, path string, body io.Reader, co
 		return &OutcomeUnknownError{Method: http.MethodPost, URL: requestURL, Err: err}
 	}
 	responseBody, readErr := readBody(response.Body, c.maxBody)
-	response.Body.Close()
+	_ = response.Body.Close()
 	if readErr != nil {
 		return &OutcomeUnknownError{Method: http.MethodPost, URL: requestURL, Err: readErr}
 	}

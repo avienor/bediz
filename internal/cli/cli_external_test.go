@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -26,7 +27,20 @@ func (errorWriter) Write([]byte) (int, error) {
 	return 0, errors.New("test write failure")
 }
 
+func writeTestPNG(t *testing.T, path string) []byte {
+	t.Helper()
+	content, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return content
+}
+
 func TestModelsListJSONReturnsSafeModelSummaries(t *testing.T) {
+	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v2/models/" {
 			http.NotFound(w, r)
@@ -79,6 +93,7 @@ func TestModelsListJSONReturnsSafeModelSummaries(t *testing.T) {
 }
 
 func TestModelsListAcceptsRequestDocument(t *testing.T) {
+	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v2/models/" {
 			http.NotFound(w, r)
@@ -111,6 +126,7 @@ func TestModelsListAcceptsRequestDocument(t *testing.T) {
 }
 
 func TestModelsListAcceptsRequestDocumentFromStandardInput(t *testing.T) {
+	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"models": []any{}})
 	}))
@@ -127,6 +143,7 @@ func TestModelsListAcceptsRequestDocumentFromStandardInput(t *testing.T) {
 }
 
 func TestModelsListRejectsUnsupportedRequestSchemaVersion(t *testing.T) {
+	isolateUserConfigDir(t)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	app := cli.NewWithIO(strings.NewReader(`{"schema_version":2}`), &stdout, &stderr)
@@ -146,6 +163,7 @@ func TestModelsListRejectsUnsupportedRequestSchemaVersion(t *testing.T) {
 }
 
 func TestModelsListRejectsNonCanonicalRequestDocuments(t *testing.T) {
+	isolateUserConfigDir(t)
 	tests := []struct {
 		name    string
 		request string
@@ -176,6 +194,7 @@ func TestModelsListRejectsNonCanonicalRequestDocuments(t *testing.T) {
 }
 
 func TestModelsListFlagsCompileToTypedFilters(t *testing.T) {
+	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
 		if !reflect.DeepEqual(query["base_models"], []string{"anima", "sdxl"}) ||
@@ -200,6 +219,7 @@ func TestModelsListFlagsCompileToTypedFilters(t *testing.T) {
 }
 
 func TestModelsListRejectsMixedRequestDocumentAndOperationFlags(t *testing.T) {
+	isolateUserConfigDir(t)
 	requestPath := filepath.Join(t.TempDir(), "models-list.json")
 	if err := os.WriteFile(requestPath, []byte(`{"schema_version":1}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -223,6 +243,7 @@ func TestModelsListRejectsMixedRequestDocumentAndOperationFlags(t *testing.T) {
 }
 
 func TestModelsListClassifiesConnectionFailure(t *testing.T) {
+	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	url := server.URL
 	server.Close()
@@ -245,6 +266,7 @@ func TestModelsListClassifiesConnectionFailure(t *testing.T) {
 }
 
 func TestModelsListClassifiesAuthenticationFailure(t *testing.T) {
+	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "denied", http.StatusUnauthorized)
 	}))
@@ -268,6 +290,7 @@ func TestModelsListClassifiesAuthenticationFailure(t *testing.T) {
 }
 
 func TestModelsListClassifiesInvalidInvokeAIResponse(t *testing.T) {
+	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("not-json"))
 	}))
@@ -291,6 +314,7 @@ func TestModelsListClassifiesInvalidInvokeAIResponse(t *testing.T) {
 }
 
 func TestModelsListClassifiesLocalInterruption(t *testing.T) {
+	isolateUserConfigDir(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	var stdout bytes.Buffer
@@ -312,6 +336,7 @@ func TestModelsListClassifiesLocalInterruption(t *testing.T) {
 }
 
 func TestImagesListJSONReturnsPaginatedImageReferences(t *testing.T) {
+	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
 		if r.URL.Path != "/api/v1/images/" || query.Get("offset") != "0" || query.Get("limit") != "20" ||
@@ -366,6 +391,7 @@ func TestImagesListJSONReturnsPaginatedImageReferences(t *testing.T) {
 }
 
 func TestImagesListFlagsCompileToTypedRequest(t *testing.T) {
+	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
 		if query.Get("offset") != "10" || query.Get("limit") != "5" || query.Get("board_id") != "none" {
@@ -392,6 +418,7 @@ func TestImagesListFlagsCompileToTypedRequest(t *testing.T) {
 }
 
 func TestImagesListAcceptsTypedRequestDocument(t *testing.T) {
+	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
 		if query.Get("offset") != "4" || query.Get("limit") != "2" || query.Get("board_id") != "none" {
@@ -416,6 +443,7 @@ func TestImagesListAcceptsTypedRequestDocument(t *testing.T) {
 }
 
 func TestImagesListRejectsOutOfRangeLimitAsInvalidRequest(t *testing.T) {
+	isolateUserConfigDir(t)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
@@ -435,6 +463,7 @@ func TestImagesListRejectsOutOfRangeLimitAsInvalidRequest(t *testing.T) {
 }
 
 func TestImagesGetJSONReturnsExactImageReference(t *testing.T) {
+	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/images/i/image-1.png" {
 			http.NotFound(w, r)
@@ -473,6 +502,7 @@ func TestImagesGetJSONReturnsExactImageReference(t *testing.T) {
 }
 
 func TestImagesGetAcceptsTypedRequestDocument(t *testing.T) {
+	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/images/i/from-request.png" {
 			http.NotFound(w, r)
@@ -497,6 +527,7 @@ func TestImagesGetAcceptsTypedRequestDocument(t *testing.T) {
 }
 
 func TestImagesGetRejectsRequestWithoutImageName(t *testing.T) {
+	isolateUserConfigDir(t)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	app := cli.NewWithIO(strings.NewReader(`{"schema_version":1}`), &stdout, &stderr)
@@ -516,6 +547,7 @@ func TestImagesGetRejectsRequestWithoutImageName(t *testing.T) {
 }
 
 func TestImagesGetClassifiesMissingImage(t *testing.T) {
+	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	}))
@@ -539,6 +571,7 @@ func TestImagesGetClassifiesMissingImage(t *testing.T) {
 }
 
 func TestQueueListJSONReturnsOnlyRequestedSummaryPage(t *testing.T) {
+	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/queue/default/item_ids":
@@ -554,7 +587,8 @@ func TestQueueListJSONReturnsOnlyRequestedSummaryPage(t *testing.T) {
 				ItemIDs []int `json:"item_ids"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatal(err)
+				t.Errorf("decode summary request: %v", err)
+				return
 			}
 			if !reflect.DeepEqual(body.ItemIDs, []int{8}) {
 				t.Errorf("hydrated item ids = %v, want [8]", body.ItemIDs)
@@ -597,6 +631,7 @@ func TestQueueListJSONReturnsOnlyRequestedSummaryPage(t *testing.T) {
 }
 
 func TestQueueListPreservesNewestFirstItemIDOrder(t *testing.T) {
+	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/queue/default/item_ids":
@@ -636,6 +671,7 @@ func TestQueueListPreservesNewestFirstItemIDOrder(t *testing.T) {
 }
 
 func TestQueueListAcceptsTypedRequestDocument(t *testing.T) {
+	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/queue/custom/item_ids" {
 			http.NotFound(w, r)
@@ -657,6 +693,7 @@ func TestQueueListAcceptsTypedRequestDocument(t *testing.T) {
 }
 
 func TestQueueListRejectsOutOfRangeLimitAsInvalidRequest(t *testing.T) {
+	isolateUserConfigDir(t)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
@@ -676,6 +713,7 @@ func TestQueueListRejectsOutOfRangeLimitAsInvalidRequest(t *testing.T) {
 }
 
 func TestQueueGetJSONReturnsNormalizedItemAndOutputImages(t *testing.T) {
+	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/queue/default/i/8":
@@ -728,6 +766,7 @@ func TestQueueGetJSONReturnsNormalizedItemAndOutputImages(t *testing.T) {
 }
 
 func TestQueueGetSucceedsWhenHistoricalOutputImageIsMissing(t *testing.T) {
+	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/queue/default/i/8":
@@ -770,6 +809,7 @@ func TestQueueGetSucceedsWhenHistoricalOutputImageIsMissing(t *testing.T) {
 }
 
 func TestQueueGetDoesNotExposeInvokeAIErrorBodies(t *testing.T) {
+	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, `{"error_traceback":"/server/private/traceback"}`, http.StatusInternalServerError)
 	}))
@@ -796,6 +836,7 @@ func TestQueueGetDoesNotExposeInvokeAIErrorBodies(t *testing.T) {
 }
 
 func TestQueueGetAcceptsTypedRequestDocument(t *testing.T) {
+	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/queue/custom/i/5" {
 			http.NotFound(w, r)
@@ -820,6 +861,7 @@ func TestQueueGetAcceptsTypedRequestDocument(t *testing.T) {
 }
 
 func TestQueueGetRejectsRequestWithoutPositiveItemID(t *testing.T) {
+	isolateUserConfigDir(t)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	app := cli.NewWithIO(strings.NewReader(`{"schema_version":1,"queue_id":"default"}`), &stdout, &stderr)
@@ -839,10 +881,9 @@ func TestQueueGetRejectsRequestWithoutPositiveItemID(t *testing.T) {
 }
 
 func TestImagesUploadJSONUploadsOneValidatedLocalFile(t *testing.T) {
+	isolateUserConfigDir(t)
 	imagePath := filepath.Join(t.TempDir(), "source.png")
-	if err := os.WriteFile(imagePath, []byte("image-bytes"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	imageContent := writeTestPNG(t, imagePath)
 	var uploads atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -856,14 +897,16 @@ func TestImagesUploadJSONUploadsOneValidatedLocalFile(t *testing.T) {
 			}
 			file, header, err := r.FormFile("file")
 			if err != nil {
-				t.Fatal(err)
+				t.Errorf("read uploaded form file: %v", err)
+				return
 			}
-			defer file.Close()
+			defer func() { _ = file.Close() }()
 			body, err := io.ReadAll(file)
 			if err != nil {
-				t.Fatal(err)
+				t.Errorf("read uploaded image: %v", err)
+				return
 			}
-			if header.Filename != "source.png" || string(body) != "image-bytes" {
+			if header.Filename != "source.png" || !bytes.Equal(body, imageContent) {
 				t.Errorf("uploaded file name=%q body=%q", header.Filename, body)
 			}
 			if header.Header.Get("Content-Type") != "image/png" {
@@ -906,10 +949,9 @@ func TestImagesUploadJSONUploadsOneValidatedLocalFile(t *testing.T) {
 }
 
 func TestImagesUploadAcceptsTypedRequestDocument(t *testing.T) {
+	isolateUserConfigDir(t)
 	imagePath := filepath.Join(t.TempDir(), "source.png")
-	if err := os.WriteFile(imagePath, []byte("image-bytes"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeTestPNG(t, imagePath)
 	request, err := json.Marshal(map[string]any{"schema_version": 1, "path": imagePath})
 	if err != nil {
 		t.Fatal(err)
@@ -942,6 +984,7 @@ func TestImagesUploadAcceptsTypedRequestDocument(t *testing.T) {
 }
 
 func TestImagesUploadRejectsUnsupportedRequestSchemaVersion(t *testing.T) {
+	isolateUserConfigDir(t)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	app := cli.NewWithIO(strings.NewReader(`{"schema_version":2,"path":"/tmp/source.png"}`), &stdout, &stderr)
@@ -961,10 +1004,9 @@ func TestImagesUploadRejectsUnsupportedRequestSchemaVersion(t *testing.T) {
 }
 
 func TestImagesUploadLostResponseReturnsUnknownOutcomeWithoutRetry(t *testing.T) {
+	isolateUserConfigDir(t)
 	imagePath := filepath.Join(t.TempDir(), "source.png")
-	if err := os.WriteFile(imagePath, []byte("image-bytes"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeTestPNG(t, imagePath)
 	var uploads atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -975,7 +1017,8 @@ func TestImagesUploadLostResponseReturnsUnknownOutcomeWithoutRetry(t *testing.T)
 			_, _ = io.Copy(io.Discard, r.Body)
 			connection, _, err := w.(http.Hijacker).Hijack()
 			if err != nil {
-				t.Fatal(err)
+				t.Errorf("hijack upload connection: %v", err)
+				return
 			}
 			_ = connection.Close()
 		default:
@@ -1002,6 +1045,7 @@ func TestImagesUploadLostResponseReturnsUnknownOutcomeWithoutRetry(t *testing.T)
 }
 
 func TestImagesUploadRejectsRelativePathBeforeConnecting(t *testing.T) {
+	isolateUserConfigDir(t)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
@@ -1021,6 +1065,7 @@ func TestImagesUploadRejectsRelativePathBeforeConnecting(t *testing.T) {
 }
 
 func TestImagesUploadRejectsNonRegularPathBeforeConnecting(t *testing.T) {
+	isolateUserConfigDir(t)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
@@ -1040,10 +1085,9 @@ func TestImagesUploadRejectsNonRegularPathBeforeConnecting(t *testing.T) {
 }
 
 func TestImagesUploadRejectsUnsupportedInvokeAIVersionBeforeMutation(t *testing.T) {
+	isolateUserConfigDir(t)
 	imagePath := filepath.Join(t.TempDir(), "source.png")
-	if err := os.WriteFile(imagePath, []byte("image-bytes"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeTestPNG(t, imagePath)
 	var uploads atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/app/version" {

@@ -71,6 +71,30 @@ func TestRunReportsInspectionAndUploadCapabilities(t *testing.T) {
 	}
 }
 
+func TestHumanOmitsEmptyCapabilityDimensions(t *testing.T) {
+	report := Report{
+		Bediz:    version.Info{Version: "test"},
+		InvokeAI: InvokeAIReport{Version: "6.14.1"},
+		Capabilities: []CapabilityReport{
+			{Operation: "models.list", Compatible: true},
+			{Operation: "generate", Family: "anima", Compatible: true, UISync: "full"},
+		},
+	}
+	var output strings.Builder
+
+	report.Human(&output)
+
+	if !strings.Contains(output.String(), "models.list compatible: true\n") {
+		t.Fatalf("inspection capability missing from human output: %q", output.String())
+	}
+	if strings.Contains(output.String(), "models.list/") || strings.Contains(output.String(), "UI sync: )") {
+		t.Fatalf("empty capability dimensions present in human output: %q", output.String())
+	}
+	if !strings.Contains(output.String(), "generate/anima compatible: true (UI sync: full)\n") {
+		t.Fatalf("generation capability dimensions missing from human output: %q", output.String())
+	}
+}
+
 func TestRunReportsQueueGetIncompatibleWithoutImageInspectionEndpoint(t *testing.T) {
 	document := openAPIFixture("")
 	paths := document["paths"].(map[string]any)

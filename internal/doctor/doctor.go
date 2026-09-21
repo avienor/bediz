@@ -475,7 +475,15 @@ func (r Report) Human(w io.Writer) {
 	fmt.Fprintf(w, "Connection: %s; authentication: %s\n", r.InvokeAI.ConnectionStatus, r.InvokeAI.AuthenticationStatus)
 	fmt.Fprintf(w, "OpenAPI: %t; models: %d\n", r.OpenAPI.Available, r.Models.Total)
 	for _, entry := range r.Capabilities {
-		fmt.Fprintf(w, "%s/%s compatible: %t (UI sync: %s)\n", entry.Operation, entry.Family, entry.Compatible, entry.UISync)
+		name := entry.Operation
+		if entry.Family != "" {
+			name += "/" + entry.Family
+		}
+		if entry.UISync != "" {
+			fmt.Fprintf(w, "%s compatible: %t (UI sync: %s)\n", name, entry.Compatible, entry.UISync)
+		} else {
+			fmt.Fprintf(w, "%s compatible: %t\n", name, entry.Compatible)
+		}
 		for _, failure := range entry.Failures {
 			fmt.Fprintf(w, "  - %s\n", failure)
 		}
