@@ -29,11 +29,120 @@ func TestRunReportsReadyAnimaCapability(t *testing.T) {
 	if report.InvokeAI.Version != "6.14.1" || !report.InvokeAI.SupportedVersion {
 		t.Fatalf("unexpected InvokeAI report: %#v", report.InvokeAI)
 	}
-	if len(report.Capabilities) != 1 || !report.Capabilities[0].Compatible {
-		t.Fatalf("unexpected capabilities: %#v", report.Capabilities)
+	foundGenerate := false
+	for _, entry := range report.Capabilities {
+		if entry.Operation == "generate" && entry.Family == "anima" && entry.Compatible {
+			foundGenerate = true
+		}
+	}
+	if !foundGenerate {
+		t.Fatalf("Anima generation capability not ready: %#v", report.Capabilities)
 	}
 	if report.UISync["generate"] != "full" {
 		t.Fatalf("unexpected UI sync: %#v", report.UISync)
+	}
+}
+
+func TestRunReportsInspectionAndUploadCapabilities(t *testing.T) {
+	server := newInvokeAIServer(t, "")
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report := Run(context.Background(), client, version.Info{Version: "test"})
+
+	got := make(map[string]bool)
+	for _, entry := range report.Capabilities {
+		got[entry.Operation] = entry.Compatible
+	}
+	for _, operation := range []string{"models.list", "images.list", "images.get", "images.upload", "queue.list", "queue.get"} {
+		if !got[operation] {
+			t.Errorf("capability %q missing or incompatible: %#v", operation, report.Capabilities)
+		}
+	}
+	encoded, err := json.Marshal(report.Capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), `"family":""`) || strings.Contains(string(encoded), `"ui_sync":""`) {
+		t.Fatalf("empty capability dimensions should be omitted: %s", encoded)
+	}
+}
+
+func TestRunReportsQueueGetIncompatibleWithoutImageInspectionEndpoint(t *testing.T) {
+	document := openAPIFixture("")
+	paths := document["paths"].(map[string]any)
+	delete(paths, "/api/v1/images/i/{image_name}")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_ = json.NewEncoder(w).Encode(map[string]string{"version": "6.14.1"})
+		case "/openapi.json":
+			_ = json.NewEncoder(w).Encode(document)
+		case "/api/v2/models/":
+			_ = json.NewEncoder(w).Encode(map[string]any{"models": []map[string]string{}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report := Run(context.Background(), client, version.Info{Version: "test"})
+
+	for _, entry := range report.Capabilities {
+		if entry.Operation == "queue.get" {
+			if entry.Compatible {
+				t.Fatalf("queue.get should require image inspection: %#v", entry)
+			}
+			return
+		}
+	}
+	t.Fatal("queue.get capability not reported")
+}
+
+func TestRunAllowsReadOnlyInspectionOnEndpointCompatibleUntestedVersion(t *testing.T) {
+	document := openAPIFixture("")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_ = json.NewEncoder(w).Encode(map[string]string{"version": "6.15.0"})
+		case "/openapi.json":
+			_ = json.NewEncoder(w).Encode(document)
+		case "/api/v2/models/":
+			_ = json.NewEncoder(w).Encode(map[string]any{"models": []map[string]string{
+				{"key": "main", "name": "Anima", "base": "anima", "type": "main"},
+				{"key": "vae", "name": "VAE", "base": "anima", "type": "vae"},
+				{"key": "encoder", "name": "Qwen3", "base": "any", "type": "qwen3_encoder"},
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report := Run(context.Background(), client, version.Info{Version: "test"})
+
+	compatibility := make(map[string]bool)
+	for _, entry := range report.Capabilities {
+		compatibility[entry.Operation] = entry.Compatible
+	}
+	for _, operation := range []string{"models.list", "images.list", "images.get", "queue.list", "queue.get"} {
+		if !compatibility[operation] {
+			t.Errorf("read-only capability %q should remain compatible: %#v", operation, report.Capabilities)
+		}
+	}
+	if compatibility["images.upload"] || compatibility["generate"] {
+		t.Fatalf("mutating capabilities should require the supported range: %#v", report.Capabilities)
 	}
 }
 

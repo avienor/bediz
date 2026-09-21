@@ -27,20 +27,74 @@ type ModelRequirement struct {
 	MinimumCount int
 }
 
+type VersionPolicy string
+
+const (
+	VersionPolicySupportedRange     VersionPolicy = "supported_range"
+	VersionPolicyCompatibleEndpoint VersionPolicy = "compatible_endpoint"
+)
+
 type Entry struct {
-	Operation   string
-	Family      string
-	UISync      string
-	Endpoints   []EndpointRequirement
-	Invocations []InvocationRequirement
-	Models      []ModelRequirement
+	Operation     string
+	Family        string
+	UISync        string
+	VersionPolicy VersionPolicy
+	Endpoints     []EndpointRequirement
+	Invocations   []InvocationRequirement
+	Models        []ModelRequirement
 }
 
 var Matrix = []Entry{
 	{
-		Operation: "generate",
-		Family:    "anima",
-		UISync:    "full",
+		Operation:     "models.list",
+		VersionPolicy: VersionPolicyCompatibleEndpoint,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v2/models/"},
+		},
+	},
+	{
+		Operation:     "images.list",
+		VersionPolicy: VersionPolicyCompatibleEndpoint,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/images/"},
+		},
+	},
+	{
+		Operation:     "images.get",
+		VersionPolicy: VersionPolicyCompatibleEndpoint,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/images/i/{image_name}"},
+		},
+	},
+	{
+		Operation:     "images.upload",
+		VersionPolicy: VersionPolicySupportedRange,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/app/version"},
+			{Method: "POST", Path: "/api/v1/images/upload"},
+		},
+	},
+	{
+		Operation:     "queue.list",
+		VersionPolicy: VersionPolicyCompatibleEndpoint,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/queue/{queue_id}/item_ids"},
+			{Method: "POST", Path: "/api/v1/queue/{queue_id}/item_summaries_by_ids"},
+		},
+	},
+	{
+		Operation:     "queue.get",
+		VersionPolicy: VersionPolicyCompatibleEndpoint,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/queue/{queue_id}/i/{item_id}"},
+			{Method: "GET", Path: "/api/v1/images/i/{image_name}"},
+		},
+	},
+	{
+		Operation:     "generate",
+		Family:        "anima",
+		UISync:        "full",
+		VersionPolicy: VersionPolicySupportedRange,
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v1/app/version"},
 			{Method: "GET", Path: "/api/v2/models/"},

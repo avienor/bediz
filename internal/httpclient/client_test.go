@@ -67,6 +67,30 @@ func TestGetRetriesTransientStatus(t *testing.T) {
 	}
 }
 
+func TestReadOnlyPostRetriesTransientStatus(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			http.Error(w, "try again", http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "", Options{HTTPClient: server.Client(), Retries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response map[string]bool
+	if err := client.QueryJSON(context.Background(), "/query", map[string]any{"ids": []int{1}}, &response); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 2 || !response["ok"] {
+		t.Fatalf("calls = %d, response = %#v", calls.Load(), response)
+	}
+}
+
 func TestMutationIsNeverRetried(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

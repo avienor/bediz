@@ -79,9 +79,9 @@ type ModelRequirement struct {
 
 type CapabilityReport struct {
 	Operation  string   `json:"operation"`
-	Family     string   `json:"family"`
+	Family     string   `json:"family,omitempty"`
 	Compatible bool     `json:"compatible"`
-	UISync     string   `json:"ui_sync"`
+	UISync     string   `json:"ui_sync,omitempty"`
 	Failures   []string `json:"failures"`
 }
 
@@ -230,7 +230,9 @@ func Run(ctx context.Context, client *httpclient.Client, bedizVersion version.In
 	}
 	report.Capabilities = buildCapabilities(report)
 	for _, entry := range capability.Matrix {
-		report.UISync[entry.Operation] = entry.UISync
+		if entry.UISync != "" {
+			report.UISync[entry.Operation] = entry.UISync
+		}
 	}
 	report.Ready = len(report.Capabilities) > 0
 	for _, entry := range report.Capabilities {
@@ -306,7 +308,7 @@ func buildCapabilities(report Report) []CapabilityReport {
 	capabilities := make([]CapabilityReport, 0, len(capability.Matrix))
 	for _, entry := range capability.Matrix {
 		failures := make([]string, 0)
-		if !report.InvokeAI.SupportedVersion {
+		if entry.VersionPolicy == capability.VersionPolicySupportedRange && !report.InvokeAI.SupportedVersion {
 			failures = append(failures, "unsupported_version")
 		}
 		if !report.OpenAPI.Available {
@@ -323,12 +325,14 @@ func buildCapabilities(report Report) []CapabilityReport {
 				}
 			}
 		}
-		if !report.Models.Available {
-			failures = append(failures, "models_unavailable")
-		} else {
-			for _, requirement := range entry.Models {
-				if !modelRequirementSatisfied(report.Models.Requirements, requirement.Name) {
-					failures = append(failures, "missing_component:"+requirement.Name)
+		if len(entry.Models) > 0 {
+			if !report.Models.Available {
+				failures = append(failures, "models_unavailable")
+			} else {
+				for _, requirement := range entry.Models {
+					if !modelRequirementSatisfied(report.Models.Requirements, requirement.Name) {
+						failures = append(failures, "missing_component:"+requirement.Name)
+					}
 				}
 			}
 		}
