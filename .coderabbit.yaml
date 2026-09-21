@@ -47,7 +47,7 @@ reviews:
       instructions: |
         Treat docs/spec/v1.md and accepted ADRs as the product contract. Review
         for deterministic behavior, explicit validation, stable error semantics,
-        context cancellation, bounded resource use, and idiomatic Go 1.24.
+        context cancellation, bounded resource use, and idiomatic Go 1.27.
         Require focused tests for behavior changes. Do not request abstractions
         or compatibility layers that are not needed by the current V1 scope.
 
