@@ -163,7 +163,7 @@ func parseVersion(value string) (int, int, int, error) {
 	if matches == nil {
 		return 0, 0, 0, fmt.Errorf("invalid InvokeAI version %q", value)
 	}
-	for _, identifier := range strings.Split(matches[versionPattern.SubexpIndex("prerelease")], ".") {
+	for identifier := range strings.SplitSeq(matches[versionPattern.SubexpIndex("prerelease")], ".") {
 		if len(identifier) > 1 && identifier[0] == '0' && isNumericIdentifier(identifier) {
 			return 0, 0, 0, fmt.Errorf("invalid InvokeAI version %q", value)
 		}
