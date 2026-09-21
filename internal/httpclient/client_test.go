@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -251,6 +252,107 @@ func TestAuthenticationFailureIsClassified(t *testing.T) {
 	err = client.GetJSON(t.Context(), "/private", nil)
 	if httpErr, ok := errors.AsType[*HTTPError](err); !ok || !httpErr.AuthenticationFailure() {
 		t.Fatalf("error = %#v", err)
+	}
+}
+
+func TestNewResolvesOptionFallbacks(t *testing.T) {
+	var userAgent atomic.Value
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userAgent.Store(r.Header.Get("User-Agent"))
+		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response map[string]bool
+	if err := client.GetJSON(t.Context(), "/read", &response); err != nil {
+		t.Fatal(err)
+	}
+	if !response["ok"] {
+		t.Fatalf("response = %#v", response)
+	}
+	if got := userAgent.Load(); got != "bediz/dev" {
+		t.Errorf("user-agent = %q, want bediz/dev", got)
+	}
+}
+
+func TestNewDoesNotEnableRetriesForCustomHTTPClient(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		http.Error(w, "try again", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "", Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = client.GetJSON(t.Context(), "/read", nil)
+	if httpErr, ok := errors.AsType[*HTTPError](err); !ok || httpErr.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("error = %#v, want conclusive service unavailable failure", err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("calls = %d, want 1", calls.Load())
+	}
+}
+
+func TestNewAppliesConfiguredHTTPOptions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("User-Agent"); got != "bediz/custom" {
+			t.Errorf("user-agent = %q, want bediz/custom", got)
+		}
+		_, _ = w.Write(bytes.Repeat([]byte("x"), 64))
+	}))
+	defer server.Close()
+	client, err := New(server.URL, "", Options{HTTPClient: server.Client(), MaxBody: 8, UserAgent: "bediz/custom"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = client.GetJSON(t.Context(), "/read", nil)
+	if _, ok := errors.AsType[*InvalidResponseError](err); !ok {
+		t.Fatalf("error = %#v, want InvalidResponseError for a body above the configured maximum", err)
+	}
+}
+
+func TestNewAppliesConfiguredTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	}))
+	defer server.Close()
+	client, err := New(server.URL, "", Options{Timeout: 10 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = client.DoJSON(t.Context(), http.MethodPost, "/mutate", map[string]bool{"go": true}, nil)
+	if _, ok := errors.AsType[*OutcomeUnknownError](err); !ok {
+		t.Fatalf("error = %#v, want OutcomeUnknownError for a request past the configured timeout", err)
+	}
+}
+
+func TestNewRejectsNegativeOptions(t *testing.T) {
+	tests := []struct {
+		name    string
+		options Options
+		want    string
+	}{
+		{name: "timeout", options: Options{Timeout: -time.Second}, want: "timeout must be positive"},
+		{name: "retries", options: Options{Retries: -1}, want: "retries cannot be negative"},
+		{name: "maximum response body", options: Options{MaxBody: -1}, want: "maximum response body size must be positive"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := New("http://127.0.0.1:9090", "", test.options)
+			if err == nil || err.Error() != test.want {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
 	}
 }
 

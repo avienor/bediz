@@ -2,6 +2,7 @@ package httpclient
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -105,10 +106,7 @@ func New(baseURL, token string, options Options) (*Client, error) {
 		return nil, errors.New("base url must not include credentials, a query, or a fragment")
 	}
 
-	timeout := options.Timeout
-	if timeout == 0 {
-		timeout = DefaultTimeout
-	}
+	timeout := cmp.Or(options.Timeout, DefaultTimeout)
 	if timeout < 0 {
 		return nil, errors.New("timeout must be positive")
 	}
@@ -123,17 +121,11 @@ func New(baseURL, token string, options Options) (*Client, error) {
 	if retries == 0 && options.HTTPClient == nil {
 		retries = DefaultRetries
 	}
-	maxBody := options.MaxBody
-	if maxBody == 0 {
-		maxBody = DefaultMaxBody
-	}
+	maxBody := cmp.Or(options.MaxBody, DefaultMaxBody)
 	if maxBody < 0 {
 		return nil, errors.New("maximum response body size must be positive")
 	}
-	userAgent := options.UserAgent
-	if userAgent == "" {
-		userAgent = "bediz/dev"
-	}
+	userAgent := cmp.Or(options.UserAgent, "bediz/dev")
 
 	return &Client{
 		baseURL:   parsed,

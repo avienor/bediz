@@ -95,6 +95,24 @@ func TestHumanOmitsEmptyCapabilityDimensions(t *testing.T) {
 	}
 }
 
+func TestHumanShowsUnknownInvokeAIVersionFallback(t *testing.T) {
+	report := Report{
+		Bediz:    version.Info{Version: "test"},
+		InvokeAI: InvokeAIReport{URL: "http://127.0.0.1:9090"},
+	}
+	var output strings.Builder
+	report.Human(&output)
+
+	want := "Bediz test\n" +
+		"InvokeAI unknown (http://127.0.0.1:9090, supported: false)\n" +
+		"Connection: ; authentication: \n" +
+		"OpenAPI: false; models: 0\n" +
+		"Status: not ready\n"
+	if output.String() != want {
+		t.Fatalf("human output = %q, want %q", output.String(), want)
+	}
+}
+
 func TestRunReportsQueueGetIncompatibleWithoutImageInspectionEndpoint(t *testing.T) {
 	document := openAPIFixture("")
 	paths := document["paths"].(map[string]any)

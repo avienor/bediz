@@ -1463,6 +1463,31 @@ func TestConfigGetFailsWhenHumanOutputCannotBeWritten(t *testing.T) {
 	}
 }
 
+func TestConfigGetHumanOutputShowsUnsetStoredValues(t *testing.T) {
+	isolateUserConfigDir(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{"config", "get"})
+
+	if exitCode != result.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d; stderr = %q", exitCode, result.ExitSuccess, stderr.String())
+	}
+	userConfigDir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Configuration: " + filepath.Join(userConfigDir, "bediz", "config.json") + "\n" +
+		"Stored URL: not set\n" +
+		"Stored token: not configured\n" +
+		"Effective URL: http://127.0.0.1:9090 (default)\n" +
+		"Effective token: not configured\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
 func isolateUserConfigDir(t *testing.T) {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "config")

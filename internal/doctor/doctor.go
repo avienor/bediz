@@ -480,8 +480,5 @@ func (r Report) Human(w io.Writer) {
 }
 
 func valueOrUnknown(value string) string {
-	if value == "" {
-		return "unknown"
-	}
-	return value
+	return cmp.Or(value, "unknown")
 }

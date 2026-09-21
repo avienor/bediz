@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -898,10 +899,7 @@ func (c *CLI) writeConfigView(operation string, jsonOutput bool, view configView
 		}
 		return result.ExitSuccess
 	}
-	storedURL := "not set"
-	if view.Stored.URL != "" {
-		storedURL = view.Stored.URL
-	}
+	storedURL := cmp.Or(view.Stored.URL, "not set")
 	effectiveToken := configured(view.Effective.TokenConfigured)
 	if view.Effective.TokenSource != "" {
 		effectiveToken += fmt.Sprintf(" (%s)", view.Effective.TokenSource)
