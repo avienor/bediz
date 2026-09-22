@@ -37,6 +37,20 @@ type resultEnvelope struct {
 	Warnings      jsontext.Value `json:"warnings"`
 }
 
+type modelSummaryData struct {
+	Key    string `json:"key"`
+	Name   string `json:"name"`
+	Base   string `json:"base"`
+	Type   string `json:"type"`
+	Format string `json:"format"`
+}
+
+type liveAnimaModelKeys struct {
+	Main         string
+	VAE          string
+	Qwen3Encoder string
+}
+
 type doctorData struct {
 	Ready *bool `json:"ready"`
 	Bediz struct {
@@ -68,15 +82,9 @@ type doctorData struct {
 		} `json:"required_invocations"`
 	} `json:"openapi"`
 	Models struct {
-		Available *bool `json:"available"`
-		Total     *int  `json:"total"`
-		Relevant  []struct {
-			Key    string `json:"key"`
-			Name   string `json:"name"`
-			Base   string `json:"base"`
-			Type   string `json:"type"`
-			Format string `json:"format"`
-		} `json:"relevant"`
+		Available    *bool              `json:"available"`
+		Total        *int               `json:"total"`
+		Relevant     []modelSummaryData `json:"relevant"`
 		Requirements []struct {
 			Name      string `json:"name"`
 			Available *int   `json:"available"`
@@ -172,36 +180,46 @@ type queueListData struct {
 	} `json:"items"`
 }
 
+type generationComponentsData struct {
+	VAE          string `json:"vae"`
+	Qwen3Encoder string `json:"qwen3_encoder"`
+}
+
+type generationRequestData struct {
+	SchemaVersion  int                       `json:"schema_version"`
+	Model          string                    `json:"model"`
+	PositivePrompt string                    `json:"positive_prompt"`
+	NegativePrompt *string                   `json:"negative_prompt"`
+	Width          *int                      `json:"width"`
+	Height         *int                      `json:"height"`
+	Steps          *int                      `json:"steps"`
+	Scheduler      *string                   `json:"scheduler"`
+	Guidance       *float64                  `json:"guidance"`
+	Seed           *uint32                   `json:"seed"`
+	OutputCount    *int                      `json:"output_count"`
+	BoardID        *string                   `json:"board_id"`
+	Components     *generationComponentsData `json:"components"`
+}
+
+type resolvedGenerationSettingsData struct {
+	PositivePrompt string            `json:"positive_prompt"`
+	NegativePrompt *string           `json:"negative_prompt"`
+	Width          int               `json:"width"`
+	Height         int               `json:"height"`
+	Steps          int               `json:"steps"`
+	Scheduler      string            `json:"scheduler"`
+	Guidance       float64           `json:"guidance"`
+	OutputCount    int               `json:"output_count"`
+	BoardID        *string           `json:"board_id"`
+	ModelKey       string            `json:"model_key"`
+	ComponentKeys  map[string]string `json:"component_keys"`
+	Seeds          []uint32          `json:"seeds"`
+}
+
 type executionReceiptData struct {
-	SubmittedRequest struct {
-		SchemaVersion  int      `json:"schema_version"`
-		Model          string   `json:"model"`
-		PositivePrompt string   `json:"positive_prompt"`
-		NegativePrompt string   `json:"negative_prompt"`
-		Width          *int     `json:"width"`
-		Height         *int     `json:"height"`
-		Steps          *int     `json:"steps"`
-		Scheduler      *string  `json:"scheduler"`
-		Guidance       *float64 `json:"guidance"`
-		Seed           *uint32  `json:"seed"`
-		OutputCount    *int     `json:"output_count"`
-		BoardID        string   `json:"board_id"`
-	} `json:"submitted_request"`
-	ResolvedSettings struct {
-		PositivePrompt string            `json:"positive_prompt"`
-		NegativePrompt string            `json:"negative_prompt"`
-		Width          int               `json:"width"`
-		Height         int               `json:"height"`
-		Steps          int               `json:"steps"`
-		Scheduler      string            `json:"scheduler"`
-		Guidance       float64           `json:"guidance"`
-		OutputCount    int               `json:"output_count"`
-		BoardID        string            `json:"board_id"`
-		ModelKey       string            `json:"model_key"`
-		ComponentKeys  map[string]string `json:"component_keys"`
-		Seeds          []uint32          `json:"seeds"`
-	} `json:"resolved_settings"`
-	Queue struct {
+	SubmittedRequest generationRequestData          `json:"submitted_request"`
+	ResolvedSettings resolvedGenerationSettingsData `json:"resolved_settings"`
+	Queue            struct {
 		QueueID string `json:"queue_id"`
 		BatchID string `json:"batch_id"`
 		ItemIDs []int  `json:"item_ids"`
@@ -220,6 +238,7 @@ func TestLiveGate(t *testing.T) {
 	}
 	validateTarget(t, target)
 	binary := buildBinary(t)
+	var animaModels liveAnimaModelKeys
 
 	if !t.Run("doctor verifies the supported baseline", func(t *testing.T) {
 		envelope := runJSONCommand(t, binary, target, "doctor")
@@ -255,6 +274,17 @@ func TestLiveGate(t *testing.T) {
 			if model.Key == "" || model.Name == "" || model.Base == "" || model.Type == "" {
 				t.Errorf("doctor returned an incomplete relevant model: %#v", model)
 			}
+			switch {
+			case model.Base == "anima" && model.Type == "main":
+				animaModels.Main = firstKey(animaModels.Main, model.Key)
+			case model.Base == "anima" && model.Type == "vae":
+				animaModels.VAE = firstKey(animaModels.VAE, model.Key)
+			case model.Base == "any" && model.Type == "qwen3_encoder":
+				animaModels.Qwen3Encoder = firstKey(animaModels.Qwen3Encoder, model.Key)
+			}
+		}
+		if animaModels.Main == "" || animaModels.VAE == "" || animaModels.Qwen3Encoder == "" {
+			t.Fatalf("doctor did not report exact keys for the required Anima models: %#v", animaModels)
 		}
 		for _, requirement := range data.Models.Requirements {
 			if requirement.Name == "" || requirement.Available == nil || requirement.Required == nil || requirement.Satisfied == nil || !*requirement.Satisfied {
@@ -422,33 +452,58 @@ func TestLiveGate(t *testing.T) {
 
 	if !t.Run("anima direct execution produces a completed receipt and self-cleans", func(t *testing.T) {
 		const testSeed uint32 = 42
-		envelope := runJSONCommand(t, binary, target, "generate", "--model", "Anima Base 1.0", "--prompt", "a tiny green apple on white background", "--steps", "1", "--width", "1024", "--height", "1024", "--seed", strconv.FormatUint(uint64(testSeed), 10))
+		envelope := runJSONCommand(
+			t, binary, target, "generate",
+			"--model", animaModels.Main,
+			"--vae", animaModels.VAE,
+			"--qwen3-encoder", animaModels.Qwen3Encoder,
+			"--prompt", "a tiny green apple on white background",
+			"--steps", "1",
+			"--width", "1024",
+			"--height", "1024",
+			"--seed", strconv.FormatUint(uint64(testSeed), 10),
+		)
+		registerGeneratedImageCleanup(t, binary, target, envelope.Data)
 		assertSuccessEnvelope(t, envelope, "generate")
 
 		var receipt executionReceiptData
 		unmarshalData(t, envelope.Data, &receipt)
 
-		if receipt.SubmittedRequest.Model != "Anima Base 1.0" ||
-			receipt.SubmittedRequest.PositivePrompt != "a tiny green apple on white background" ||
-			receipt.SubmittedRequest.Steps == nil || *receipt.SubmittedRequest.Steps != 1 ||
-			receipt.SubmittedRequest.Width == nil || *receipt.SubmittedRequest.Width != 1024 ||
-			receipt.SubmittedRequest.Height == nil || *receipt.SubmittedRequest.Height != 1024 ||
-			receipt.SubmittedRequest.Seed == nil || *receipt.SubmittedRequest.Seed != testSeed {
-			t.Fatalf("unexpected submitted request in receipt: %#v", receipt.SubmittedRequest)
+		wantSubmittedRequest := generationRequestData{
+			SchemaVersion:  1,
+			Model:          animaModels.Main,
+			PositivePrompt: "a tiny green apple on white background",
+			Width:          new(1024),
+			Height:         new(1024),
+			Steps:          new(1),
+			Seed:           new(testSeed),
+			Components: &generationComponentsData{
+				VAE:          animaModels.VAE,
+				Qwen3Encoder: animaModels.Qwen3Encoder,
+			},
+		}
+		if !reflect.DeepEqual(receipt.SubmittedRequest, wantSubmittedRequest) {
+			t.Fatalf("submitted request = %#v, want exact canonical request %#v", receipt.SubmittedRequest, wantSubmittedRequest)
 		}
 
-		if receipt.ResolvedSettings.PositivePrompt != "a tiny green apple on white background" ||
-			receipt.ResolvedSettings.Steps != 1 ||
-			receipt.ResolvedSettings.Width != 1024 ||
-			receipt.ResolvedSettings.Height != 1024 ||
-			receipt.ResolvedSettings.Scheduler != "euler" ||
-			receipt.ResolvedSettings.Guidance != 4.5 ||
-			receipt.ResolvedSettings.OutputCount != 1 ||
-			receipt.ResolvedSettings.ModelKey == "" ||
-			receipt.ResolvedSettings.ComponentKeys["vae"] == "" ||
-			receipt.ResolvedSettings.ComponentKeys["qwen3_encoder"] == "" ||
-			!slices.Equal(receipt.ResolvedSettings.Seeds, []uint32{testSeed}) {
-			t.Fatalf("unexpected resolved settings in receipt: %#v", receipt.ResolvedSettings)
+		wantResolvedSettings := resolvedGenerationSettingsData{
+			PositivePrompt: "a tiny green apple on white background",
+			NegativePrompt: new(""),
+			Width:          1024,
+			Height:         1024,
+			Steps:          1,
+			Scheduler:      "euler",
+			Guidance:       4.5,
+			OutputCount:    1,
+			ModelKey:       animaModels.Main,
+			ComponentKeys: map[string]string{
+				"vae":           animaModels.VAE,
+				"qwen3_encoder": animaModels.Qwen3Encoder,
+			},
+			Seeds: []uint32{testSeed},
+		}
+		if !reflect.DeepEqual(receipt.ResolvedSettings, wantResolvedSettings) {
+			t.Fatalf("resolved settings = %#v, want exact settings %#v", receipt.ResolvedSettings, wantResolvedSettings)
 		}
 
 		if receipt.Queue.QueueID != "default" || receipt.Queue.BatchID == "" || len(receipt.Queue.ItemIDs) != 1 {
@@ -464,29 +519,105 @@ func TestLiveGate(t *testing.T) {
 		}
 
 		image := output.Image
-		if image.ImageName == "" || image.ImageURL == "" || image.ThumbnailURL == "" ||
-			image.Width != 1024 || image.Height != 1024 || image.IsIntermediate == nil || *image.IsIntermediate {
-			t.Fatalf("output image reference is incomplete: %#v", image)
-		}
+		assertGeneratedImageReference(t, target, image)
 
-		imageName := image.ImageName
-		t.Logf("generated fixture cleanup evidence: image_name=%q", imageName)
-		t.Cleanup(func() {
-			deleteBackendImage(t, target, imageName)
-			assertImageRemoved(t, binary, target, imageName)
-		})
-
-		getEnvelope := runJSONCommand(t, binary, target, "images", "get", imageName)
+		getEnvelope := runJSONCommand(t, binary, target, "images", "get", image.ImageName)
 		assertSuccessEnvelope(t, getEnvelope, "images.get")
 		var got imageResultData
 		unmarshalData(t, getEnvelope.Data, &got)
-		if got.Image.ImageName != imageName || got.Image.Width != 1024 || got.Image.Height != 1024 {
-			t.Fatalf("images get returned unexpected image: %#v", got.Image)
+		if !reflect.DeepEqual(got.Image, image) {
+			t.Fatalf("images get reference differs from execution receipt: receipt=%#v get=%#v", image, got.Image)
 		}
 	}) {
 		return
 	}
 	t.Log("live E2E: VERIFIED")
+}
+
+func firstKey(current, candidate string) string {
+	if current == "" || candidate < current {
+		return candidate
+	}
+	return current
+}
+
+func registerGeneratedImageCleanup(t *testing.T, binary, target string, raw jsontext.Value) {
+	t.Helper()
+	var hint struct {
+		Outputs []struct {
+			Image struct {
+				ImageName string `json:"image_name"`
+			} `json:"image"`
+		} `json:"outputs"`
+	}
+	if err := json.Unmarshal(raw, &hint); err != nil {
+		return
+	}
+	seen := make(map[string]bool)
+	for _, output := range hint.Outputs {
+		imageName := output.Image.ImageName
+		if imageName == "" || seen[imageName] {
+			continue
+		}
+		seen[imageName] = true
+		t.Logf("generated fixture cleanup evidence: image_name=%q", imageName)
+		t.Cleanup(func() {
+			deleteBackendImage(t, target, imageName)
+			assertImageRemoved(t, binary, target, imageName)
+		})
+	}
+}
+
+func assertGeneratedImageReference(t *testing.T, target string, image imageReference) {
+	t.Helper()
+	if image.ImageName == "" || image.ImageOrigin != "internal" || image.ImageCategory != "general" ||
+		image.Width != 1024 || image.Height != 1024 || image.CreatedAt == "" || image.UpdatedAt == "" ||
+		image.IsIntermediate == nil || *image.IsIntermediate || image.SessionID == nil || *image.SessionID == "" ||
+		image.NodeID == nil || *image.NodeID == "" || image.Starred == nil || *image.Starred ||
+		image.HasWorkflow == nil || image.BoardID != nil {
+		t.Fatalf("output image reference is incomplete or incorrect: %#v", image)
+	}
+	for field, imageURL := range map[string]string{
+		"image_url":     image.ImageURL,
+		"thumbnail_url": image.ThumbnailURL,
+	} {
+		assertAccessibleImageURL(t, target, field, imageURL)
+	}
+}
+
+func assertAccessibleImageURL(t *testing.T, target, field, rawURL string) {
+	t.Helper()
+	parsed, err := url.Parse(rawURL)
+	if err != nil || !parsed.IsAbs() || parsed.Host == "" {
+		t.Fatalf("generated image %s = %q, want an absolute URL", field, rawURL)
+	}
+	targetURL, err := url.Parse(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Scheme != targetURL.Scheme || parsed.Host != targetURL.Host {
+		t.Fatalf("generated image %s points outside the tested InvokeAI target: %q", field, rawURL)
+	}
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, rawURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+secretSentinel)
+	response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
+	if err != nil {
+		t.Fatalf("fetch generated image %s: %v", field, err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("generated image %s returned %s", field, response.Status)
+	}
+	content, err := io.ReadAll(io.LimitReader(response.Body, 1))
+	if err != nil {
+		t.Fatalf("read generated image %s: %v", field, err)
+	}
+	if len(content) == 0 {
+		t.Fatalf("generated image %s returned an empty body", field)
+	}
 }
 
 func writeUniquePNG(t *testing.T) uploadFixture {

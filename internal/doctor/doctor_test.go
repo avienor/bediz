@@ -2,20 +2,22 @@ package doctor
 
 import (
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/avienor/bediz/internal/capability"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/result"
 	"github.com/avienor/bediz/internal/version"
 )
 
 func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
-	server := newInvokeAIServer(t, "")
+	server := newInvokeAIServer(t)
 	defer server.Close()
 	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
 	if err != nil {
@@ -64,7 +66,7 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 }
 
 func TestRunReportsInspectionAndUploadCapabilities(t *testing.T) {
-	server := newInvokeAIServer(t, "")
+	server := newInvokeAIServer(t)
 	defer server.Close()
 	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
 	if err != nil {
@@ -130,7 +132,7 @@ func TestHumanShowsUnknownInvokeAIVersionFallback(t *testing.T) {
 }
 
 func TestRunReportsQueueGetIncompatibleWithoutImageInspectionEndpoint(t *testing.T) {
-	document := openAPIFixture("")
+	document := openAPIFixture(t)
 	paths := document["paths"].(map[string]any)
 	delete(paths, "/api/v1/images/i/{image_name}")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -165,7 +167,7 @@ func TestRunReportsQueueGetIncompatibleWithoutImageInspectionEndpoint(t *testing
 }
 
 func TestRunAllowsReadOnlyInspectionOnEndpointCompatibleUntestedVersion(t *testing.T) {
-	document := openAPIFixture("")
+	document := openAPIFixture(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/app/version":
@@ -205,7 +207,7 @@ func TestRunAllowsReadOnlyInspectionOnEndpointCompatibleUntestedVersion(t *testi
 }
 
 func TestRunClassifiesRejectedAuthentication(t *testing.T) {
-	document := openAPIFixture("")
+	document := openAPIFixture(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/app/version":
@@ -264,7 +266,7 @@ func TestRunDoesNotDeriveSchemaIssuesWhenOpenAPIRequestFails(t *testing.T) {
 }
 
 func TestRunDoesNotInventComponentReadinessWhenModelsRequestFails(t *testing.T) {
-	document := openAPIFixture("")
+	document := openAPIFixture(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/app/version":
@@ -295,7 +297,7 @@ func TestRunDoesNotInventComponentReadinessWhenModelsRequestFails(t *testing.T) 
 }
 
 func TestFailureClassifiesInvokeAIHTTPError(t *testing.T) {
-	document := openAPIFixture("")
+	document := openAPIFixture(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/app/version":
@@ -327,7 +329,7 @@ func TestFailureClassifiesInvokeAIHTTPError(t *testing.T) {
 }
 
 func TestFailureClassifiesInvalidInvokeAIResponse(t *testing.T) {
-	document := openAPIFixture("")
+	document := openAPIFixture(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/app/version":
@@ -369,7 +371,7 @@ func TestFailureClassifiesInvalidVersionPayloads(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			document := openAPIFixture("")
+			document := openAPIFixture(t)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/api/v1/app/version":
@@ -403,7 +405,7 @@ func TestFailureClassifiesInvalidVersionPayloads(t *testing.T) {
 }
 
 func TestRunReportsAnimaGenerationReadyOnlyWhenAllRequirementsPass(t *testing.T) {
-	server := newInvokeAIServer(t, "")
+	server := newInvokeAIServer(t)
 	defer server.Close()
 	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
 	if err != nil {
@@ -447,7 +449,7 @@ func TestRunReportsAnimaGenerationReadyOnlyWhenAllRequirementsPass(t *testing.T)
 
 func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 	t.Run("unsupported invokeai version", func(t *testing.T) {
-		server := newCustomInvokeAIServer(t, "6.15.0", openAPIFixture(""), baselineModels)
+		server := newCustomInvokeAIServer(t, "6.15.0", openAPIFixture(t), baselineModels)
 		defer server.Close()
 		client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
 		if err != nil {
@@ -459,7 +461,7 @@ func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 			t.Fatal("report should not be ready with unsupported InvokeAI version")
 		}
 		assertIssuePresent(t, report, "unsupported_invokeai_version")
-		assertCapabilityFailurePresent(t, report, "unsupported_version")
+		assertCapabilityFailureFor(t, report, result.OperationGenerate, "anima", "unsupported_version")
 	})
 
 	t.Run("missing required endpoints", func(t *testing.T) {
@@ -476,7 +478,7 @@ func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 
 		for _, endpoint := range endpoints {
 			t.Run(endpoint.method+" "+endpoint.path, func(t *testing.T) {
-				document := openAPIFixture("")
+				document := openAPIFixture(t)
 				paths := document["paths"].(map[string]any)
 				if methods, ok := paths[endpoint.path].(map[string]any); ok {
 					delete(methods, strings.ToLower(endpoint.method))
@@ -497,7 +499,7 @@ func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 					t.Fatalf("report should not be ready when %s %s is missing", endpoint.method, endpoint.path)
 				}
 				assertIssuePresent(t, report, "missing_endpoint")
-				assertCapabilityFailurePresent(t, report, "missing_endpoint:"+endpoint.method+" "+endpoint.path)
+				assertCapabilityFailureFor(t, report, result.OperationGenerate, "anima", "missing_endpoint:"+endpoint.method+" "+endpoint.path)
 			})
 		}
 	})
@@ -519,7 +521,7 @@ func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 
 		for _, item := range schemas {
 			t.Run(item.schema, func(t *testing.T) {
-				document := openAPIFixture("")
+				document := openAPIFixture(t)
 				components := document["components"].(map[string]any)
 				schemaMap := components["schemas"].(map[string]any)
 				delete(schemaMap, item.schema)
@@ -536,30 +538,65 @@ func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 					t.Fatalf("report should not be ready when %s schema is missing", item.schema)
 				}
 				assertIssuePresent(t, report, "incompatible_invocation")
-				assertCapabilityFailurePresent(t, report, "incompatible_invocation:"+item.typeName)
+				assertCapabilityFailureFor(t, report, result.OperationGenerate, "anima", "incompatible_invocation:"+item.typeName)
 			})
 		}
 	})
 
 	t.Run("missing required invocation field", func(t *testing.T) {
-		fields := []struct {
-			schema   string
-			property string
-			typeName string
-		}{
-			{schema: "AnimaModelLoaderInvocation", property: "model", typeName: "anima_model_loader"},
-			{schema: "StringInvocation", property: "value", typeName: "string"},
-			{schema: "AnimaTextEncoderInvocation", property: "prompt", typeName: "anima_text_encoder"},
-			{schema: "CollectInvocation", property: "collection", typeName: "collect"},
-			{schema: "IntegerInvocation", property: "value", typeName: "integer"},
-			{schema: "AnimaDenoiseInvocation", property: "guidance_scale", typeName: "anima_denoise"},
-			{schema: "CoreMetadataInvocation", property: "positive_prompt", typeName: "core_metadata"},
-			{schema: "AnimaLatentsToImageInvocation", property: "latents", typeName: "anima_l2i"},
-		}
+		baseline := openAPIFixture(t)
+		components := baseline["components"].(map[string]any)
+		schemas := components["schemas"].(map[string]any)
+		for _, schemaName := range slices.Sorted(maps.Keys(schemas)) {
+			schema := schemas[schemaName].(map[string]any)
+			properties := schema["properties"].(map[string]any)
+			typeProperty := properties["type"].(map[string]any)
+			typeName := typeProperty["const"].(string)
+			for _, property := range slices.Sorted(maps.Keys(properties)) {
+				t.Run(schemaName+"."+property, func(t *testing.T) {
+					document := openAPIFixture(t)
+					documentComponents := document["components"].(map[string]any)
+					documentSchemas := documentComponents["schemas"].(map[string]any)
+					documentSchema := documentSchemas[schemaName].(map[string]any)
+					documentProperties := documentSchema["properties"].(map[string]any)
+					delete(documentProperties, property)
 
-		for _, item := range fields {
-			t.Run(item.schema+"."+item.property, func(t *testing.T) {
-				server := newInvokeAIServer(t, item.property)
+					server := newCustomInvokeAIServer(t, "6.14.1", document, baselineModels)
+					defer server.Close()
+					client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					report := Run(t.Context(), client, version.Info{Version: "test"})
+					if report.Ready {
+						t.Fatalf("report should not be ready when %s is missing from %s", property, schemaName)
+					}
+					assertIssuePresent(t, report, "incompatible_invocation")
+					assertCapabilityFailureFor(t, report, result.OperationGenerate, "anima", "incompatible_invocation:"+typeName)
+				})
+			}
+		}
+	})
+
+	t.Run("mismatched required invocation type", func(t *testing.T) {
+		baseline := openAPIFixture(t)
+		components := baseline["components"].(map[string]any)
+		schemas := components["schemas"].(map[string]any)
+		for _, schemaName := range slices.Sorted(maps.Keys(schemas)) {
+			schema := schemas[schemaName].(map[string]any)
+			properties := schema["properties"].(map[string]any)
+			typeProperty := properties["type"].(map[string]any)
+			typeName := typeProperty["const"].(string)
+			t.Run(schemaName, func(t *testing.T) {
+				document := openAPIFixture(t)
+				documentComponents := document["components"].(map[string]any)
+				documentSchemas := documentComponents["schemas"].(map[string]any)
+				documentSchema := documentSchemas[schemaName].(map[string]any)
+				documentProperties := documentSchema["properties"].(map[string]any)
+				documentProperties["type"] = map[string]any{"const": "wrong_type"}
+
+				server := newCustomInvokeAIServer(t, "6.14.1", document, baselineModels)
 				defer server.Close()
 				client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
 				if err != nil {
@@ -568,10 +605,10 @@ func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 
 				report := Run(t.Context(), client, version.Info{Version: "test"})
 				if report.Ready {
-					t.Fatalf("report should not be ready when %s is missing from %s", item.property, item.schema)
+					t.Fatalf("report should not be ready when %s identifies the wrong invocation type", schemaName)
 				}
 				assertIssuePresent(t, report, "incompatible_invocation")
-				assertCapabilityFailurePresent(t, report, "incompatible_invocation:"+item.typeName)
+				assertCapabilityFailureFor(t, report, result.OperationGenerate, "anima", "incompatible_invocation:"+typeName)
 			})
 		}
 	})
@@ -619,7 +656,7 @@ func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.name, func(t *testing.T) {
-				server := newCustomInvokeAIServer(t, "6.14.1", openAPIFixture(""), test.models)
+				server := newCustomInvokeAIServer(t, "6.14.1", openAPIFixture(t), test.models)
 				defer server.Close()
 				client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
 				if err != nil {
@@ -631,14 +668,31 @@ func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 					t.Fatalf("report should not be ready when %s is missing", test.missingName)
 				}
 				assertIssuePresent(t, report, "missing_component")
-				assertCapabilityFailurePresent(t, report, "missing_component:"+test.missingName)
+				assertCapabilityFailureFor(t, report, result.OperationGenerate, "anima", "missing_component:"+test.missingName)
 			})
 		}
+	})
+
+	t.Run("incomplete required model identifier", func(t *testing.T) {
+		models := []map[string]string{
+			{"key": "main", "name": "Anima", "base": "anima", "type": "main", "format": "checkpoint"},
+			{"key": "vae", "hash": "blake3:vae", "name": "VAE", "base": "anima", "type": "vae", "format": "checkpoint"},
+			{"key": "encoder", "hash": "blake3:encoder", "name": "Qwen3", "base": "any", "type": "qwen3_encoder", "format": "checkpoint"},
+		}
+		server := newCustomInvokeAIServer(t, "6.14.1", openAPIFixture(t), models)
+		defer server.Close()
+		client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		report := Run(t.Context(), client, version.Info{Version: "test"})
+		assertCapabilityFailureFor(t, report, result.OperationGenerate, "anima", "missing_component:Anima main model")
 	})
 }
 
 func TestDoctorDoesNotClaimGenerationUISynchronization(t *testing.T) {
-	server := newInvokeAIServer(t, "")
+	server := newInvokeAIServer(t)
 	defer server.Close()
 	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
 	if err != nil {
@@ -696,6 +750,20 @@ func assertCapabilityFailurePresent(t *testing.T, report Report, failure string)
 	t.Fatalf("capability failure %q not found: %#v", failure, report.Capabilities)
 }
 
+func assertCapabilityFailureFor(t *testing.T, report Report, operation, family, failure string) {
+	t.Helper()
+	for _, capabilityReport := range report.Capabilities {
+		if capabilityReport.Operation != operation || capabilityReport.Family != family {
+			continue
+		}
+		if slices.Contains(capabilityReport.Failures, failure) {
+			return
+		}
+		t.Fatalf("capability %s/%s does not contain failure %q: %#v", operation, family, failure, capabilityReport)
+	}
+	t.Fatalf("capability %s/%s not found: %#v", operation, family, report.Capabilities)
+}
+
 func assertCapabilityFailurePrefixAbsent(t *testing.T, report Report, prefix string) {
 	t.Helper()
 	for _, capabilityReport := range report.Capabilities {
@@ -708,9 +776,9 @@ func assertCapabilityFailurePrefixAbsent(t *testing.T, report Report, prefix str
 }
 
 var baselineModels = []map[string]string{
-	{"key": "main", "name": "Anima", "base": "anima", "type": "main", "format": "checkpoint"},
-	{"key": "vae", "name": "VAE", "base": "anima", "type": "vae", "format": "checkpoint"},
-	{"key": "encoder", "name": "Qwen3", "base": "any", "type": "qwen3_encoder", "format": "checkpoint"},
+	{"key": "main", "hash": "blake3:main", "name": "Anima", "base": "anima", "type": "main", "format": "checkpoint"},
+	{"key": "vae", "hash": "blake3:vae", "name": "VAE", "base": "anima", "type": "vae", "format": "checkpoint"},
+	{"key": "encoder", "hash": "blake3:encoder", "name": "Qwen3", "base": "any", "type": "qwen3_encoder", "format": "checkpoint"},
 }
 
 func newCustomInvokeAIServer(t *testing.T, version string, document any, models any) *httptest.Server {
@@ -729,39 +797,20 @@ func newCustomInvokeAIServer(t *testing.T, version string, document any, models 
 	}))
 }
 
-func newInvokeAIServer(t *testing.T, missingProperty string) *httptest.Server {
+func newInvokeAIServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	return newCustomInvokeAIServer(t, "6.14.1", openAPIFixture(missingProperty), baselineModels)
+	return newCustomInvokeAIServer(t, "6.14.1", openAPIFixture(t), baselineModels)
 }
 
-func openAPIFixture(missingProperty string) map[string]any {
-	paths := make(map[string]any)
-	schemas := make(map[string]any)
-	for _, entry := range capability.Matrix {
-		for _, endpoint := range entry.Endpoints {
-			methods, _ := paths[endpoint.Path].(map[string]any)
-			if methods == nil {
-				methods = make(map[string]any)
-				paths[endpoint.Path] = methods
-			}
-			methods[strings.ToLower(endpoint.Method)] = map[string]any{}
-		}
-		for _, invocation := range entry.Invocations {
-			properties := map[string]any{"type": map[string]any{"const": invocation.Type}}
-			for _, property := range invocation.Properties {
-				if property == missingProperty {
-					delete(properties, property)
-				} else if property != "type" {
-					properties[property] = map[string]any{}
-				}
-			}
-			schemas[invocation.Schema] = map[string]any{"properties": properties}
-		}
+func openAPIFixture(t *testing.T) map[string]any {
+	t.Helper()
+	encoded, err := os.ReadFile("testdata/invokeai_6_14_anima_openapi.json")
+	if err != nil {
+		t.Fatal(err)
 	}
-	return map[string]any{
-		"paths": paths,
-		"components": map[string]any{
-			"schemas": schemas,
-		},
+	var document map[string]any
+	if err := jsonv2.Unmarshal(encoded, &document); err != nil {
+		t.Fatal(err)
 	}
+	return document
 }

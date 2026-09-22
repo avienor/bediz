@@ -3179,9 +3179,9 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(openAPIDocument)
 		case "/api/v2/models/":
 			_ = json.NewEncoder(w).Encode(map[string]any{"models": []map[string]string{
-				{"key": "main", "name": "Anima", "base": "anima", "type": "main"},
-				{"key": "vae", "name": "VAE", "base": "anima", "type": "vae"},
-				{"key": "encoder", "name": "Qwen3", "base": "any", "type": "qwen3_encoder"},
+				{"key": "main", "hash": "blake3:main", "name": "Anima", "base": "anima", "type": "main"},
+				{"key": "vae", "hash": "blake3:vae", "name": "VAE", "base": "anima", "type": "vae"},
+				{"key": "encoder", "hash": "blake3:encoder", "name": "Qwen3", "base": "any", "type": "qwen3_encoder"},
 			}})
 		default:
 			http.NotFound(w, r)

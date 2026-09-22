@@ -92,7 +92,13 @@ var Matrix = []Entry{
 			{Method: "GET", Path: "/api/v1/images/i/{image_name}"},
 		},
 	},
-	{
+	AnimaGenerationEntry(),
+}
+
+// AnimaGenerationEntry returns the tested InvokeAI requirements shared by
+// capability reporting and direct execution validation.
+func AnimaGenerationEntry() Entry {
+	return Entry{
 		Operation:     result.OperationGenerate,
 		Family:        "anima",
 		VersionPolicy: VersionPolicySupportedRange,
@@ -149,7 +155,7 @@ var Matrix = []Entry{
 			{Name: "Anima VAE", Types: []string{"vae"}, Bases: []string{"anima"}, MinimumCount: 1},
 			{Name: "Qwen3 encoder", Types: []string{"qwen3_encoder"}, Bases: []string{"any"}, MinimumCount: 1},
 		},
-	},
+	}
 }
 
 var versionPattern = regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?P<prerelease>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`)
