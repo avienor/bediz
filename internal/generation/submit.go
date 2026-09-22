@@ -12,6 +12,7 @@ import (
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/images"
 	"github.com/avienor/bediz/internal/operation"
+	"github.com/avienor/bediz/internal/result"
 )
 
 type ResolvedSettings struct {
@@ -46,6 +47,7 @@ type ExecutionReceipt struct {
 	ResolvedSettings ResolvedSettings `json:"resolved_settings"`
 	Queue            QueueReceipt     `json:"queue"`
 	Outputs          []Output         `json:"outputs"`
+	Warnings         []result.Warning `json:"warnings"`
 }
 
 type modelListResponse struct {
@@ -134,8 +136,9 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 			ComponentKeys:  map[string]string{"vae": resolved.Models.VAE.Key, "qwen3_encoder": resolved.Models.Qwen3Encoder.Key},
 			Seeds:          slices.Clone(resolved.Seeds),
 		},
-		Queue:   QueueReceipt{QueueID: response.QueueID, BatchID: response.Batch.BatchID, ItemIDs: response.ItemIDs},
-		Outputs: []Output{},
+		Queue:    QueueReceipt{QueueID: response.QueueID, BatchID: response.Batch.BatchID, ItemIDs: response.ItemIDs},
+		Outputs:  []Output{},
+		Warnings: []result.Warning{},
 	}, nil
 }
 
