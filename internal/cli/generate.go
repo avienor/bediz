@@ -9,6 +9,7 @@ import (
 	"github.com/avienor/bediz/internal/generation"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/result"
+	"github.com/avienor/bediz/internal/synchronization"
 	"github.com/spf13/cobra"
 )
 
@@ -119,12 +120,17 @@ func (c *CLI) executeGenerate(ctx context.Context, jsonOutput bool, command *cob
 		operationFlagsSet: fieldsSet,
 		invoke: func(ctx context.Context, client *httpclient.Client, request generation.Request) (generation.ExecutionReceipt, error) {
 			accepted, err := generation.Submit(ctx, client, request)
-			if err != nil || options.noWait {
+			if err != nil {
 				return accepted, err
+			}
+			accepted = synchronization.SynchronizeAnima(ctx, client, accepted)
+			if options.noWait {
+				return accepted, nil
 			}
 			return generation.Wait(ctx, client, accepted, generation.WaitOptions{Timeout: options.waitTimeout})
 		},
-		render: renderExecutionReceipt,
+		render:   renderExecutionReceipt,
+		warnings: func(receipt generation.ExecutionReceipt) []result.Warning { return receipt.Warnings },
 	}
 	return execution.run(ctx, c, jsonOutput)
 }

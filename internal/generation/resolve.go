@@ -177,6 +177,12 @@ func resolveUniqueCompatible(inventory []ModelIdentifier, selector string, requi
 	return ModelIdentifier{}, operation.InvalidRequest(fmt.Sprintf("model selector %q did not resolve to an installed model", selector))
 }
 
+// ResolveAnimaMain resolves an explicit selector using the same rules as an
+// Anima Generation Request, without requiring generation components.
+func ResolveAnimaMain(inventory []ModelIdentifier, selector string) (ModelIdentifier, error) {
+	return resolveUniqueCompatible(inventory, selector, animaMainRequirement)
+}
+
 func resolveOnlyCompatible(inventory []ModelIdentifier, requirement modelRequirement) (ModelIdentifier, error) {
 	var matches []ModelIdentifier
 	for _, model := range inventory {

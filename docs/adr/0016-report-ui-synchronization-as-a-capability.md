@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0017
 ---
 
 # Report UI synchronization as a capability

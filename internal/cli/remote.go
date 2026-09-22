@@ -100,6 +100,7 @@ type remoteExecution[Request, Result any] struct {
 	operationFlagsSet bool
 	invoke            func(context.Context, *httpclient.Client, Request) (Result, error)
 	render            func(Result, io.Writer) error
+	warnings          func(Result) []result.Warning
 }
 
 // run performs the operation end to end. Local problems are reported before
@@ -126,10 +127,20 @@ func (e remoteExecution[Request, Result]) run(ctx context.Context, c *CLI, jsonO
 		return c.failRemote(e.operation, jsonOutput, err)
 	}
 	if jsonOutput {
+		if e.warnings != nil {
+			return c.writeResultWithWarnings(e.operation, value, e.warnings(value))
+		}
 		return c.writeResult(e.operation, value)
 	}
 	if err := e.render(value, c.stdout); err != nil {
 		return c.fail(e.operation, false, result.CodeOutputWriteFailed, err.Error(), nil)
+	}
+	if e.warnings != nil {
+		for _, warning := range e.warnings(value) {
+			if _, err := fmt.Fprintf(c.stderr, "%s: %s\n", warning.Code, warning.Message); err != nil {
+				return c.fail(e.operation, false, result.CodeOutputWriteFailed, err.Error(), nil)
+			}
+		}
 	}
 	return result.ExitSuccess
 }

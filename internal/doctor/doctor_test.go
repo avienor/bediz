@@ -40,7 +40,7 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 	for i, entry := range report.Capabilities {
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate"}
+	wantOperations := []string{"models.list", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "recall"}
 	if !slices.Equal(operations, wantOperations) {
 		t.Fatalf("reported operations = %q, want implemented operations %q", operations, wantOperations)
 	}
@@ -60,8 +60,8 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 			t.Fatalf("model requirement not satisfied: %#v", requirement)
 		}
 	}
-	if len(report.UISync) != 0 {
-		t.Fatalf("doctor reported deferred UI sync before delivery step 4: %#v", report.UISync)
+	if report.UISync["generate"] != "partial" {
+		t.Fatalf("doctor UI synchronization = %#v, want partial generation", report.UISync)
 	}
 }
 
@@ -436,11 +436,11 @@ func TestRunReportsAnimaGenerationReadyOnlyWhenAllRequirementsPass(t *testing.T)
 	if len(generateReport.Failures) != 0 {
 		t.Fatalf("unexpected generate failures: %#v", generateReport.Failures)
 	}
-	if generateReport.UISync != "" {
-		t.Fatalf("generate UISync = %q, want unadvertised empty string", generateReport.UISync)
+	if generateReport.UISync != "partial" {
+		t.Fatalf("generate UISync = %q, want partial", generateReport.UISync)
 	}
-	if _, ok := report.UISync["generate"]; ok {
-		t.Fatalf("report.UISync unexpectedly contains generate: %#v", report.UISync)
+	if report.UISync["generate"] != "partial" {
+		t.Fatalf("report.UISync = %#v, want partial generation", report.UISync)
 	}
 	if len(report.Issues) != 0 {
 		t.Fatalf("unexpected issues: %#v", report.Issues)
@@ -462,6 +462,10 @@ func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 		}
 		assertIssuePresent(t, report, "unsupported_invokeai_version")
 		assertCapabilityFailureFor(t, report, result.OperationGenerate, "anima", "unsupported_version")
+		assertCapabilityFailureFor(t, report, result.OperationRecall, "", "unsupported_version")
+		if report.UISync["generate"] != "" {
+			t.Fatalf("unsupported version claims UI synchronization: %#v", report.UISync)
+		}
 	})
 
 	t.Run("missing required endpoints", func(t *testing.T) {
@@ -548,6 +552,9 @@ func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 		components := baseline["components"].(map[string]any)
 		schemas := components["schemas"].(map[string]any)
 		for _, schemaName := range slices.Sorted(maps.Keys(schemas)) {
+			if schemaName == "RecallParameter" {
+				continue
+			}
 			schema := schemas[schemaName].(map[string]any)
 			properties := schema["properties"].(map[string]any)
 			typeProperty := properties["type"].(map[string]any)
@@ -584,6 +591,9 @@ func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 		components := baseline["components"].(map[string]any)
 		schemas := components["schemas"].(map[string]any)
 		for _, schemaName := range slices.Sorted(maps.Keys(schemas)) {
+			if schemaName == "RecallParameter" {
+				continue
+			}
 			schema := schemas[schemaName].(map[string]any)
 			properties := schema["properties"].(map[string]any)
 			typeProperty := properties["type"].(map[string]any)
@@ -691,7 +701,7 @@ func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 	})
 }
 
-func TestDoctorDoesNotClaimGenerationUISynchronization(t *testing.T) {
+func TestDoctorReportsVerifiedPartialGenerationUISynchronization(t *testing.T) {
 	server := newInvokeAIServer(t)
 	defer server.Close()
 	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
@@ -700,22 +710,93 @@ func TestDoctorDoesNotClaimGenerationUISynchronization(t *testing.T) {
 	}
 
 	report := Run(t.Context(), client, version.Info{Version: "test"})
-	if _, ok := report.UISync["generate"]; ok {
-		t.Fatalf("report.UISync contains generate: %#v", report.UISync)
-	}
-	if len(report.UISync) != 0 {
-		t.Fatalf("report.UISync is not empty before step 4: %#v", report.UISync)
+	if report.UISync["generate"] != "partial" {
+		t.Fatalf("report.UISync = %#v, want partial generation", report.UISync)
 	}
 
 	var output strings.Builder
 	if err := report.Human(&output); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "generate/anima compatible: true\n") {
+	if !strings.Contains(output.String(), "generate/anima compatible: true (UI sync: partial)\n") {
 		t.Fatalf("human output missing generate/anima: %q", output.String())
 	}
-	if strings.Contains(output.String(), "generate/anima compatible: true (UI sync:") {
-		t.Fatalf("human output claims UI sync for generate: %q", output.String())
+	if strings.Contains(output.String(), "UI sync: full") {
+		t.Fatalf("human output overstates UI synchronization: %q", output.String())
+	}
+}
+
+func TestDoctorReportsMissingRecallRequirementsSeparatelyFromDirectExecution(t *testing.T) {
+	tests := []struct {
+		name        string
+		mutate      func(map[string]any)
+		wantFailure string
+	}{
+		{"missing endpoint", func(document map[string]any) {
+			delete(document["paths"].(map[string]any), "/api/v1/recall/{queue_id}")
+		}, "missing_endpoint:POST /api/v1/recall/{queue_id}"},
+		{"wrong request schema", func(document map[string]any) {
+			path := document["paths"].(map[string]any)["/api/v1/recall/{queue_id}"].(map[string]any)
+			post := path["post"].(map[string]any)
+			post["requestBody"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)["$ref"] = "#/components/schemas/Other"
+		}, "incompatible_recall_schema:request_body"},
+		{"missing seed patch field", func(document map[string]any) {
+			schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
+			delete(schemas["RecallParameter"].(map[string]any)["properties"].(map[string]any), "seed")
+		}, "incompatible_recall_schema:seed"},
+		{"wrong seed patch type", func(document map[string]any) {
+			schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
+			seed := schemas["RecallParameter"].(map[string]any)["properties"].(map[string]any)["seed"].(map[string]any)
+			seed["anyOf"] = []any{map[string]any{"type": "string"}, map[string]any{"type": "null"}}
+		}, "incompatible_recall_schema:seed"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			document := openAPIFixture(t)
+			test.mutate(document)
+			server := newCustomInvokeAIServer(t, "6.14.1", document, baselineModels)
+			defer server.Close()
+			client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			report := Run(t.Context(), client, version.Info{Version: "test"})
+			if report.Ready {
+				t.Fatal("doctor should report missing Recall readiness")
+			}
+			if report.UISync["generate"] != "" {
+				t.Fatalf("unverified UI synchronization: %#v", report.UISync)
+			}
+			for _, entry := range report.Capabilities {
+				switch entry.Operation {
+				case "generate":
+					if !entry.Compatible || entry.UISync != "" {
+						t.Fatalf("Direct Execution should remain compatible: %#v", entry)
+					}
+				case "recall":
+					if entry.Compatible || !slices.Contains(entry.Failures, test.wantFailure) {
+						t.Fatalf("missing precise Recall failure %q: %#v", test.wantFailure, entry)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestDoctorAcceptsReversedRecallNullableAlternatives(t *testing.T) {
+	document := openAPIFixture(t)
+	schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
+	seed := schemas["RecallParameter"].(map[string]any)["properties"].(map[string]any)["seed"].(map[string]any)
+	seed["anyOf"] = []any{map[string]any{"type": "null"}, map[string]any{"type": "integer"}}
+	server := newCustomInvokeAIServer(t, "6.14.1", document, baselineModels)
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := Run(t.Context(), client, version.Info{Version: "test"})
+	if !report.Ready || report.UISync["generate"] != "partial" {
+		t.Fatalf("valid Recall schema should preserve partial readiness: %#v", report)
 	}
 }
 

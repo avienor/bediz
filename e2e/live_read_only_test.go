@@ -229,6 +229,15 @@ type executionReceiptData struct {
 		Seed   uint32         `json:"seed"`
 		Image  imageReference `json:"image"`
 	} `json:"outputs"`
+	Warnings []uiSyncWarning `json:"warnings"`
+}
+
+type uiSyncWarning struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Details struct {
+		NotRestored []string `json:"not_restored"`
+	} `json:"details"`
 }
 
 func TestLiveGate(t *testing.T) {
@@ -291,7 +300,7 @@ func TestLiveGate(t *testing.T) {
 				t.Errorf("doctor returned an unsatisfied or incomplete model requirement: %#v", requirement)
 			}
 		}
-		wantOperations := []string{"generate", "images.get", "images.list", "images.upload", "models.list", "queue.get", "queue.list"}
+		wantOperations := []string{"generate", "images.get", "images.list", "images.upload", "models.list", "queue.get", "queue.list", "recall"}
 		operations := make([]string, 0, len(data.Capabilities))
 		var generateFound bool
 		for _, capability := range data.Capabilities {
@@ -304,16 +313,16 @@ func TestLiveGate(t *testing.T) {
 				if capability.Family != "anima" {
 					t.Errorf("generate family = %q, want anima", capability.Family)
 				}
-				if capability.UISync != "" {
-					t.Errorf("generate ui_sync = %q, want empty before step 4", capability.UISync)
+				if capability.UISync != "partial" {
+					t.Errorf("generate ui_sync = %q, want partial", capability.UISync)
 				}
 			}
 		}
 		if !generateFound {
 			t.Error("doctor did not report generate capability")
 		}
-		if _, ok := data.UISync["generate"]; ok {
-			t.Errorf("doctor claims unadvertised UI sync for generate: %#v", data.UISync)
+		if data.UISync["generate"] != "partial" {
+			t.Errorf("doctor UI synchronization = %#v, want partial generation", data.UISync)
 		}
 		slices.Sort(operations)
 		if !slices.Equal(operations, wantOperations) {
@@ -464,10 +473,19 @@ func TestLiveGate(t *testing.T) {
 			"--seed", strconv.FormatUint(uint64(testSeed), 10),
 		)
 		registerGeneratedImageCleanup(t, binary, target, envelope.Data)
-		assertSuccessEnvelope(t, envelope, "generate")
+		assertSuccessEnvelope(t, envelope, "generate", "ui_sync_partial")
 
 		var receipt executionReceiptData
 		unmarshalData(t, envelope.Data, &receipt)
+		var warnings []uiSyncWarning
+		if err := json.Unmarshal(envelope.Warnings, &warnings, json.RejectUnknownMembers(true)); err != nil {
+			t.Fatalf("invalid generation warnings: %v", err)
+		}
+		wantNotRestored := []string{"scheduler", "guidance", "vae", "qwen3_encoder", "output_count", "board_id"}
+		if !reflect.DeepEqual(receipt.Warnings, warnings) || len(warnings) != 1 ||
+			!slices.Equal(warnings[0].Details.NotRestored, wantNotRestored) {
+			t.Fatalf("incomplete partial Handoff warning: receipt=%#v envelope=%#v", receipt.Warnings, warnings)
+		}
 
 		wantSubmittedRequest := generationRequestData{
 			SchemaVersion:  1,
@@ -835,11 +853,17 @@ func isolatedEnvironment(configDirectory string) []string {
 	return append(environment, configVariable+"="+configDirectory)
 }
 
-func assertSuccessEnvelope(t *testing.T, envelope resultEnvelope, operation string) {
+func assertSuccessEnvelope(t *testing.T, envelope resultEnvelope, operation string, expectedWarningCodes ...string) {
 	t.Helper()
-	var warnings []jsontext.Value
+	var warnings []struct {
+		Code string `json:"code"`
+	}
 	warningsErr := json.Unmarshal(envelope.Warnings, &warnings)
-	if envelope.SchemaVersion != 1 || !envelope.OK || envelope.Operation != operation || len(envelope.Data) == 0 || len(envelope.Error) != 0 || warningsErr != nil || warnings == nil || len(warnings) != 0 {
+	codes := make([]string, len(warnings))
+	for i, warning := range warnings {
+		codes[i] = warning.Code
+	}
+	if envelope.SchemaVersion != 1 || !envelope.OK || envelope.Operation != operation || len(envelope.Data) == 0 || len(envelope.Error) != 0 || warningsErr != nil || warnings == nil || !slices.Equal(codes, expectedWarningCodes) {
 		t.Fatalf("unexpected %s result envelope: schema=%d ok=%t operation=%q data=%s error=%s warnings=%s", operation, envelope.SchemaVersion, envelope.OK, envelope.Operation, envelope.Data, envelope.Error, envelope.Warnings)
 	}
 }

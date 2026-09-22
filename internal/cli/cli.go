@@ -81,6 +81,7 @@ func (c *CLI) newRootCommand(exitCode *int) *cobra.Command {
 
 	root.AddCommand(c.newDoctorCommand(exitCode, &jsonOutput))
 	root.AddCommand(c.newGenerateCommand(exitCode, &jsonOutput))
+	root.AddCommand(c.newRecallCommand(exitCode, &jsonOutput))
 	root.AddCommand(c.newConfigCommand(exitCode, &jsonOutput))
 	root.AddCommand(c.newModelsCommand(exitCode, &jsonOutput))
 	root.AddCommand(c.newImagesCommand(exitCode, &jsonOutput))
@@ -358,7 +359,11 @@ func (c *CLI) writeConfigView(operation string, jsonOutput bool, view configView
 // envelope has no structured representation, so it is reported on standard
 // error and reports the InvokeAI failure category.
 func (c *CLI) writeResult(operation string, data any) int {
-	if err := result.WriteJSON(c.stdout, result.Success(operation, data, nil)); err != nil {
+	return c.writeResultWithWarnings(operation, data, nil)
+}
+
+func (c *CLI) writeResultWithWarnings(operation string, data any, warnings []result.Warning) int {
+	if err := result.WriteJSON(c.stdout, result.Success(operation, data, warnings)); err != nil {
 		fmt.Fprintf(c.stderr, "write JSON result: %v\n", err)
 		return result.ExitInvokeAIFailure
 	}

@@ -97,7 +97,12 @@ func animaOpenAPIFixture(missingSchema, missingProperty string) map[string]any {
 	if missingSchema != "" && missingProperty == "" {
 		delete(schemas, missingSchema)
 	}
-	return map[string]any{"components": map[string]any{"schemas": schemas}}
+	recallSchema := recallOpenAPI()
+	schemas["RecallParameter"] = recallSchema["components"].(map[string]any)["schemas"].(map[string]any)["RecallParameter"]
+	return map[string]any{
+		"paths":      recallSchema["paths"],
+		"components": map[string]any{"schemas": schemas},
+	}
 }
 
 func newAnimaGenerationServer(openAPI map[string]any, models []map[string]any, enqueue http.HandlerFunc) *httptest.Server {
@@ -110,6 +115,10 @@ func newAnimaGenerationServer(openAPI map[string]any, models []map[string]any, e
 		}
 		if r.URL.Path == "/api/v1/queue/default/enqueue_batch" {
 			enqueue(w, r)
+			return
+		}
+		if r.URL.Path == "/api/v1/recall/default" {
+			_, _ = w.Write([]byte(`{"status":"success"}`))
 			return
 		}
 		http.NotFound(w, r)
@@ -198,9 +207,10 @@ func TestGenerateNoWaitFlagsSubmitExactAnimaRequestOnce(t *testing.T) {
 		!reflect.DeepEqual(envelope.Data.ResolvedSettings.ComponentKeys, map[string]string{"vae": "vae-key", "qwen3_encoder": "encoder-key"}) ||
 		!reflect.DeepEqual(envelope.Data.ResolvedSettings.Seeds, []uint32{42}) ||
 		envelope.Data.Queue.QueueID != "default" || envelope.Data.Queue.BatchID != "batch-1" ||
-		!reflect.DeepEqual(envelope.Data.Queue.ItemIDs, []int{17}) || len(envelope.Data.Outputs) != 0 || len(envelope.Warnings) != 0 {
+		!reflect.DeepEqual(envelope.Data.Queue.ItemIDs, []int{17}) || len(envelope.Data.Outputs) != 0 {
 		t.Fatalf("unexpected envelope: %#v", envelope)
 	}
+	assertPartialSyncWarning(t, envelope.Data.Warnings, envelope.Warnings)
 }
 
 func TestGenerateNoWaitSubmitsOneOrderedBatch(t *testing.T) {
@@ -962,6 +972,8 @@ func newGenerateWaitServer(t *testing.T, items []map[string]any, transientFailur
 				"queue_id": "default", "enqueued": 1, "requested": 1, "item_ids": []int{17},
 				"batch": map[string]any{"batch_id": "batch-1"},
 			})
+		case r.URL.Path == "/api/v1/recall/default":
+			_, _ = w.Write([]byte(`{"status":"success"}`))
 		case r.URL.Path == "/api/v1/queue/default/i/17":
 			requests := int(counters.itemPolls.Add(1))
 			if failures.Load() > 0 {
@@ -1079,6 +1091,7 @@ type receiptEnvelope struct {
 				BoardID       *string `json:"board_id"`
 			} `json:"image"`
 		} `json:"outputs"`
+		Warnings []result.Warning `json:"warnings"`
 	} `json:"data"`
 	Warnings []result.Warning `json:"warnings"`
 }
@@ -1126,8 +1139,8 @@ func TestGenerateWaitsForCompletionAndReturnsCompletedReceipt(t *testing.T) {
 	if counters.enqueues.Load() != 1 || counters.itemPolls.Load() < 3 || counters.imageGets.Load() != 1 {
 		t.Fatalf("enqueues = %d, item polls = %d, image gets = %d", counters.enqueues.Load(), counters.itemPolls.Load(), counters.imageGets.Load())
 	}
-	if mutations := counters.mutationRequests(); !slices.Equal(mutations, []string{"POST /api/v1/queue/default/enqueue_batch"}) {
-		t.Fatalf("non-read requests = %v, want only the single enqueue", mutations)
+	if mutations := counters.mutationRequests(); !slices.Equal(mutations, generationSyncMutations) {
+		t.Fatalf("non-read requests = %v, want one enqueue then one Recall", mutations)
 	}
 	var envelope receiptEnvelope
 	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
@@ -1138,9 +1151,10 @@ func TestGenerateWaitsForCompletionAndReturnsCompletedReceipt(t *testing.T) {
 		!reflect.DeepEqual(envelope.Data.ResolvedSettings.ComponentKeys, map[string]string{"vae": "vae-key", "qwen3_encoder": "encoder-key"}) ||
 		!reflect.DeepEqual(envelope.Data.ResolvedSettings.Seeds, []uint32{42}) ||
 		envelope.Data.Queue.QueueID != "default" || envelope.Data.Queue.BatchID != "batch-1" ||
-		!reflect.DeepEqual(envelope.Data.Queue.ItemIDs, []int{17}) || len(envelope.Warnings) != 0 {
+		!reflect.DeepEqual(envelope.Data.Queue.ItemIDs, []int{17}) {
 		t.Fatalf("unexpected receipt: %#v", envelope)
 	}
+	assertPartialSyncWarning(t, envelope.Data.Warnings, envelope.Warnings)
 	if len(envelope.Data.Outputs) != 1 {
 		t.Fatalf("outputs = %#v, want one completed output", envelope.Data.Outputs)
 	}
@@ -1278,8 +1292,8 @@ func TestGenerateWaitSurvivesTransientPollFailures(t *testing.T) {
 	if counters.enqueues.Load() != 1 || counters.itemPolls.Load() < 2 {
 		t.Fatalf("enqueues = %d, item polls = %d", counters.enqueues.Load(), counters.itemPolls.Load())
 	}
-	if mutations := counters.mutationRequests(); !slices.Equal(mutations, []string{"POST /api/v1/queue/default/enqueue_batch"}) {
-		t.Fatalf("non-read requests = %v, want only the single enqueue", mutations)
+	if mutations := counters.mutationRequests(); !slices.Equal(mutations, generationSyncMutations) {
+		t.Fatalf("non-read requests = %v, want one enqueue then one Recall", mutations)
 	}
 }
 
@@ -1312,8 +1326,8 @@ func TestGenerateWaitTimeoutReportsTheUncanceledItem(t *testing.T) {
 	if counters.enqueues.Load() != 1 || counters.itemPolls.Load() < 1 {
 		t.Fatalf("enqueues = %d, item polls = %d", counters.enqueues.Load(), counters.itemPolls.Load())
 	}
-	if mutations := counters.mutationRequests(); !slices.Equal(mutations, []string{"POST /api/v1/queue/default/enqueue_batch"}) {
-		t.Fatalf("non-read requests = %v, want only the single enqueue", mutations)
+	if mutations := counters.mutationRequests(); !slices.Equal(mutations, generationSyncMutations) {
+		t.Fatalf("non-read requests = %v, want one enqueue then one Recall", mutations)
 	}
 }
 
@@ -1345,8 +1359,8 @@ func TestGenerateInterruptionStopsOnlyTheLocalWait(t *testing.T) {
 	if counters.enqueues.Load() != 1 {
 		t.Fatalf("enqueues = %d, want the accepted item to be enqueued exactly once", counters.enqueues.Load())
 	}
-	if mutations := counters.mutationRequests(); !slices.Equal(mutations, []string{"POST /api/v1/queue/default/enqueue_batch"}) {
-		t.Fatalf("non-read requests = %v, want only the single enqueue", mutations)
+	if mutations := counters.mutationRequests(); !slices.Equal(mutations, generationSyncMutations) {
+		t.Fatalf("non-read requests = %v, want one enqueue then one Recall", mutations)
 	}
 }
 
@@ -1409,8 +1423,8 @@ func TestGenerateReportsConclusiveItemFailuresWithoutTracebacks(t *testing.T) {
 			if output := stdout.String() + stderr.String(); strings.Contains(output, "/server/private/traceback") {
 				t.Fatalf("output exposes a server traceback: %q", output)
 			}
-			if mutations := counters.mutationRequests(); !slices.Equal(mutations, []string{"POST /api/v1/queue/default/enqueue_batch"}) {
-				t.Fatalf("non-read requests = %v, want only the single enqueue", mutations)
+			if mutations := counters.mutationRequests(); !slices.Equal(mutations, generationSyncMutations) {
+				t.Fatalf("non-read requests = %v, want one enqueue then one Recall", mutations)
 			}
 		})
 	}
@@ -1508,8 +1522,8 @@ func TestGenerateRejectsQueueResultsOutsideTheTestedContract(t *testing.T) {
 			if counters.itemPolls.Load() != 1 {
 				t.Fatalf("item polls = %d, want the rejected result to stop the wait", counters.itemPolls.Load())
 			}
-			if mutations := counters.mutationRequests(); !slices.Equal(mutations, []string{"POST /api/v1/queue/default/enqueue_batch"}) {
-				t.Fatalf("non-read requests = %v, want only the single enqueue", mutations)
+			if mutations := counters.mutationRequests(); !slices.Equal(mutations, generationSyncMutations) {
+				t.Fatalf("non-read requests = %v, want one enqueue then one Recall", mutations)
 			}
 		})
 	}
@@ -1561,7 +1575,7 @@ func TestGenerateHumanOutputReportsTheCompletedImage(t *testing.T) {
 
 	exitCode := app.Run(t.Context(), generateWaitArgs(server.URL))
 
-	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
+	if exitCode != result.ExitSuccess || !strings.Contains(stderr.String(), "ui_sync_partial:") {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
 	}
 	if want := "Generated generated.png for seed 42 from queue item 17\n"; stdout.String() != want {
@@ -3175,6 +3189,7 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 		"/api/v1/queue/{queue_id}/enqueue_batch":         map[string]any{"post": map[string]any{}},
 	}
 	openAPIDocument := animaOpenAPIFixture("", "")
+	paths["/api/v1/recall/{queue_id}"] = openAPIDocument["paths"].(map[string]any)["/api/v1/recall/{queue_id}"]
 	openAPIDocument["paths"] = paths
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -3232,9 +3247,9 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 		}
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate"}
+	wantOperations := []string{"models.list", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "recall"}
 	if envelope.SchemaVersion != 1 || !envelope.OK || envelope.Operation != "doctor" || !envelope.Data.Ready ||
-		!slices.Equal(operations, wantOperations) || len(envelope.Data.UISync) != 0 ||
+		!slices.Equal(operations, wantOperations) || envelope.Data.UISync["generate"] != "partial" ||
 		len(envelope.Data.OpenAPI.Invocations) != 8 || len(envelope.Data.Models.Relevant) != 3 || len(envelope.Data.Models.Requirements) != 3 {
 		t.Fatalf("unexpected doctor envelope: %#v", envelope)
 	}
