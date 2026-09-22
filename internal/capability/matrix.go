@@ -92,6 +92,70 @@ var Matrix = []Entry{
 			{Method: "GET", Path: "/api/v1/images/i/{image_name}"},
 		},
 	},
+	AnimaGenerationEntry(),
+}
+
+// AnimaGenerationEntry returns the tested InvokeAI requirements shared by
+// capability reporting and direct execution validation.
+func AnimaGenerationEntry() Entry {
+	return Entry{
+		Operation:     result.OperationGenerate,
+		Family:        "anima",
+		VersionPolicy: VersionPolicySupportedRange,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/app/version"},
+			{Method: "GET", Path: "/api/v2/models/"},
+			{Method: "POST", Path: "/api/v1/queue/{queue_id}/enqueue_batch"},
+			{Method: "GET", Path: "/api/v1/queue/{queue_id}/i/{item_id}"},
+			{Method: "GET", Path: "/api/v1/images/i/{image_name}"},
+		},
+		Invocations: []InvocationRequirement{
+			{
+				Schema: "AnimaModelLoaderInvocation", Type: "anima_model_loader",
+				Properties: []string{"id", "is_intermediate", "use_cache", "type", "model", "vae_model", "qwen3_encoder_model"},
+			},
+			{
+				Schema: "StringInvocation", Type: "string",
+				Properties: []string{"id", "is_intermediate", "use_cache", "type", "value"},
+			},
+			{
+				Schema: "AnimaTextEncoderInvocation", Type: "anima_text_encoder",
+				Properties: []string{"id", "is_intermediate", "use_cache", "type", "prompt", "qwen3_encoder"},
+			},
+			{
+				Schema: "CollectInvocation", Type: "collect",
+				Properties: []string{"id", "is_intermediate", "use_cache", "type", "collection", "item"},
+			},
+			{
+				Schema: "IntegerInvocation", Type: "integer",
+				Properties: []string{"id", "is_intermediate", "use_cache", "type", "value"},
+			},
+			{
+				Schema: "AnimaDenoiseInvocation", Type: "anima_denoise",
+				Properties: []string{
+					"id", "is_intermediate", "use_cache", "type", "denoising_start", "denoising_end", "add_noise",
+					"guidance_scale", "width", "height", "steps", "seed", "scheduler", "transformer",
+					"positive_conditioning", "negative_conditioning",
+				},
+			},
+			{
+				Schema: "CoreMetadataInvocation", Type: "core_metadata",
+				Properties: []string{
+					"id", "is_intermediate", "use_cache", "type", "generation_mode", "negative_prompt", "width", "height",
+					"cfg_scale", "steps", "scheduler", "model", "vae", "qwen3_encoder", "seed", "positive_prompt",
+				},
+			},
+			{
+				Schema: "AnimaLatentsToImageInvocation", Type: "anima_l2i",
+				Properties: []string{"id", "is_intermediate", "use_cache", "type", "board", "latents", "metadata", "vae"},
+			},
+		},
+		Models: []ModelRequirement{
+			{Name: "Anima main model", Types: []string{"main"}, Bases: []string{"anima"}, MinimumCount: 1},
+			{Name: "Anima VAE", Types: []string{"vae"}, Bases: []string{"anima"}, MinimumCount: 1},
+			{Name: "Qwen3 encoder", Types: []string{"qwen3_encoder"}, Bases: []string{"any"}, MinimumCount: 1},
+		},
+	}
 }
 
 var versionPattern = regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?P<prerelease>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`)

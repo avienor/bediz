@@ -2,17 +2,18 @@
 
 Bediz is a deterministic Go CLI for controlling a local InvokeAI installation. The V1 contract is defined in [`docs/spec/v1.md`](docs/spec/v1.md).
 
-The current implementation includes the first two V1 delivery slices:
+The current implementation includes the first three V1 delivery slices:
 
 - per-user connection configuration with flag, environment, file, and default precedence;
 - a bounded HTTP client with bearer authentication, safe-read retries, and unknown-outcome classification for mutations;
 - the versioned JSON result and error envelope;
 - `version`, with concise human output and a stable V1 JSON result envelope;
-- `doctor`, which checks InvokeAI version compatibility (`>= 6.14.1, < 6.15.0`), the OpenAPI endpoints required by implemented capabilities, and readiness for the implemented inspection and upload operations;
+- `doctor`, which checks InvokeAI version compatibility (`>= 6.14.1, < 6.15.0`), the OpenAPI endpoints and invocation schemas/properties required by implemented capabilities, and readiness for inspection, upload, and Anima text-to-image generation;
 - safe installed-model, gallery-image, and queue inspection;
-- single-file image upload with supported-version validation, no automatic mutation retry, and `outcome_unknown` reporting when the transport result is inconclusive.
+- single-file image upload with supported-version validation, no automatic mutation retry, and `outcome_unknown` reporting when the transport result is inconclusive;
+- Anima text-to-image direct execution with deterministic model and component resolution, ordered multi-output seed resolution, graph compilation targeting the tested InvokeAI 6.14.x baseline, safe queue-polling to an Execution Receipt, and `--no-wait` support.
 
-Generation is not advertised as a capability until its implementation slice is complete. It and the remaining management commands will be added in the later V1 slices described by the specification.
+Generation UI Synchronization and Recall are delivery step 4 and are not yet advertised. The remaining management commands will be added in later V1 slices described by the specification.
 
 ## Build and run
 
@@ -28,6 +29,7 @@ go build -o bediz ./cmd/bediz
 ./bediz images upload /absolute/path/to/image.png --json
 ./bediz queue list --json
 ./bediz queue get ITEM_ID --json
+./bediz generate --model "Anima Base 1.0" --prompt "a lighthouse in a storm" --json
 ```
 
 Inspection commands return normalized Bediz records rather than raw InvokeAI response documents. List output is page-bounded, image selectors use stable InvokeAI image names, and queue listing hydrates only the requested page of lightweight summaries. On supported InvokeAI 6.14.x versions, preserving queue order and total count requires reading the complete lightweight item-ID index; the configured HTTP response-size limit bounds that response, and Bediz never fetches execution graphs while listing.
@@ -81,12 +83,15 @@ BEDIZ_E2E_URL=http://127.0.0.1:9090 go test -count=1 -v ./e2e
 ```
 
 The gate builds the real `bediz` binary and invokes `doctor`, `models list`,
-bounded image and queue listing, and a self-cleaning image upload round trip
-through the process boundary. The upload case creates a unique 2-by-2 PNG,
+bounded image and queue listing, a self-cleaning image upload round trip, and a
+self-cleaning Anima generation round trip through the process boundary. The upload case creates a unique 2-by-2 PNG,
 verifies the same normalized Image Reference through `images upload`,
 `images get`, and `images list`, then deletes exactly that image through the
 InvokeAI backend API. A final `images get` must return the V1 `not_found`
-envelope before the gate reports `live E2E: VERIFIED`.
+envelope. The generation case submits a canonical request with an explicit
+seed, waits for queue completion, validates the Execution Receipt and accessible
+Image Reference, and cleans up the resulting image through the InvokeAI backend API
+before the gate reports `live E2E: VERIFIED`.
 
 Every case checks process exit statuses, one V1 JSON result envelope on
 standard output, empty standard error, supported-version readiness, normalized
@@ -97,9 +102,7 @@ an empty backend metadata record, and absolute image URLs. Cleanup failures
 name the exact test-created image so it can be removed manually without
 touching unrelated resources; the fixture filename and SHA-256 digest remain
 in failed-test output as inspection evidence when an upload outcome is unknown.
-The gate never generates, cancels, or clears anything, and it does not run
-`queue get` because there is no known queue fixture yet. Empty pre-existing
-model, image, and queue collections are valid. The URL must not contain
+Empty pre-existing model, image, and queue collections are valid. The URL must not contain
 credentials, a query, or a fragment; an authentication requirement causes the
 gate to fail instead of accepting or printing a real token. Use `-count=1` as
 shown so a live result is never served from the Go test cache.

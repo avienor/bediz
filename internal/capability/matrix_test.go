@@ -15,6 +15,7 @@ func TestMatrixAdvertisesOnlyImplementedOperations(t *testing.T) {
 		result.OperationImagesUpload,
 		result.OperationQueueList,
 		result.OperationQueueGet,
+		result.OperationGenerate,
 	}
 	got := make([]string, len(Matrix))
 	for i, entry := range Matrix {
@@ -23,6 +24,98 @@ func TestMatrixAdvertisesOnlyImplementedOperations(t *testing.T) {
 
 	if !slices.Equal(got, want) {
 		t.Fatalf("advertised operations = %q, want implemented operations %q", got, want)
+	}
+}
+
+func TestMatrixRegistersAnimaDirectExecutionRequirements(t *testing.T) {
+	var animaEntry *Entry
+	for _, entry := range Matrix {
+		if entry.Operation == result.OperationGenerate {
+			animaEntry = &entry
+			break
+		}
+	}
+	if animaEntry == nil {
+		t.Fatal("Matrix does not register generate operation")
+	}
+	if animaEntry.Family != "anima" {
+		t.Fatalf("Family = %q, want %q", animaEntry.Family, "anima")
+	}
+	if animaEntry.VersionPolicy != VersionPolicySupportedRange {
+		t.Fatalf("VersionPolicy = %q, want %q", animaEntry.VersionPolicy, VersionPolicySupportedRange)
+	}
+	if animaEntry.UISync != "" {
+		t.Fatalf("UISync = %q, want unadvertised empty string before delivery step 4", animaEntry.UISync)
+	}
+
+	wantEndpoints := []EndpointRequirement{
+		{Method: "GET", Path: "/api/v1/app/version"},
+		{Method: "GET", Path: "/api/v2/models/"},
+		{Method: "POST", Path: "/api/v1/queue/{queue_id}/enqueue_batch"},
+		{Method: "GET", Path: "/api/v1/queue/{queue_id}/i/{item_id}"},
+		{Method: "GET", Path: "/api/v1/images/i/{image_name}"},
+	}
+	if !slices.Equal(animaEntry.Endpoints, wantEndpoints) {
+		t.Fatalf("Endpoints = %#v, want %#v", animaEntry.Endpoints, wantEndpoints)
+	}
+
+	wantInvocations := []InvocationRequirement{
+		{
+			Schema: "AnimaModelLoaderInvocation", Type: "anima_model_loader",
+			Properties: []string{"id", "is_intermediate", "use_cache", "type", "model", "vae_model", "qwen3_encoder_model"},
+		},
+		{
+			Schema: "StringInvocation", Type: "string",
+			Properties: []string{"id", "is_intermediate", "use_cache", "type", "value"},
+		},
+		{
+			Schema: "AnimaTextEncoderInvocation", Type: "anima_text_encoder",
+			Properties: []string{"id", "is_intermediate", "use_cache", "type", "prompt", "qwen3_encoder"},
+		},
+		{
+			Schema: "CollectInvocation", Type: "collect",
+			Properties: []string{"id", "is_intermediate", "use_cache", "type", "collection", "item"},
+		},
+		{
+			Schema: "IntegerInvocation", Type: "integer",
+			Properties: []string{"id", "is_intermediate", "use_cache", "type", "value"},
+		},
+		{
+			Schema: "AnimaDenoiseInvocation", Type: "anima_denoise",
+			Properties: []string{
+				"id", "is_intermediate", "use_cache", "type", "denoising_start", "denoising_end", "add_noise",
+				"guidance_scale", "width", "height", "steps", "seed", "scheduler", "transformer",
+				"positive_conditioning", "negative_conditioning",
+			},
+		},
+		{
+			Schema: "CoreMetadataInvocation", Type: "core_metadata",
+			Properties: []string{
+				"id", "is_intermediate", "use_cache", "type", "generation_mode", "negative_prompt", "width", "height",
+				"cfg_scale", "steps", "scheduler", "model", "vae", "qwen3_encoder", "seed", "positive_prompt",
+			},
+		},
+		{
+			Schema: "AnimaLatentsToImageInvocation", Type: "anima_l2i",
+			Properties: []string{"id", "is_intermediate", "use_cache", "type", "board", "latents", "metadata", "vae"},
+		},
+	}
+	if !slices.EqualFunc(animaEntry.Invocations, wantInvocations, func(a, b InvocationRequirement) bool {
+		return a.Schema == b.Schema && a.Type == b.Type && slices.Equal(a.Properties, b.Properties)
+	}) {
+		t.Fatalf("Invocations = %#v, want %#v", animaEntry.Invocations, wantInvocations)
+	}
+
+	wantModels := []ModelRequirement{
+		{Name: "Anima main model", Types: []string{"main"}, Bases: []string{"anima"}, MinimumCount: 1},
+		{Name: "Anima VAE", Types: []string{"vae"}, Bases: []string{"anima"}, MinimumCount: 1},
+		{Name: "Qwen3 encoder", Types: []string{"qwen3_encoder"}, Bases: []string{"any"}, MinimumCount: 1},
+	}
+	if !slices.EqualFunc(animaEntry.Models, wantModels, func(a, b ModelRequirement) bool {
+		return a.Name == b.Name && a.MinimumCount == b.MinimumCount &&
+			slices.Equal(a.Types, b.Types) && slices.Equal(a.Bases, b.Bases)
+	}) {
+		t.Fatalf("Models = %#v, want %#v", animaEntry.Models, wantModels)
 	}
 }
 

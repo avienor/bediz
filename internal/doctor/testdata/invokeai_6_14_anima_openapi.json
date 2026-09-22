@@ -1,0 +1,118 @@
+{
+  "paths": {
+    "/api/v1/app/version": {"get": {}},
+    "/api/v2/models/": {"get": {}},
+    "/api/v1/images/": {"get": {}},
+    "/api/v1/images/i/{image_name}": {"get": {}},
+    "/api/v1/images/upload": {"post": {}},
+    "/api/v1/queue/{queue_id}/item_ids": {"get": {}},
+    "/api/v1/queue/{queue_id}/item_summaries_by_ids": {"post": {}},
+    "/api/v1/queue/{queue_id}/i/{item_id}": {"get": {}},
+    "/api/v1/queue/{queue_id}/enqueue_batch": {"post": {}}
+  },
+  "components": {
+    "schemas": {
+      "AnimaModelLoaderInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "type": {"const": "anima_model_loader"},
+          "model": {},
+          "vae_model": {},
+          "qwen3_encoder_model": {}
+        }
+      },
+      "StringInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "type": {"const": "string"},
+          "value": {}
+        }
+      },
+      "AnimaTextEncoderInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "type": {"const": "anima_text_encoder"},
+          "prompt": {},
+          "qwen3_encoder": {}
+        }
+      },
+      "CollectInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "type": {"const": "collect"},
+          "collection": {},
+          "item": {}
+        }
+      },
+      "IntegerInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "type": {"const": "integer"},
+          "value": {}
+        }
+      },
+      "AnimaDenoiseInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "type": {"const": "anima_denoise"},
+          "denoising_start": {},
+          "denoising_end": {},
+          "add_noise": {},
+          "guidance_scale": {},
+          "width": {},
+          "height": {},
+          "steps": {},
+          "seed": {},
+          "scheduler": {},
+          "transformer": {},
+          "positive_conditioning": {},
+          "negative_conditioning": {}
+        }
+      },
+      "CoreMetadataInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "type": {"const": "core_metadata"},
+          "generation_mode": {},
+          "negative_prompt": {},
+          "width": {},
+          "height": {},
+          "cfg_scale": {},
+          "steps": {},
+          "scheduler": {},
+          "model": {},
+          "vae": {},
+          "qwen3_encoder": {},
+          "seed": {},
+          "positive_prompt": {}
+        }
+      },
+      "AnimaLatentsToImageInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "type": {"const": "anima_l2i"},
+          "board": {},
+          "latents": {},
+          "metadata": {},
+          "vae": {}
+        }
+      }
+    }
+  }
+}

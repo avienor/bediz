@@ -71,6 +71,23 @@ type ModelSummary struct {
 	Format string `json:"format,omitempty"`
 }
 
+type modelInventoryEntry struct {
+	Key    string `json:"key"`
+	Hash   string `json:"hash"`
+	Name   string `json:"name"`
+	Base   string `json:"base"`
+	Type   string `json:"type"`
+	Format string `json:"format"`
+}
+
+func (m modelInventoryEntry) completeIdentifier() bool {
+	return m.Key != "" && m.Hash != "" && m.Name != "" && m.Base != "" && m.Type != ""
+}
+
+func (m modelInventoryEntry) summary() ModelSummary {
+	return ModelSummary{Key: m.Key, Name: m.Name, Base: m.Base, Type: m.Type, Format: m.Format}
+}
+
 type ModelRequirement struct {
 	Name      string `json:"name"`
 	Available int    `json:"available"`
@@ -108,7 +125,7 @@ type openAPIProperty struct {
 }
 
 type modelList struct {
-	Models []ModelSummary `json:"models"`
+	Models []modelInventoryEntry `json:"models"`
 }
 
 type appVersion struct {
@@ -272,7 +289,7 @@ func inspectOpenAPI(document openAPIDocument) ([]EndpointCheck, []InvocationChec
 	return endpoints, invocations
 }
 
-func inspectModels(models []ModelSummary) ([]ModelSummary, []ModelRequirement) {
+func inspectModels(models []modelInventoryEntry) ([]ModelSummary, []ModelRequirement) {
 	requirements := uniqueModelRequirements()
 	relevant := make([]ModelSummary, 0)
 	seen := make(map[string]bool)
@@ -283,7 +300,7 @@ func inspectModels(models []ModelSummary) ([]ModelSummary, []ModelRequirement) {
 			if modelMatches(model, requirement) {
 				count++
 				if !seen[model.Key] {
-					relevant = append(relevant, model)
+					relevant = append(relevant, model.summary())
 					seen[model.Key] = true
 				}
 			}
@@ -402,8 +419,8 @@ func uniqueModelRequirements() []capability.ModelRequirement {
 	return requirements
 }
 
-func modelMatches(model ModelSummary, requirement capability.ModelRequirement) bool {
-	return slices.Contains(requirement.Types, model.Type) && slices.Contains(requirement.Bases, model.Base)
+func modelMatches(model modelInventoryEntry, requirement capability.ModelRequirement) bool {
+	return model.completeIdentifier() && slices.Contains(requirement.Types, model.Type) && slices.Contains(requirement.Bases, model.Base)
 }
 
 func endpointAvailable(checks []EndpointCheck, requirement capability.EndpointRequirement) bool {

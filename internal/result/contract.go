@@ -6,6 +6,7 @@ const (
 	OperationCLI          = "cli"
 	OperationVersion      = "version"
 	OperationDoctor       = "doctor"
+	OperationGenerate     = "generate"
 	OperationConfig       = "config"
 	OperationConfigGet    = "config.get"
 	OperationConfigSet    = "config.set"
@@ -28,9 +29,12 @@ const (
 	CodeConfigurationWriteFailed = "configuration_write_failed"
 	CodeOutputWriteFailed        = "output_write_failed"
 	CodeUnsupportedCapability    = "unsupported_capability"
+	CodeSelectionRequired        = "selection_required"
+	CodeMissingComponent         = "missing_component"
 	CodeConnectionFailed         = "connection_failed"
 	CodeAuthenticationFailed     = "authentication_failed"
 	CodeOutcomeUnknown           = "outcome_unknown"
+	CodeWaitTimeout              = "wait_timeout"
 	CodeNotFound                 = "not_found"
 	CodeInvokeAIOperationFailed  = "invokeai_operation_failed"
 	CodeInvokeAIHTTPError        = "invokeai_http_error"
@@ -51,11 +55,14 @@ var exitStatuses = map[string]int{
 	CodeInvalidConfiguration:     ExitInvalidRequest,
 	CodeConfigurationWriteFailed: ExitInvalidRequest,
 	CodeUnsupportedCapability:    ExitUnsupportedCapability,
+	CodeSelectionRequired:        ExitSelectionRequired,
+	CodeMissingComponent:         ExitUnsupportedCapability,
 	CodeConnectionFailed:         ExitConnection,
 	CodeAuthenticationFailed:     ExitConnection,
 	CodeInterrupted:              ExitInterrupted,
 	CodeOutputWriteFailed:        ExitInvokeAIFailure,
 	CodeOutcomeUnknown:           ExitInvokeAIFailure,
+	CodeWaitTimeout:              ExitInvokeAIFailure,
 	CodeNotFound:                 ExitInvokeAIFailure,
 	CodeInvokeAIOperationFailed:  ExitInvokeAIFailure,
 	CodeInvokeAIHTTPError:        ExitInvokeAIFailure,
