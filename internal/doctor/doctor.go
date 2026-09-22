@@ -144,9 +144,9 @@ func Run(ctx context.Context, client *httpclient.Client, bedizVersion version.In
 		report.InvokeAI.ConnectionStatus = "ok"
 		report.InvokeAI.Version = versionResponse.Version
 		if versionResponse.Version == "" {
-			report.Issues = append(report.Issues, Issue{Code: "invalid_version_response", Message: "InvokeAI version response did not contain a version"})
+			report.Issues = append(report.Issues, Issue{Code: result.CodeInvalidVersionResponse, Message: "InvokeAI version response did not contain a version"})
 		} else if supported, err := capability.SupportsInvokeAI(versionResponse.Version); err != nil {
-			report.Issues = append(report.Issues, Issue{Code: "invalid_invokeai_version", Message: err.Error()})
+			report.Issues = append(report.Issues, Issue{Code: result.CodeInvalidInvokeAIVersion, Message: err.Error()})
 		} else {
 			report.InvokeAI.SupportedVersion = supported
 			if !supported {
@@ -234,7 +234,7 @@ func Run(ctx context.Context, client *httpclient.Client, bedizVersion version.In
 			report.UISync[entry.Operation] = entry.UISync
 		}
 	}
-	report.Ready = len(report.Capabilities) > 0
+	report.Ready = len(report.Issues) == 0 && len(report.Capabilities) > 0
 	for _, entry := range report.Capabilities {
 		if !entry.Compatible {
 			report.Ready = false
@@ -349,13 +349,13 @@ func appendRequestIssue(report *Report, check string, err error) {
 	networkErr, networkErrMatched := errors.AsType[*httpclient.NetworkError](err)
 	switch {
 	case httpErrMatched && httpErr.AuthenticationFailure():
-		report.Issues = append(report.Issues, Issue{Code: "authentication_failed", Message: fmt.Sprintf("%s check was rejected by InvokeAI", check), Details: map[string]any{"status": httpErr.StatusCode}})
+		report.Issues = append(report.Issues, Issue{Code: result.CodeAuthenticationFailed, Message: fmt.Sprintf("%s check was rejected by InvokeAI", check), Details: map[string]any{"status": httpErr.StatusCode}})
 	case networkErrMatched:
-		report.Issues = append(report.Issues, Issue{Code: "connection_failed", Message: fmt.Sprintf("%s check could not reach InvokeAI", check), Details: map[string]any{"error": networkErr.Err.Error()}})
+		report.Issues = append(report.Issues, Issue{Code: result.CodeConnectionFailed, Message: fmt.Sprintf("%s check could not reach InvokeAI", check), Details: map[string]any{"error": networkErr.Err.Error()}})
 	case httpErrMatched:
-		report.Issues = append(report.Issues, Issue{Code: "invokeai_http_error", Message: fmt.Sprintf("%s check failed", check), Details: map[string]any{"status": httpErr.StatusCode}})
+		report.Issues = append(report.Issues, Issue{Code: result.CodeInvokeAIHTTPError, Message: fmt.Sprintf("%s check failed", check), Details: map[string]any{"status": httpErr.StatusCode}})
 	default:
-		report.Issues = append(report.Issues, Issue{Code: "invalid_invokeai_response", Message: fmt.Sprintf("%s check failed: %v", check, err)})
+		report.Issues = append(report.Issues, Issue{Code: result.CodeInvalidInvokeAIResponse, Message: fmt.Sprintf("%s check failed: %v", check, err)})
 	}
 }
 
@@ -433,50 +433,69 @@ func modelRequirementSatisfied(checks []ModelRequirement, name string) bool {
 	return false
 }
 
-func Failure(report Report) (int, string, string) {
+// Failure reports the structured failure that decides doctor's outcome, or nil
+// when the diagnostic run is ready. The process exit status follows from the
+// error code.
+func Failure(report Report) *result.Error {
 	for _, issue := range report.Issues {
-		if issue.Code == "connection_failed" || issue.Code == "authentication_failed" {
-			return result.ExitConnection, issue.Code, issue.Message
+		if issue.Code == result.CodeConnectionFailed || issue.Code == result.CodeAuthenticationFailed {
+			return &result.Error{Code: issue.Code, Message: issue.Message}
 		}
 	}
 	for _, issue := range report.Issues {
-		if issue.Code == "invokeai_http_error" ||
-			issue.Code == "invalid_invokeai_response" ||
-			issue.Code == "invalid_version_response" ||
-			issue.Code == "invalid_invokeai_version" {
-			return result.ExitInvokeAIFailure, issue.Code, issue.Message
+		if issue.Code == result.CodeInvokeAIHTTPError ||
+			issue.Code == result.CodeInvalidInvokeAIResponse ||
+			issue.Code == result.CodeInvalidVersionResponse ||
+			issue.Code == result.CodeInvalidInvokeAIVersion {
+			return &result.Error{Code: issue.Code, Message: issue.Message}
 		}
 	}
 	if !report.Ready {
-		return result.ExitUnsupportedCapability, "unsupported_capability", "InvokeAI is not ready for the registered Bediz capabilities"
+		return &result.Error{Code: result.CodeUnsupportedCapability, Message: "InvokeAI is not ready for the registered Bediz capabilities"}
 	}
-	return result.ExitSuccess, "", ""
+	return nil
 }
 
-func (r Report) Human(w io.Writer) {
+// Human writes the concise diagnostic report and returns any output failure.
+func (r Report) Human(w io.Writer) error {
 	status := "ready"
 	if !r.Ready {
 		status = "not ready"
 	}
-	fmt.Fprintf(w, "Bediz %s\n", r.Bediz.Version)
-	fmt.Fprintf(w, "InvokeAI %s (%s, supported: %t)\n", valueOrUnknown(r.InvokeAI.Version), r.InvokeAI.URL, r.InvokeAI.SupportedVersion)
-	fmt.Fprintf(w, "Connection: %s; authentication: %s\n", r.InvokeAI.ConnectionStatus, r.InvokeAI.AuthenticationStatus)
-	fmt.Fprintf(w, "OpenAPI: %t; models: %d\n", r.OpenAPI.Available, r.Models.Total)
+	if _, err := fmt.Fprintf(w, "Bediz %s\n", r.Bediz.Version); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "InvokeAI %s (%s, supported: %t)\n", valueOrUnknown(r.InvokeAI.Version), r.InvokeAI.URL, r.InvokeAI.SupportedVersion); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "Connection: %s; authentication: %s\n", r.InvokeAI.ConnectionStatus, r.InvokeAI.AuthenticationStatus); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "OpenAPI: %t; models: %d\n", r.OpenAPI.Available, r.Models.Total); err != nil {
+		return err
+	}
 	for _, entry := range r.Capabilities {
 		name := entry.Operation
 		if entry.Family != "" {
 			name += "/" + entry.Family
 		}
 		if entry.UISync != "" {
-			fmt.Fprintf(w, "%s compatible: %t (UI sync: %s)\n", name, entry.Compatible, entry.UISync)
+			if _, err := fmt.Fprintf(w, "%s compatible: %t (UI sync: %s)\n", name, entry.Compatible, entry.UISync); err != nil {
+				return err
+			}
 		} else {
-			fmt.Fprintf(w, "%s compatible: %t\n", name, entry.Compatible)
+			if _, err := fmt.Fprintf(w, "%s compatible: %t\n", name, entry.Compatible); err != nil {
+				return err
+			}
 		}
 		for _, failure := range entry.Failures {
-			fmt.Fprintf(w, "  - %s\n", failure)
+			if _, err := fmt.Fprintf(w, "  - %s\n", failure); err != nil {
+				return err
+			}
 		}
 	}
-	fmt.Fprintf(w, "Status: %s\n", status)
+	_, err := fmt.Fprintf(w, "Status: %s\n", status)
+	return err
 }
 
 func valueOrUnknown(value string) string {

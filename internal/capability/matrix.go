@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/avienor/bediz/internal/result"
 )
 
 const SupportedInvokeAIRange = ">= 6.14.1, < 6.15.0"
@@ -46,28 +48,28 @@ type Entry struct {
 
 var Matrix = []Entry{
 	{
-		Operation:     "models.list",
+		Operation:     result.OperationModelsList,
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v2/models/"},
 		},
 	},
 	{
-		Operation:     "images.list",
+		Operation:     result.OperationImagesList,
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v1/images/"},
 		},
 	},
 	{
-		Operation:     "images.get",
+		Operation:     result.OperationImagesGet,
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v1/images/i/{image_name}"},
 		},
 	},
 	{
-		Operation:     "images.upload",
+		Operation:     result.OperationImagesUpload,
 		VersionPolicy: VersionPolicySupportedRange,
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v1/app/version"},
@@ -75,7 +77,7 @@ var Matrix = []Entry{
 		},
 	},
 	{
-		Operation:     "queue.list",
+		Operation:     result.OperationQueueList,
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v1/queue/{queue_id}/item_ids"},
@@ -83,63 +85,11 @@ var Matrix = []Entry{
 		},
 	},
 	{
-		Operation:     "queue.get",
+		Operation:     result.OperationQueueGet,
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v1/queue/{queue_id}/i/{item_id}"},
 			{Method: "GET", Path: "/api/v1/images/i/{image_name}"},
-		},
-	},
-	{
-		Operation:     "generate",
-		Family:        "anima",
-		UISync:        "full",
-		VersionPolicy: VersionPolicySupportedRange,
-		Endpoints: []EndpointRequirement{
-			{Method: "GET", Path: "/api/v1/app/version"},
-			{Method: "GET", Path: "/api/v2/models/"},
-			{Method: "POST", Path: "/api/v1/queue/{queue_id}/enqueue_batch"},
-			{Method: "GET", Path: "/api/v1/queue/{queue_id}/status"},
-			{Method: "GET", Path: "/api/v1/queue/{queue_id}/i/{item_id}"},
-			{Method: "POST", Path: "/api/v1/recall/{queue_id}"},
-		},
-		Invocations: []InvocationRequirement{
-			{
-				Schema:     "AnimaModelLoaderInvocation",
-				Type:       "anima_model_loader",
-				Properties: []string{"model", "vae_model", "qwen3_encoder_model"},
-			},
-			{
-				Schema:     "AnimaTextEncoderInvocation",
-				Type:       "anima_text_encoder",
-				Properties: []string{"prompt", "qwen3_encoder"},
-			},
-			{
-				Schema: "AnimaDenoiseInvocation",
-				Type:   "anima_denoise",
-				Properties: []string{
-					"transformer", "positive_conditioning", "guidance_scale",
-					"width", "height", "steps", "seed", "scheduler",
-				},
-			},
-			{
-				Schema:     "AnimaLatentsToImageInvocation",
-				Type:       "anima_l2i",
-				Properties: []string{"latents", "vae", "board", "metadata"},
-			},
-			{
-				Schema: "CoreMetadataInvocation",
-				Type:   "core_metadata",
-				Properties: []string{
-					"generation_mode", "positive_prompt", "width", "height",
-					"seed", "steps", "scheduler", "model", "vae", "qwen3_encoder",
-				},
-			},
-		},
-		Models: []ModelRequirement{
-			{Name: "Anima main model", Types: []string{"main"}, Bases: []string{"anima"}, MinimumCount: 1},
-			{Name: "Anima-compatible VAE", Types: []string{"vae"}, Bases: []string{"anima", "flux", "any"}, MinimumCount: 1},
-			{Name: "Qwen3 text encoder", Types: []string{"qwen3_encoder"}, Bases: []string{"anima", "any"}, MinimumCount: 1},
 		},
 	},
 }
