@@ -6,6 +6,7 @@ const (
 	OperationCLI          = "cli"
 	OperationVersion      = "version"
 	OperationDoctor       = "doctor"
+	OperationGenerate     = "generate"
 	OperationConfig       = "config"
 	OperationConfigGet    = "config.get"
 	OperationConfigSet    = "config.set"
@@ -28,6 +29,7 @@ const (
 	CodeConfigurationWriteFailed = "configuration_write_failed"
 	CodeOutputWriteFailed        = "output_write_failed"
 	CodeUnsupportedCapability    = "unsupported_capability"
+	CodeSelectionRequired        = "selection_required"
 	CodeConnectionFailed         = "connection_failed"
 	CodeAuthenticationFailed     = "authentication_failed"
 	CodeOutcomeUnknown           = "outcome_unknown"
@@ -51,6 +53,7 @@ var exitStatuses = map[string]int{
 	CodeInvalidConfiguration:     ExitInvalidRequest,
 	CodeConfigurationWriteFailed: ExitInvalidRequest,
 	CodeUnsupportedCapability:    ExitUnsupportedCapability,
+	CodeSelectionRequired:        ExitSelectionRequired,
 	CodeConnectionFailed:         ExitConnection,
 	CodeAuthenticationFailed:     ExitConnection,
 	CodeInterrupted:              ExitInterrupted,

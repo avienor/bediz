@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -41,6 +42,413 @@ func writeTestPNG(t *testing.T, path string) []byte {
 		t.Fatal(err)
 	}
 	return content
+}
+
+func TestGenerateNoWaitFlagsSubmitExactAnimaRequestOnce(t *testing.T) {
+	isolateUserConfigDir(t)
+	fixture, err := os.ReadFile("../generation/testdata/anima_6_14_enqueue.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wantEnqueue any
+	if err := jsonv2.Unmarshal(fixture, &wantEnqueue); err != nil {
+		t.Fatal(err)
+	}
+	var enqueueRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_ = jsonv2.MarshalWrite(w, map[string]any{"version": "6.14.1"})
+		case "/api/v2/models/":
+			_ = jsonv2.MarshalWrite(w, map[string]any{"models": []map[string]any{
+				{"key": "main-key", "hash": "blake3:main", "name": "Anima Main", "base": "anima", "type": "main", "format": "checkpoint"},
+				{"key": "vae-key", "hash": "blake3:vae", "name": "Anima VAE", "base": "anima", "type": "vae", "format": "checkpoint"},
+				{"key": "encoder-key", "hash": "blake3:encoder", "name": "Qwen3 Encoder", "base": "any", "type": "qwen3_encoder", "format": "checkpoint"},
+			}})
+		case "/api/v1/queue/default/enqueue_batch":
+			enqueueRequests.Add(1)
+			if r.Method != http.MethodPost {
+				t.Errorf("enqueue method = %s, want POST", r.Method)
+			}
+			var gotEnqueue any
+			if err := jsonv2.UnmarshalRead(r.Body, &gotEnqueue); err != nil {
+				t.Errorf("decode enqueue request: %v", err)
+				return
+			}
+			if !reflect.DeepEqual(gotEnqueue, wantEnqueue) {
+				t.Errorf("enqueue request does not match fixture\ngot:  %#v\nwant: %#v", gotEnqueue, wantEnqueue)
+			}
+			_ = jsonv2.MarshalWrite(w, map[string]any{
+				"queue_id": "default", "enqueued": 1, "requested": 1, "priority": 0, "item_ids": []int{17},
+				"batch": map[string]any{"batch_id": "batch-1", "origin": "generate", "destination": "generate", "graph": map[string]any{}, "runs": 1},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{
+		"generate", "--no-wait",
+		"--model", "main-key", "--prompt", "a lighthouse in a storm", "--negative-prompt", "text",
+		"--width", "768", "--height", "1024", "--steps", "24", "--scheduler", "heun", "--guidance", "4.25",
+		"--seed", "42", "--output-count", "1", "--board", "board-1", "--vae", "vae-key", "--qwen3-encoder", "encoder-key",
+		"--url", server.URL, "--json",
+	})
+
+	if exitCode != result.ExitSuccess || stderr.Len() != 0 || enqueueRequests.Load() != 1 {
+		t.Fatalf("exit code = %d, enqueue requests = %d, stderr = %q, stdout = %q", exitCode, enqueueRequests.Load(), stderr.String(), stdout.String())
+	}
+	var envelope struct {
+		SchemaVersion int    `json:"schema_version"`
+		OK            bool   `json:"ok"`
+		Operation     string `json:"operation"`
+		Data          struct {
+			SubmittedRequest map[string]any `json:"submitted_request"`
+			ResolvedSettings struct {
+				ModelKey      string            `json:"model_key"`
+				ComponentKeys map[string]string `json:"component_keys"`
+				Seeds         []uint32          `json:"seeds"`
+			} `json:"resolved_settings"`
+			Queue struct {
+				QueueID string `json:"queue_id"`
+				BatchID string `json:"batch_id"`
+				ItemIDs []int  `json:"item_ids"`
+			} `json:"queue"`
+			Outputs []any `json:"outputs"`
+		} `json:"data"`
+		Warnings []result.Warning `json:"warnings"`
+	}
+	if err := jsonv2.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("stdout is not a JSON object: %v; stdout = %q", err, stdout.String())
+	}
+	if envelope.SchemaVersion != 1 || !envelope.OK || envelope.Operation != "generate" ||
+		envelope.Data.SubmittedRequest["model"] != "main-key" ||
+		envelope.Data.ResolvedSettings.ModelKey != "main-key" ||
+		!reflect.DeepEqual(envelope.Data.ResolvedSettings.ComponentKeys, map[string]string{"vae": "vae-key", "qwen3_encoder": "encoder-key"}) ||
+		!reflect.DeepEqual(envelope.Data.ResolvedSettings.Seeds, []uint32{42}) ||
+		envelope.Data.Queue.QueueID != "default" || envelope.Data.Queue.BatchID != "batch-1" ||
+		!reflect.DeepEqual(envelope.Data.Queue.ItemIDs, []int{17}) || len(envelope.Data.Outputs) != 0 || len(envelope.Warnings) != 0 {
+		t.Fatalf("unexpected envelope: %#v", envelope)
+	}
+}
+
+func TestGenerateReturnsSelectionRequiredBeforeEnqueueForAmbiguousModelName(t *testing.T) {
+	isolateUserConfigDir(t)
+	var enqueueRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_ = jsonv2.MarshalWrite(w, map[string]any{"version": "6.14.1"})
+		case "/api/v2/models/":
+			_ = jsonv2.MarshalWrite(w, map[string]any{"models": []map[string]any{
+				{"key": "main-b", "hash": "blake3:main-b", "name": "Same Anima", "base": "anima", "type": "main"},
+				{"key": "main-a", "hash": "blake3:main-a", "name": "Same Anima", "base": "anima", "type": "main"},
+				{"key": "vae-key", "hash": "blake3:vae", "name": "Anima VAE", "base": "anima", "type": "vae"},
+				{"key": "encoder-key", "hash": "blake3:encoder", "name": "Qwen3 Encoder", "base": "any", "type": "qwen3_encoder"},
+			}})
+		case "/api/v1/queue/default/enqueue_batch":
+			enqueueRequests.Add(1)
+			http.Error(w, "must not enqueue", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{
+		"generate", "--no-wait", "--model", "Same Anima", "--prompt", "test", "--negative-prompt", "",
+		"--width", "768", "--height", "768", "--steps", "20", "--scheduler", "euler", "--guidance", "4.5",
+		"--seed", "7", "--output-count", "1", "--vae", "vae-key", "--qwen3-encoder", "encoder-key",
+		"--url", server.URL, "--json",
+	})
+
+	if exitCode != result.ExitSelectionRequired || stderr.Len() != 0 || enqueueRequests.Load() != 0 {
+		t.Fatalf("exit code = %d, enqueue requests = %d, stderr = %q, stdout = %q", exitCode, enqueueRequests.Load(), stderr.String(), stdout.String())
+	}
+	var envelope result.Envelope
+	if err := jsonv2.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
+	}
+	if envelope.Error == nil || envelope.Error.Code != "selection_required" || envelope.Error.Details["selector"] != "Same Anima" || envelope.Error.Details["kind"] != "main_model" {
+		t.Fatalf("unexpected envelope: %#v", envelope)
+	}
+	candidates, ok := envelope.Error.Details["candidates"].([]any)
+	if !ok || len(candidates) != 2 || candidates[0].(map[string]any)["key"] != "main-a" || candidates[1].(map[string]any)["key"] != "main-b" {
+		t.Fatalf("unexpected candidates: %#v", envelope.Error.Details["candidates"])
+	}
+}
+
+func TestGenerateRejectsIncompleteModelIdentifiersBeforeEnqueue(t *testing.T) {
+	isolateUserConfigDir(t)
+	var enqueueRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_ = jsonv2.MarshalWrite(w, map[string]any{"version": "6.14.1"})
+		case "/api/v2/models/":
+			_ = jsonv2.MarshalWrite(w, map[string]any{"models": []map[string]any{
+				{"key": "main-key", "name": "Anima Main", "base": "anima", "type": "main"},
+				{"key": "vae-key", "hash": "blake3:vae", "name": "Anima VAE", "base": "anima", "type": "vae"},
+				{"key": "encoder-key", "hash": "blake3:encoder", "name": "Qwen3 Encoder", "base": "any", "type": "qwen3_encoder"},
+			}})
+		case "/api/v1/queue/default/enqueue_batch":
+			enqueueRequests.Add(1)
+			http.Error(w, "must not enqueue", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{
+		"generate", "--no-wait", "--model", "main-key", "--prompt", "test",
+		"--width", "768", "--height", "768", "--steps", "20", "--scheduler", "euler", "--guidance", "4.5",
+		"--seed", "7", "--output-count", "1", "--vae", "vae-key", "--qwen3-encoder", "encoder-key",
+		"--url", server.URL, "--json",
+	})
+
+	if exitCode != result.ExitUnsupportedCapability || stderr.Len() != 0 || enqueueRequests.Load() != 0 {
+		t.Fatalf("exit code = %d, enqueue requests = %d, stderr = %q, stdout = %q", exitCode, enqueueRequests.Load(), stderr.String(), stdout.String())
+	}
+	var envelope result.Envelope
+	if err := jsonv2.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Error == nil || envelope.Error.Code != "unsupported_capability" {
+		t.Fatalf("unexpected envelope: %#v", envelope)
+	}
+}
+
+func TestGenerateRequestDocumentCompilesToExactAnimaOperation(t *testing.T) {
+	isolateUserConfigDir(t)
+	fixture, err := os.ReadFile("../generation/testdata/anima_6_14_enqueue.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wantEnqueue any
+	if err := jsonv2.Unmarshal(fixture, &wantEnqueue); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_ = jsonv2.MarshalWrite(w, map[string]any{"version": "6.14.1"})
+		case "/api/v2/models/":
+			_ = jsonv2.MarshalWrite(w, map[string]any{"models": []map[string]any{
+				{"key": "main-key", "hash": "blake3:main", "name": "Anima Main", "base": "anima", "type": "main"},
+				{"key": "vae-key", "hash": "blake3:vae", "name": "Anima VAE", "base": "anima", "type": "vae"},
+				{"key": "encoder-key", "hash": "blake3:encoder", "name": "Qwen3 Encoder", "base": "any", "type": "qwen3_encoder"},
+			}})
+		case "/api/v1/queue/default/enqueue_batch":
+			var gotEnqueue any
+			if err := jsonv2.UnmarshalRead(r.Body, &gotEnqueue); err != nil {
+				t.Errorf("decode enqueue request: %v", err)
+				return
+			}
+			if !reflect.DeepEqual(gotEnqueue, wantEnqueue) {
+				t.Errorf("request document and flags compiled differently\ngot:  %#v\nwant: %#v", gotEnqueue, wantEnqueue)
+			}
+			_ = jsonv2.MarshalWrite(w, map[string]any{
+				"queue_id": "default", "enqueued": 1, "requested": 1, "item_ids": []int{18},
+				"batch": map[string]any{"batch_id": "batch-2"},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	request := `{"schema_version":1,"model":"main-key","positive_prompt":"a lighthouse in a storm","negative_prompt":"text","width":768,"height":1024,"steps":24,"scheduler":"heun","guidance":4.25,"seed":42,"output_count":1,"board_id":"board-1","components":{"vae":"vae-key","qwen3_encoder":"encoder-key"}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.NewWithIO(strings.NewReader(request), &stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{"generate", "--no-wait", "--request", "-", "--url", server.URL, "--json"})
+
+	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
+		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
+	}
+}
+
+func TestGenerateRejectsUnknownOrMixedRequestDocumentFieldsBeforeNetwork(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		request string
+		args    []string
+	}{
+		{
+			name:    "unknown request field",
+			request: `{"schema_version":1,"model":"main-key","positive_prompt":"test","typo":true}`,
+			args:    []string{"generate", "--no-wait", "--request", "-"},
+		},
+		{
+			name:    "request mixed with operation flag",
+			request: `{"schema_version":1,"model":"main-key","positive_prompt":"test"}`,
+			args:    []string{"generate", "--no-wait", "--request", "-", "--model", "main-key"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			isolateUserConfigDir(t)
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				requests.Add(1)
+			}))
+			defer server.Close()
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			app := cli.NewWithIO(strings.NewReader(test.request), &stdout, &stderr)
+			args := append(slices.Clone(test.args), "--url", server.URL, "--json")
+
+			exitCode := app.Run(t.Context(), args)
+
+			if exitCode != result.ExitInvalidRequest || stderr.Len() != 0 || requests.Load() != 0 {
+				t.Fatalf("exit code = %d, requests = %d, stderr = %q, stdout = %q", exitCode, requests.Load(), stderr.String(), stdout.String())
+			}
+			var envelope result.Envelope
+			if err := jsonv2.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope.Error == nil || envelope.Error.Code != "invalid_request" {
+				t.Fatalf("unexpected envelope: %#v", envelope)
+			}
+		})
+	}
+}
+
+func TestGenerateDoesNotRetryInconclusiveEnqueue(t *testing.T) {
+	isolateUserConfigDir(t)
+	var enqueueRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_ = jsonv2.MarshalWrite(w, map[string]any{"version": "6.14.1"})
+		case "/api/v2/models/":
+			_ = jsonv2.MarshalWrite(w, map[string]any{"models": []map[string]any{
+				{"key": "main-key", "hash": "blake3:main", "name": "Anima Main", "base": "anima", "type": "main"},
+				{"key": "vae-key", "hash": "blake3:vae", "name": "Anima VAE", "base": "anima", "type": "vae"},
+				{"key": "encoder-key", "hash": "blake3:encoder", "name": "Qwen3 Encoder", "base": "any", "type": "qwen3_encoder"},
+			}})
+		case "/api/v1/queue/default/enqueue_batch":
+			enqueueRequests.Add(1)
+			connection, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Errorf("hijack enqueue connection: %v", err)
+				return
+			}
+			_ = connection.Close()
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{
+		"generate", "--no-wait", "--model", "main-key", "--prompt", "test",
+		"--width", "768", "--height", "768", "--steps", "20", "--scheduler", "euler", "--guidance", "4.5",
+		"--seed", "7", "--output-count", "1", "--vae", "vae-key", "--qwen3-encoder", "encoder-key",
+		"--url", server.URL, "--json",
+	})
+
+	if exitCode != result.ExitInvokeAIFailure || stderr.Len() != 0 || enqueueRequests.Load() != 1 {
+		t.Fatalf("exit code = %d, enqueue requests = %d, stderr = %q, stdout = %q", exitCode, enqueueRequests.Load(), stderr.String(), stdout.String())
+	}
+	var envelope result.Envelope
+	if err := jsonv2.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Error == nil || envelope.Error.Code != "outcome_unknown" {
+		t.Fatalf("unexpected envelope: %#v", envelope)
+	}
+}
+
+func TestGenerateTreatsIncompleteSuccessfulEnqueueResponseAsOutcomeUnknown(t *testing.T) {
+	isolateUserConfigDir(t)
+	var enqueueRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_ = jsonv2.MarshalWrite(w, map[string]any{"version": "6.14.1"})
+		case "/api/v2/models/":
+			_ = jsonv2.MarshalWrite(w, map[string]any{"models": []map[string]any{
+				{"key": "main-key", "hash": "blake3:main", "name": "Anima Main", "base": "anima", "type": "main"},
+				{"key": "vae-key", "hash": "blake3:vae", "name": "Anima VAE", "base": "anima", "type": "vae"},
+				{"key": "encoder-key", "hash": "blake3:encoder", "name": "Qwen3 Encoder", "base": "any", "type": "qwen3_encoder"},
+			}})
+		case "/api/v1/queue/default/enqueue_batch":
+			enqueueRequests.Add(1)
+			_ = jsonv2.MarshalWrite(w, map[string]any{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{
+		"generate", "--no-wait", "--model", "main-key", "--prompt", "test",
+		"--width", "768", "--height", "768", "--steps", "20", "--scheduler", "euler", "--guidance", "4.5",
+		"--seed", "7", "--output-count", "1", "--vae", "vae-key", "--qwen3-encoder", "encoder-key",
+		"--url", server.URL, "--json",
+	})
+
+	if exitCode != result.ExitInvokeAIFailure || stderr.Len() != 0 || enqueueRequests.Load() != 1 {
+		t.Fatalf("exit code = %d, enqueue requests = %d, stderr = %q, stdout = %q", exitCode, enqueueRequests.Load(), stderr.String(), stdout.String())
+	}
+	var envelope result.Envelope
+	if err := jsonv2.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Error == nil || envelope.Error.Code != "outcome_unknown" {
+		t.Fatalf("unexpected envelope: %#v", envelope)
+	}
+}
+
+func TestGenerateRejectsNonFiniteGuidanceBeforeNetwork(t *testing.T) {
+	for _, guidance := range []string{"NaN", "+Inf"} {
+		t.Run(guidance, func(t *testing.T) {
+			isolateUserConfigDir(t)
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				requests.Add(1)
+			}))
+			defer server.Close()
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			app := cli.New(&stdout, &stderr)
+
+			exitCode := app.Run(t.Context(), []string{
+				"generate", "--no-wait", "--model", "main-key", "--prompt", "test",
+				"--width", "768", "--height", "768", "--steps", "20", "--scheduler", "euler", "--guidance", guidance,
+				"--seed", "7", "--output-count", "1", "--vae", "vae-key", "--qwen3-encoder", "encoder-key",
+				"--url", server.URL, "--json",
+			})
+
+			if exitCode != result.ExitInvalidRequest || stderr.Len() != 0 || requests.Load() != 0 {
+				t.Fatalf("exit code = %d, requests = %d, stderr = %q, stdout = %q", exitCode, requests.Load(), stderr.String(), stdout.String())
+			}
+			var envelope result.Envelope
+			if err := jsonv2.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope.Error == nil || envelope.Error.Code != "invalid_request" {
+				t.Fatalf("unexpected envelope: %#v", envelope)
+			}
+		})
+	}
 }
 
 func TestModelsListJSONReturnsSafeModelSummaries(t *testing.T) {

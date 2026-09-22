@@ -138,6 +138,11 @@ func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
 	if unsupported, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); ok {
 		return c.fail(operationName, jsonOutput, result.CodeUnsupportedCapability, unsupported.Error(), nil)
 	}
+	if selection, ok := errors.AsType[*operation.SelectionRequiredError](err); ok {
+		return c.fail(operationName, jsonOutput, result.CodeSelectionRequired, selection.Error(), map[string]any{
+			"kind": selection.Kind, "selector": selection.Selector, "candidates": selection.Candidates,
+		})
+	}
 	if _, ok := errors.AsType[*httpclient.OutcomeUnknownError](err); ok {
 		return c.fail(operationName, jsonOutput, result.CodeOutcomeUnknown, "InvokeAI may have accepted the operation; inspect remote state before retrying", nil)
 	}

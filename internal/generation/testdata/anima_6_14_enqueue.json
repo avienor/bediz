@@ -1,0 +1,116 @@
+{
+  "batch": {
+    "origin": "generate",
+    "destination": "generate",
+    "graph": {
+      "id": "bediz_anima_v1",
+      "nodes": {
+        "model_loader": {
+          "id": "model_loader",
+          "is_intermediate": true,
+          "use_cache": true,
+          "model": {"key":"main-key","hash":"blake3:main","name":"Anima Main","base":"anima","type":"main"},
+          "vae_model": {"key":"vae-key","hash":"blake3:vae","name":"Anima VAE","base":"anima","type":"vae"},
+          "qwen3_encoder_model": {"key":"encoder-key","hash":"blake3:encoder","name":"Qwen3 Encoder","base":"any","type":"qwen3_encoder"},
+          "type": "anima_model_loader"
+        },
+        "positive_prompt": {
+          "id": "positive_prompt",
+          "is_intermediate": true,
+          "use_cache": true,
+          "value": "a lighthouse in a storm",
+          "type": "string"
+        },
+        "positive_conditioning": {
+          "id": "positive_conditioning",
+          "is_intermediate": true,
+          "use_cache": true,
+          "type": "anima_text_encoder"
+        },
+        "positive_collection": {
+          "id": "positive_collection",
+          "is_intermediate": true,
+          "use_cache": true,
+          "collection": [],
+          "type": "collect"
+        },
+        "negative_conditioning": {
+          "id": "negative_conditioning",
+          "is_intermediate": true,
+          "use_cache": true,
+          "prompt": "text",
+          "type": "anima_text_encoder"
+        },
+        "negative_collection": {
+          "id": "negative_collection",
+          "is_intermediate": true,
+          "use_cache": true,
+          "collection": [],
+          "type": "collect"
+        },
+        "seed": {
+          "id": "seed",
+          "is_intermediate": true,
+          "use_cache": true,
+          "value": 42,
+          "type": "integer"
+        },
+        "denoise": {
+          "id": "denoise",
+          "is_intermediate": true,
+          "use_cache": true,
+          "denoising_start": 0,
+          "denoising_end": 1,
+          "add_noise": true,
+          "guidance_scale": 4.25,
+          "width": 768,
+          "height": 1024,
+          "steps": 24,
+          "seed": 0,
+          "scheduler": "heun",
+          "type": "anima_denoise"
+        },
+        "metadata": {
+          "id": "metadata",
+          "is_intermediate": true,
+          "use_cache": true,
+          "generation_mode": "anima_txt2img",
+          "negative_prompt": "text",
+          "width": 768,
+          "height": 1024,
+          "cfg_scale": 4.25,
+          "steps": 24,
+          "scheduler": "heun",
+          "model": {"key":"main-key","hash":"blake3:main","name":"Anima Main","base":"anima","type":"main"},
+          "vae": {"key":"vae-key","hash":"blake3:vae","name":"Anima VAE","base":"anima","type":"vae"},
+          "qwen3_encoder": {"key":"encoder-key","hash":"blake3:encoder","name":"Qwen3 Encoder","base":"any","type":"qwen3_encoder"},
+          "type": "core_metadata"
+        },
+        "decode": {
+          "id": "decode",
+          "is_intermediate": false,
+          "use_cache": false,
+          "board": {"board_id":"board-1"},
+          "type": "anima_l2i"
+        }
+      },
+      "edges": [
+        {"source":{"node_id":"model_loader","field":"transformer"},"destination":{"node_id":"denoise","field":"transformer"}},
+        {"source":{"node_id":"model_loader","field":"qwen3_encoder"},"destination":{"node_id":"positive_conditioning","field":"qwen3_encoder"}},
+        {"source":{"node_id":"model_loader","field":"vae"},"destination":{"node_id":"decode","field":"vae"}},
+        {"source":{"node_id":"positive_prompt","field":"value"},"destination":{"node_id":"positive_conditioning","field":"prompt"}},
+        {"source":{"node_id":"positive_conditioning","field":"conditioning"},"destination":{"node_id":"positive_collection","field":"item"}},
+        {"source":{"node_id":"positive_collection","field":"collection"},"destination":{"node_id":"denoise","field":"positive_conditioning"}},
+        {"source":{"node_id":"model_loader","field":"qwen3_encoder"},"destination":{"node_id":"negative_conditioning","field":"qwen3_encoder"}},
+        {"source":{"node_id":"negative_conditioning","field":"conditioning"},"destination":{"node_id":"negative_collection","field":"item"}},
+        {"source":{"node_id":"negative_collection","field":"collection"},"destination":{"node_id":"denoise","field":"negative_conditioning"}},
+        {"source":{"node_id":"seed","field":"value"},"destination":{"node_id":"denoise","field":"seed"}},
+        {"source":{"node_id":"denoise","field":"latents"},"destination":{"node_id":"decode","field":"latents"}},
+        {"source":{"node_id":"seed","field":"value"},"destination":{"node_id":"metadata","field":"seed"}},
+        {"source":{"node_id":"positive_prompt","field":"value"},"destination":{"node_id":"metadata","field":"positive_prompt"}},
+        {"source":{"node_id":"metadata","field":"metadata"},"destination":{"node_id":"decode","field":"metadata"}}
+      ]
+    },
+    "runs": 1
+  }
+}
