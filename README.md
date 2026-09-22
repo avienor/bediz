@@ -30,7 +30,7 @@ go build -o bediz ./cmd/bediz
 ./bediz queue get ITEM_ID --json
 ```
 
-Inspection commands return normalized Bediz records rather than raw InvokeAI response documents. List commands are bounded, image selectors use stable InvokeAI image names, and queue listing hydrates only the requested page of lightweight summaries.
+Inspection commands return normalized Bediz records rather than raw InvokeAI response documents. List output is page-bounded, image selectors use stable InvokeAI image names, and queue listing hydrates only the requested page of lightweight summaries. On supported InvokeAI 6.14.x versions, preserving queue order and total count requires reading the complete lightweight item-ID index; the configured HTTP response-size limit bounds that response, and Bediz never fetches execution graphs while listing.
 
 Each operation also accepts a schema-versioned request document from a file or standard input. Operation arguments and flags cannot be mixed with `--request`:
 

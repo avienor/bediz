@@ -10,9 +10,21 @@
 
 **Escalate when:** A supported backend exposes a reliable paginated ID endpoint; preserving an accurate total count would require unbounded memory or removing the response-size guard; live behavior differs from the OpenAPI contract; or the product should instead sacrifice total-count accuracy to stop reading the ID response early.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Queue output and summary hydration are bounded by the requested page and exclude execution graphs.
-- [ ] Complete lightweight ID-index retrieval is constrained by the HTTP response-size limit and documented explicitly.
-- [ ] Stress-oriented contract tests distinguish page-bounded work from backend ID-index retrieval.
-- [ ] Live contract evidence and all project-defined Go verification commands pass.
+- [x] Queue output and summary hydration are bounded by the requested page and exclude execution graphs.
+- [x] Complete lightweight ID-index retrieval is constrained by the HTTP response-size limit and documented explicitly.
+- [x] Stress-oriented contract tests distinguish page-bounded work from backend ID-index retrieval.
+- [x] Live contract evidence and all project-defined Go verification commands pass.
+
+## Comments
+
+Implemented the bounded queue-inspection contract. The production implementation already selected the requested ID page before summary hydration, restored the backend ID-index order after hydration, omitted execution graphs, and used the shared HTTP client's response-size guard. This slice therefore adds missing contract evidence and corrects the public wording rather than changing runtime behavior.
+
+**Contract tests.** A 10,000-item queue fixture requests a seven-item page from the middle of the ordered ID index. It proves that exactly those seven IDs are sent once to the lightweight summary endpoint, only seven summaries are returned in index order even when hydration responds in reverse order, the total remains 10,000, and no per-item execution-graph endpoint is requested. A separate fixture configures a 128-byte HTTP response maximum and proves that an oversized complete ID index fails as an invalid InvokeAI response before summary hydration begins.
+
+**Specification.** V1 inspection safety and the README now distinguish page-bounded public output and summary hydration from complete lightweight ID-index retrieval. They state that the supported 6.14.x item-ID endpoint has no pagination, the full index preserves ordering and reported total count, and its response remains bounded by the configured HTTP response-size limit.
+
+**Live contract evidence.** The local supported baseline reported InvokeAI `6.14.1`. Its live OpenAPI document exposes only `queue_id` and `order_dir` on `GET /api/v1/queue/{queue_id}/item_ids`; it exposes no offset, limit, cursor, page, or other ID-pagination parameter. The live response schema requires the ordered `item_ids` collection and `total_count`.
+
+**Verification evidence.** `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify` all pass. Focused queue, HTTP-client, and public CLI test suites also pass.
