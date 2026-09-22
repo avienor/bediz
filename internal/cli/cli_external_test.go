@@ -3167,18 +3167,22 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 		"/api/v1/queue/{queue_id}/item_ids":              map[string]any{"get": map[string]any{}},
 		"/api/v1/queue/{queue_id}/item_summaries_by_ids": map[string]any{"post": map[string]any{}},
 		"/api/v1/queue/{queue_id}/i/{item_id}":           map[string]any{"get": map[string]any{}},
+		"/api/v1/queue/{queue_id}/enqueue_batch":         map[string]any{"post": map[string]any{}},
 	}
+	openAPIDocument := animaOpenAPIFixture("", "")
+	openAPIDocument["paths"] = paths
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/app/version":
 			_ = json.NewEncoder(w).Encode(map[string]string{"version": "6.14.1"})
 		case "/openapi.json":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"paths":      paths,
-				"components": map[string]any{"schemas": map[string]any{}},
-			})
+			_ = json.NewEncoder(w).Encode(openAPIDocument)
 		case "/api/v2/models/":
-			_ = json.NewEncoder(w).Encode(map[string]any{"models": []any{}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"models": []map[string]string{
+				{"key": "main", "name": "Anima", "base": "anima", "type": "main"},
+				{"key": "vae", "name": "VAE", "base": "anima", "type": "vae"},
+				{"key": "encoder", "name": "Qwen3", "base": "any", "type": "qwen3_encoder"},
+			}})
 		default:
 			http.NotFound(w, r)
 		}
@@ -3223,10 +3227,10 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 		}
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "images.list", "images.get", "images.upload", "queue.list", "queue.get"}
+	wantOperations := []string{"models.list", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate"}
 	if envelope.SchemaVersion != 1 || !envelope.OK || envelope.Operation != "doctor" || !envelope.Data.Ready ||
 		!slices.Equal(operations, wantOperations) || len(envelope.Data.UISync) != 0 ||
-		len(envelope.Data.OpenAPI.Invocations) != 0 || len(envelope.Data.Models.Relevant) != 0 || len(envelope.Data.Models.Requirements) != 0 {
+		len(envelope.Data.OpenAPI.Invocations) != 8 || len(envelope.Data.Models.Relevant) != 3 || len(envelope.Data.Models.Requirements) != 3 {
 		t.Fatalf("unexpected doctor envelope: %#v", envelope)
 	}
 }

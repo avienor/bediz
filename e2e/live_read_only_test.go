@@ -172,6 +172,47 @@ type queueListData struct {
 	} `json:"items"`
 }
 
+type executionReceiptData struct {
+	SubmittedRequest struct {
+		SchemaVersion  int      `json:"schema_version"`
+		Model          string   `json:"model"`
+		PositivePrompt string   `json:"positive_prompt"`
+		NegativePrompt string   `json:"negative_prompt"`
+		Width          *int     `json:"width"`
+		Height         *int     `json:"height"`
+		Steps          *int     `json:"steps"`
+		Scheduler      *string  `json:"scheduler"`
+		Guidance       *float64 `json:"guidance"`
+		Seed           *uint32  `json:"seed"`
+		OutputCount    *int     `json:"output_count"`
+		BoardID        string   `json:"board_id"`
+	} `json:"submitted_request"`
+	ResolvedSettings struct {
+		PositivePrompt string            `json:"positive_prompt"`
+		NegativePrompt string            `json:"negative_prompt"`
+		Width          int               `json:"width"`
+		Height         int               `json:"height"`
+		Steps          int               `json:"steps"`
+		Scheduler      string            `json:"scheduler"`
+		Guidance       float64           `json:"guidance"`
+		OutputCount    int               `json:"output_count"`
+		BoardID        string            `json:"board_id"`
+		ModelKey       string            `json:"model_key"`
+		ComponentKeys  map[string]string `json:"component_keys"`
+		Seeds          []uint32          `json:"seeds"`
+	} `json:"resolved_settings"`
+	Queue struct {
+		QueueID string `json:"queue_id"`
+		BatchID string `json:"batch_id"`
+		ItemIDs []int  `json:"item_ids"`
+	} `json:"queue"`
+	Outputs []struct {
+		ItemID int            `json:"item_id"`
+		Seed   uint32         `json:"seed"`
+		Image  imageReference `json:"image"`
+	} `json:"outputs"`
+}
+
 func TestLiveGate(t *testing.T) {
 	target := strings.TrimSpace(os.Getenv("BEDIZ_E2E_URL"))
 	if target == "" {
@@ -220,13 +261,29 @@ func TestLiveGate(t *testing.T) {
 				t.Errorf("doctor returned an unsatisfied or incomplete model requirement: %#v", requirement)
 			}
 		}
-		wantOperations := []string{"images.get", "images.list", "images.upload", "models.list", "queue.get", "queue.list"}
+		wantOperations := []string{"generate", "images.get", "images.list", "images.upload", "models.list", "queue.get", "queue.list"}
 		operations := make([]string, 0, len(data.Capabilities))
+		var generateFound bool
 		for _, capability := range data.Capabilities {
 			if capability.Compatible == nil || !*capability.Compatible || capability.Failures == nil || len(capability.Failures) != 0 {
 				t.Errorf("doctor reported an incompatible capability: %#v", capability)
 			}
 			operations = append(operations, capability.Operation)
+			if capability.Operation == "generate" {
+				generateFound = true
+				if capability.Family != "anima" {
+					t.Errorf("generate family = %q, want anima", capability.Family)
+				}
+				if capability.UISync != "" {
+					t.Errorf("generate ui_sync = %q, want empty before step 4", capability.UISync)
+				}
+			}
+		}
+		if !generateFound {
+			t.Error("doctor did not report generate capability")
+		}
+		if _, ok := data.UISync["generate"]; ok {
+			t.Errorf("doctor claims unadvertised UI sync for generate: %#v", data.UISync)
 		}
 		slices.Sort(operations)
 		if !slices.Equal(operations, wantOperations) {
@@ -308,7 +365,7 @@ func TestLiveGate(t *testing.T) {
 		imageName := cleanupHint.Image.ImageName
 		t.Logf("uploaded fixture cleanup evidence: image_name=%q", imageName)
 		t.Cleanup(func() {
-			deleteUploadedImage(t, target, imageName)
+			deleteBackendImage(t, target, imageName)
 			assertImageRemoved(t, binary, target, imageName)
 		})
 
@@ -358,6 +415,73 @@ func TestLiveGate(t *testing.T) {
 		}
 		if !reflect.DeepEqual(*listedImage, uploaded.Image) {
 			t.Fatalf("images list reference differs from upload for %q: upload=%#v list=%#v", imageName, uploaded.Image, *listedImage)
+		}
+	}) {
+		return
+	}
+
+	if !t.Run("anima direct execution produces a completed receipt and self-cleans", func(t *testing.T) {
+		const testSeed uint32 = 42
+		envelope := runJSONCommand(t, binary, target, "generate", "--model", "Anima Base 1.0", "--prompt", "a tiny green apple on white background", "--steps", "1", "--width", "1024", "--height", "1024", "--seed", strconv.FormatUint(uint64(testSeed), 10))
+		assertSuccessEnvelope(t, envelope, "generate")
+
+		var receipt executionReceiptData
+		unmarshalData(t, envelope.Data, &receipt)
+
+		if receipt.SubmittedRequest.Model != "Anima Base 1.0" ||
+			receipt.SubmittedRequest.PositivePrompt != "a tiny green apple on white background" ||
+			receipt.SubmittedRequest.Steps == nil || *receipt.SubmittedRequest.Steps != 1 ||
+			receipt.SubmittedRequest.Width == nil || *receipt.SubmittedRequest.Width != 1024 ||
+			receipt.SubmittedRequest.Height == nil || *receipt.SubmittedRequest.Height != 1024 ||
+			receipt.SubmittedRequest.Seed == nil || *receipt.SubmittedRequest.Seed != testSeed {
+			t.Fatalf("unexpected submitted request in receipt: %#v", receipt.SubmittedRequest)
+		}
+
+		if receipt.ResolvedSettings.PositivePrompt != "a tiny green apple on white background" ||
+			receipt.ResolvedSettings.Steps != 1 ||
+			receipt.ResolvedSettings.Width != 1024 ||
+			receipt.ResolvedSettings.Height != 1024 ||
+			receipt.ResolvedSettings.Scheduler != "euler" ||
+			receipt.ResolvedSettings.Guidance != 4.5 ||
+			receipt.ResolvedSettings.OutputCount != 1 ||
+			receipt.ResolvedSettings.ModelKey == "" ||
+			receipt.ResolvedSettings.ComponentKeys["vae"] == "" ||
+			receipt.ResolvedSettings.ComponentKeys["qwen3_encoder"] == "" ||
+			!slices.Equal(receipt.ResolvedSettings.Seeds, []uint32{testSeed}) {
+			t.Fatalf("unexpected resolved settings in receipt: %#v", receipt.ResolvedSettings)
+		}
+
+		if receipt.Queue.QueueID != "default" || receipt.Queue.BatchID == "" || len(receipt.Queue.ItemIDs) != 1 {
+			t.Fatalf("unexpected queue in receipt: %#v", receipt.Queue)
+		}
+
+		if len(receipt.Outputs) != 1 {
+			t.Fatalf("outputs count = %d, want 1", len(receipt.Outputs))
+		}
+		output := receipt.Outputs[0]
+		if output.ItemID != receipt.Queue.ItemIDs[0] || output.Seed != testSeed {
+			t.Fatalf("output mismatch: %#v, want item_id=%d seed=%d", output, receipt.Queue.ItemIDs[0], testSeed)
+		}
+
+		image := output.Image
+		if image.ImageName == "" || image.ImageURL == "" || image.ThumbnailURL == "" ||
+			image.Width != 1024 || image.Height != 1024 || image.IsIntermediate == nil || *image.IsIntermediate {
+			t.Fatalf("output image reference is incomplete: %#v", image)
+		}
+
+		imageName := image.ImageName
+		t.Logf("generated fixture cleanup evidence: image_name=%q", imageName)
+		t.Cleanup(func() {
+			deleteBackendImage(t, target, imageName)
+			assertImageRemoved(t, binary, target, imageName)
+		})
+
+		getEnvelope := runJSONCommand(t, binary, target, "images", "get", imageName)
+		assertSuccessEnvelope(t, getEnvelope, "images.get")
+		var got imageResultData
+		unmarshalData(t, getEnvelope.Data, &got)
+		if got.Image.ImageName != imageName || got.Image.Width != 1024 || got.Image.Height != 1024 {
+			t.Fatalf("images get returned unexpected image: %#v", got.Image)
 		}
 	}) {
 		return
@@ -425,7 +549,7 @@ func assertNoImageMetadata(t *testing.T, target, imageName string) {
 	}
 }
 
-func deleteUploadedImage(t *testing.T, target, imageName string) {
+func deleteBackendImage(t *testing.T, target, imageName string) {
 	t.Helper()
 	response := requestImageBackend(t, context.WithoutCancel(t.Context()), http.MethodDelete, target, imageName, "")
 	if response.StatusCode != http.StatusOK {

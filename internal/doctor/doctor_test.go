@@ -38,12 +38,28 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 	for i, entry := range report.Capabilities {
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "images.list", "images.get", "images.upload", "queue.list", "queue.get"}
+	wantOperations := []string{"models.list", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate"}
 	if !slices.Equal(operations, wantOperations) {
 		t.Fatalf("reported operations = %q, want implemented operations %q", operations, wantOperations)
 	}
-	if len(report.OpenAPI.Invocations) != 0 || len(report.Models.Relevant) != 0 || len(report.Models.Requirements) != 0 || len(report.UISync) != 0 {
-		t.Fatalf("doctor reported deferred generation readiness: %#v", report)
+	if len(report.OpenAPI.Invocations) == 0 {
+		t.Fatal("doctor reported no required invocations")
+	}
+	for _, invocation := range report.OpenAPI.Invocations {
+		if !invocation.Available || len(invocation.MissingProperties) != 0 {
+			t.Fatalf("invocation check failed: %#v", invocation)
+		}
+	}
+	if len(report.Models.Requirements) != 3 {
+		t.Fatalf("model requirements count = %d, want 3", len(report.Models.Requirements))
+	}
+	for _, requirement := range report.Models.Requirements {
+		if !requirement.Satisfied {
+			t.Fatalf("model requirement not satisfied: %#v", requirement)
+		}
+	}
+	if len(report.UISync) != 0 {
+		t.Fatalf("doctor reported deferred UI sync before delivery step 4: %#v", report.UISync)
 	}
 }
 
@@ -183,8 +199,8 @@ func TestRunAllowsReadOnlyInspectionOnEndpointCompatibleUntestedVersion(t *testi
 			t.Errorf("read-only capability %q should remain compatible: %#v", operation, report.Capabilities)
 		}
 	}
-	if compatibility["images.upload"] {
-		t.Fatalf("mutating capabilities should require the supported range: %#v", report.Capabilities)
+	if compatibility["images.upload"] || compatibility["generate"] {
+		t.Fatalf("mutating and graph-producing capabilities should require the supported range: %#v", report.Capabilities)
 	}
 }
 
@@ -274,7 +290,7 @@ func TestRunDoesNotInventComponentReadinessWhenModelsRequestFails(t *testing.T) 
 	}
 	assertIssuePresent(t, report, "invokeai_http_error")
 	assertIssueAbsent(t, report, "missing_component")
-	assertCapabilityFailurePrefixAbsent(t, report, "models_unavailable")
+	assertCapabilityFailurePresent(t, report, "models_unavailable")
 	assertCapabilityFailurePrefixAbsent(t, report, "missing_component:")
 }
 
@@ -386,6 +402,269 @@ func TestFailureClassifiesInvalidVersionPayloads(t *testing.T) {
 	}
 }
 
+func TestRunReportsAnimaGenerationReadyOnlyWhenAllRequirementsPass(t *testing.T) {
+	server := newInvokeAIServer(t, "")
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report := Run(t.Context(), client, version.Info{Version: "test"})
+	if !report.Ready {
+		t.Fatalf("report not ready: %#v", report.Issues)
+	}
+
+	var generateReport *CapabilityReport
+	for _, entry := range report.Capabilities {
+		if entry.Operation == result.OperationGenerate {
+			generateReport = &entry
+			break
+		}
+	}
+	if generateReport == nil {
+		t.Fatal("doctor capabilities did not contain generate operation")
+	}
+	if generateReport.Family != "anima" {
+		t.Fatalf("Family = %q, want %q", generateReport.Family, "anima")
+	}
+	if !generateReport.Compatible {
+		t.Fatalf("generate should be compatible, got failures: %#v", generateReport.Failures)
+	}
+	if len(generateReport.Failures) != 0 {
+		t.Fatalf("unexpected generate failures: %#v", generateReport.Failures)
+	}
+	if generateReport.UISync != "" {
+		t.Fatalf("generate UISync = %q, want unadvertised empty string", generateReport.UISync)
+	}
+	if _, ok := report.UISync["generate"]; ok {
+		t.Fatalf("report.UISync unexpectedly contains generate: %#v", report.UISync)
+	}
+	if len(report.Issues) != 0 {
+		t.Fatalf("unexpected issues: %#v", report.Issues)
+	}
+}
+
+func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
+	t.Run("unsupported invokeai version", func(t *testing.T) {
+		server := newCustomInvokeAIServer(t, "6.15.0", openAPIFixture(""), baselineModels)
+		defer server.Close()
+		client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		report := Run(t.Context(), client, version.Info{Version: "test"})
+		if report.Ready {
+			t.Fatal("report should not be ready with unsupported InvokeAI version")
+		}
+		assertIssuePresent(t, report, "unsupported_invokeai_version")
+		assertCapabilityFailurePresent(t, report, "unsupported_version")
+	})
+
+	t.Run("missing required endpoints", func(t *testing.T) {
+		endpoints := []struct {
+			method string
+			path   string
+		}{
+			{method: "GET", path: "/api/v1/app/version"},
+			{method: "GET", path: "/api/v2/models/"},
+			{method: "POST", path: "/api/v1/queue/{queue_id}/enqueue_batch"},
+			{method: "GET", path: "/api/v1/queue/{queue_id}/i/{item_id}"},
+			{method: "GET", path: "/api/v1/images/i/{image_name}"},
+		}
+
+		for _, endpoint := range endpoints {
+			t.Run(endpoint.method+" "+endpoint.path, func(t *testing.T) {
+				document := openAPIFixture("")
+				paths := document["paths"].(map[string]any)
+				if methods, ok := paths[endpoint.path].(map[string]any); ok {
+					delete(methods, strings.ToLower(endpoint.method))
+					if len(methods) == 0 {
+						delete(paths, endpoint.path)
+					}
+				}
+
+				server := newCustomInvokeAIServer(t, "6.14.1", document, baselineModels)
+				defer server.Close()
+				client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				report := Run(t.Context(), client, version.Info{Version: "test"})
+				if report.Ready {
+					t.Fatalf("report should not be ready when %s %s is missing", endpoint.method, endpoint.path)
+				}
+				assertIssuePresent(t, report, "missing_endpoint")
+				assertCapabilityFailurePresent(t, report, "missing_endpoint:"+endpoint.method+" "+endpoint.path)
+			})
+		}
+	})
+
+	t.Run("missing required invocation schemas", func(t *testing.T) {
+		schemas := []struct {
+			schema   string
+			typeName string
+		}{
+			{schema: "AnimaModelLoaderInvocation", typeName: "anima_model_loader"},
+			{schema: "StringInvocation", typeName: "string"},
+			{schema: "AnimaTextEncoderInvocation", typeName: "anima_text_encoder"},
+			{schema: "CollectInvocation", typeName: "collect"},
+			{schema: "IntegerInvocation", typeName: "integer"},
+			{schema: "AnimaDenoiseInvocation", typeName: "anima_denoise"},
+			{schema: "CoreMetadataInvocation", typeName: "core_metadata"},
+			{schema: "AnimaLatentsToImageInvocation", typeName: "anima_l2i"},
+		}
+
+		for _, item := range schemas {
+			t.Run(item.schema, func(t *testing.T) {
+				document := openAPIFixture("")
+				components := document["components"].(map[string]any)
+				schemaMap := components["schemas"].(map[string]any)
+				delete(schemaMap, item.schema)
+
+				server := newCustomInvokeAIServer(t, "6.14.1", document, baselineModels)
+				defer server.Close()
+				client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				report := Run(t.Context(), client, version.Info{Version: "test"})
+				if report.Ready {
+					t.Fatalf("report should not be ready when %s schema is missing", item.schema)
+				}
+				assertIssuePresent(t, report, "incompatible_invocation")
+				assertCapabilityFailurePresent(t, report, "incompatible_invocation:"+item.typeName)
+			})
+		}
+	})
+
+	t.Run("missing required invocation field", func(t *testing.T) {
+		fields := []struct {
+			schema   string
+			property string
+			typeName string
+		}{
+			{schema: "AnimaModelLoaderInvocation", property: "model", typeName: "anima_model_loader"},
+			{schema: "StringInvocation", property: "value", typeName: "string"},
+			{schema: "AnimaTextEncoderInvocation", property: "prompt", typeName: "anima_text_encoder"},
+			{schema: "CollectInvocation", property: "collection", typeName: "collect"},
+			{schema: "IntegerInvocation", property: "value", typeName: "integer"},
+			{schema: "AnimaDenoiseInvocation", property: "guidance_scale", typeName: "anima_denoise"},
+			{schema: "CoreMetadataInvocation", property: "positive_prompt", typeName: "core_metadata"},
+			{schema: "AnimaLatentsToImageInvocation", property: "latents", typeName: "anima_l2i"},
+		}
+
+		for _, item := range fields {
+			t.Run(item.schema+"."+item.property, func(t *testing.T) {
+				server := newInvokeAIServer(t, item.property)
+				defer server.Close()
+				client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				report := Run(t.Context(), client, version.Info{Version: "test"})
+				if report.Ready {
+					t.Fatalf("report should not be ready when %s is missing from %s", item.property, item.schema)
+				}
+				assertIssuePresent(t, report, "incompatible_invocation")
+				assertCapabilityFailurePresent(t, report, "incompatible_invocation:"+item.typeName)
+			})
+		}
+	})
+
+	t.Run("missing required models", func(t *testing.T) {
+		tests := []struct {
+			name        string
+			models      []map[string]string
+			missingName string
+		}{
+			{
+				name: "missing Anima main model",
+				models: []map[string]string{
+					{"key": "vae", "name": "VAE", "base": "anima", "type": "vae"},
+					{"key": "encoder", "name": "Qwen3", "base": "any", "type": "qwen3_encoder"},
+				},
+				missingName: "Anima main model",
+			},
+			{
+				name: "missing Anima VAE",
+				models: []map[string]string{
+					{"key": "main", "name": "Anima", "base": "anima", "type": "main"},
+					{"key": "encoder", "name": "Qwen3", "base": "any", "type": "qwen3_encoder"},
+				},
+				missingName: "Anima VAE",
+			},
+			{
+				name: "missing Qwen3 encoder",
+				models: []map[string]string{
+					{"key": "main", "name": "Anima", "base": "anima", "type": "main"},
+					{"key": "vae", "name": "VAE", "base": "anima", "type": "vae"},
+				},
+				missingName: "Qwen3 encoder",
+			},
+			{
+				name: "encoder with base anima instead of any",
+				models: []map[string]string{
+					{"key": "main", "name": "Anima", "base": "anima", "type": "main"},
+					{"key": "vae", "name": "VAE", "base": "anima", "type": "vae"},
+					{"key": "encoder", "name": "Qwen3", "base": "anima", "type": "qwen3_encoder"},
+				},
+				missingName: "Qwen3 encoder",
+			},
+		}
+
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				server := newCustomInvokeAIServer(t, "6.14.1", openAPIFixture(""), test.models)
+				defer server.Close()
+				client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				report := Run(t.Context(), client, version.Info{Version: "test"})
+				if report.Ready {
+					t.Fatalf("report should not be ready when %s is missing", test.missingName)
+				}
+				assertIssuePresent(t, report, "missing_component")
+				assertCapabilityFailurePresent(t, report, "missing_component:"+test.missingName)
+			})
+		}
+	})
+}
+
+func TestDoctorDoesNotClaimGenerationUISynchronization(t *testing.T) {
+	server := newInvokeAIServer(t, "")
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report := Run(t.Context(), client, version.Info{Version: "test"})
+	if _, ok := report.UISync["generate"]; ok {
+		t.Fatalf("report.UISync contains generate: %#v", report.UISync)
+	}
+	if len(report.UISync) != 0 {
+		t.Fatalf("report.UISync is not empty before step 4: %#v", report.UISync)
+	}
+
+	var output strings.Builder
+	if err := report.Human(&output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "generate/anima compatible: true\n") {
+		t.Fatalf("human output missing generate/anima: %q", output.String())
+	}
+	if strings.Contains(output.String(), "generate/anima compatible: true (UI sync:") {
+		t.Fatalf("human output claims UI sync for generate: %q", output.String())
+	}
+}
+
 func assertIssuePresent(t *testing.T, report Report, code string) {
 	t.Helper()
 	for _, issue := range report.Issues {
@@ -428,25 +707,31 @@ func assertCapabilityFailurePrefixAbsent(t *testing.T, report Report, prefix str
 	}
 }
 
-func newInvokeAIServer(t *testing.T, missingProperty string) *httptest.Server {
+var baselineModels = []map[string]string{
+	{"key": "main", "name": "Anima", "base": "anima", "type": "main", "format": "checkpoint"},
+	{"key": "vae", "name": "VAE", "base": "anima", "type": "vae", "format": "checkpoint"},
+	{"key": "encoder", "name": "Qwen3", "base": "any", "type": "qwen3_encoder", "format": "checkpoint"},
+}
+
+func newCustomInvokeAIServer(t *testing.T, version string, document any, models any) *httptest.Server {
 	t.Helper()
-	document := openAPIFixture(missingProperty)
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/app/version":
-			_ = json.NewEncoder(w).Encode(map[string]string{"version": "6.14.1"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"version": version})
 		case "/openapi.json":
 			_ = json.NewEncoder(w).Encode(document)
 		case "/api/v2/models/":
-			_ = json.NewEncoder(w).Encode(map[string]any{"models": []map[string]string{
-				{"key": "main", "name": "Anima", "base": "anima", "type": "main", "format": "checkpoint"},
-				{"key": "vae", "name": "VAE", "base": "anima", "type": "vae", "format": "checkpoint"},
-				{"key": "encoder", "name": "Qwen3", "base": "any", "type": "qwen3_encoder", "format": "checkpoint"},
-			}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"models": models})
 		default:
 			http.NotFound(w, r)
 		}
 	}))
+}
+
+func newInvokeAIServer(t *testing.T, missingProperty string) *httptest.Server {
+	t.Helper()
+	return newCustomInvokeAIServer(t, "6.14.1", openAPIFixture(missingProperty), baselineModels)
 }
 
 func openAPIFixture(missingProperty string) map[string]any {
@@ -464,7 +749,9 @@ func openAPIFixture(missingProperty string) map[string]any {
 		for _, invocation := range entry.Invocations {
 			properties := map[string]any{"type": map[string]any{"const": invocation.Type}}
 			for _, property := range invocation.Properties {
-				if property != missingProperty {
+				if property == missingProperty {
+					delete(properties, property)
+				} else if property != "type" {
 					properties[property] = map[string]any{}
 				}
 			}
