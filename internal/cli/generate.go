@@ -79,8 +79,9 @@ func (c *CLI) executeGenerate(ctx context.Context, jsonOutput bool, command *cob
 	for _, name := range operationFlags {
 		fieldsSet = fieldsSet || command.Flags().Changed(name)
 	}
-	request := generation.Request{SchemaVersion: 1}
+	var request generation.Request
 	if fieldsSet {
+		request.SchemaVersion = 1
 		request.Model = options.model
 		request.PositivePrompt = options.prompt
 		request.NegativePrompt = options.negativePrompt

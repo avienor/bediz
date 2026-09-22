@@ -607,7 +607,7 @@ func assertAccessibleImageURL(t *testing.T, target, field, rawURL string) {
 	if err != nil {
 		t.Fatalf("fetch generated image %s: %v", field, err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("generated image %s returned %s", field, response.Status)
 	}

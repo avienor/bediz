@@ -675,6 +675,11 @@ func TestGenerateRejectsUnknownOrMixedRequestDocumentFieldsBeforeNetwork(t *test
 			args:    []string{"generate", "--no-wait", "--request", "-"},
 		},
 		{
+			name:    "missing schema version",
+			request: `{"model":"main-key","positive_prompt":"test"}`,
+			args:    []string{"generate", "--no-wait", "--request", "-"},
+		},
+		{
 			name:    "request mixed with operation flag",
 			request: `{"schema_version":1,"model":"main-key","positive_prompt":"test"}`,
 			args:    []string{"generate", "--no-wait", "--request", "-", "--model", "main-key"},
