@@ -38,6 +38,9 @@ func TestResolveAnimaAppliesFamilyDefaultsAndUniqueComponents(t *testing.T) {
 		resolved.Request.NegativePrompt != "" {
 		t.Fatalf("unexpected resolved defaults: %#v", resolved.Request)
 	}
+	if !reflect.DeepEqual(resolved.Seeds, []uint32{0x12345678}) {
+		t.Fatalf("resolved seeds = %v, want [305419896]", resolved.Seeds)
+	}
 	if resolved.Models.Main.Key != "main-key" || resolved.Models.VAE.Key != "vae-key" || resolved.Models.Qwen3Encoder.Key != "encoder-key" {
 		t.Fatalf("unexpected resolved models: %#v", resolved.Models)
 	}
@@ -140,6 +143,53 @@ func TestResolveAnimaExplicitSettingsAndCompatibleSelectorsWin(t *testing.T) {
 	}
 }
 
+func TestResolveAnimaAssignsIndependentRandomSeeds(t *testing.T) {
+	request := generation.Request{
+		SchemaVersion: 1, Model: "main-key", PositivePrompt: "test", OutputCount: new(3),
+	}
+	inventory := []generation.ModelIdentifier{
+		{Key: "main-key", Hash: "blake3:main", Name: "Anima Main", Base: "anima", Type: "main"},
+		{Key: "vae-key", Hash: "blake3:vae", Name: "Anima VAE", Base: "anima", Type: "vae"},
+		{Key: "encoder-key", Hash: "blake3:encoder", Name: "Qwen3 Encoder", Base: "any", Type: "qwen3_encoder"},
+	}
+	random := bytes.NewReader([]byte{
+		0x01, 0x00, 0x00, 0x00,
+		0xef, 0xbe, 0xad, 0xde,
+		0xff, 0xff, 0xff, 0xff,
+	})
+
+	resolved, err := generation.ResolveAnima(request, inventory, random)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(resolved.Seeds, []uint32{1, 0xdeadbeef, math.MaxUint32}) {
+		t.Fatalf("resolved seeds = %v", resolved.Seeds)
+	}
+	if resolved.Request.Seed == nil || *resolved.Request.Seed != 1 {
+		t.Fatalf("graph seed = %v, want the first resolved seed", resolved.Request.Seed)
+	}
+}
+
+func TestResolveAnimaIncrementsExplicitSeedWithUnsignedWraparound(t *testing.T) {
+	request := generation.Request{
+		SchemaVersion: 1, Model: "main-key", PositivePrompt: "test",
+		Seed: new(uint32(math.MaxUint32 - 1)), OutputCount: new(4),
+	}
+	inventory := []generation.ModelIdentifier{
+		{Key: "main-key", Hash: "blake3:main", Name: "Anima Main", Base: "anima", Type: "main"},
+		{Key: "vae-key", Hash: "blake3:vae", Name: "Anima VAE", Base: "anima", Type: "vae"},
+		{Key: "encoder-key", Hash: "blake3:encoder", Name: "Qwen3 Encoder", Base: "any", Type: "qwen3_encoder"},
+	}
+
+	resolved, err := generation.ResolveAnima(request, inventory, &errorReader{err: errors.New("random source must not be read")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(resolved.Seeds, []uint32{math.MaxUint32 - 1, math.MaxUint32, 0, 1}) {
+		t.Fatalf("resolved seeds = %v", resolved.Seeds)
+	}
+}
+
 type errorReader struct {
 	err error
 }
@@ -184,7 +234,6 @@ func TestResolveAnimaRejectsInvalidSettings(t *testing.T) {
 		{name: "NaN guidance", change: func(r *generation.Request) { r.Guidance = new(math.NaN()) }, message: "guidance must be finite and at least 1"},
 		{name: "infinite guidance", change: func(r *generation.Request) { r.Guidance = new(math.Inf(1)) }, message: "guidance must be finite and at least 1"},
 		{name: "zero output count", change: func(r *generation.Request) { r.OutputCount = new(0) }, message: "output count must be positive"},
-		{name: "multiple outputs", change: func(r *generation.Request) { r.OutputCount = new(2) }, message: "output count must be 1"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

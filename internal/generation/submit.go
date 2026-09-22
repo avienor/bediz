@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/avienor/bediz/internal/capability"
 	"github.com/avienor/bediz/internal/httpclient"
@@ -96,7 +97,7 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	if err != nil {
 		return ExecutionReceipt{}, err
 	}
-	enqueueRequest, err := CompileAnima(resolved.Request, resolved.Models)
+	enqueueRequest, err := CompileAnima(resolved)
 	if err != nil {
 		return ExecutionReceipt{}, err
 	}
@@ -105,8 +106,7 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	if err := client.DoJSON(ctx, http.MethodPost, enqueuePath, enqueueRequest, &response); err != nil {
 		return ExecutionReceipt{}, err
 	}
-	if response.QueueID != "default" || response.Enqueued != 1 || response.Requested != 1 ||
-		response.Batch.BatchID == "" || len(response.ItemIDs) != 1 || response.ItemIDs[0] < 1 {
+	if !validEnqueueResponse(response, *resolved.Request.OutputCount) {
 		enqueueURL, err := client.ResolveURL(enqueuePath)
 		if err != nil {
 			return ExecutionReceipt{}, fmt.Errorf("resolve enqueue URL: %w", err)
@@ -132,9 +132,27 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 			BoardID:        resolved.Request.BoardID,
 			ModelKey:       resolved.Models.Main.Key,
 			ComponentKeys:  map[string]string{"vae": resolved.Models.VAE.Key, "qwen3_encoder": resolved.Models.Qwen3Encoder.Key},
-			Seeds:          []uint32{*resolved.Request.Seed},
+			Seeds:          slices.Clone(resolved.Seeds),
 		},
 		Queue:   QueueReceipt{QueueID: response.QueueID, BatchID: response.Batch.BatchID, ItemIDs: response.ItemIDs},
 		Outputs: []Output{},
 	}, nil
+}
+
+func validEnqueueResponse(response enqueueResponse, outputCount int) bool {
+	if response.QueueID != "default" || response.Enqueued != outputCount || response.Requested != outputCount ||
+		response.Batch.BatchID == "" || len(response.ItemIDs) != outputCount {
+		return false
+	}
+	seen := make(map[int]struct{}, len(response.ItemIDs))
+	for _, itemID := range response.ItemIDs {
+		if itemID < 1 {
+			return false
+		}
+		if _, exists := seen[itemID]; exists {
+			return false
+		}
+		seen[itemID] = struct{}{}
+	}
+	return true
 }

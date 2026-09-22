@@ -111,6 +111,15 @@
         {"source":{"node_id":"metadata","field":"metadata"},"destination":{"node_id":"decode","field":"metadata"}}
       ]
     },
+    "data": [
+      [
+        {
+          "node_path": "seed",
+          "field_name": "value",
+          "items": [42]
+        }
+      ]
+    ],
     "runs": 1
   }
 }

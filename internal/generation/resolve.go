@@ -16,6 +16,7 @@ import (
 type AnimaResolution struct {
 	Request Request
 	Models  ResolvedModels
+	Seeds   []uint32
 }
 
 type modelRequirement struct {
@@ -38,12 +39,22 @@ func ResolveAnima(request Request, inventory []ModelIdentifier, random io.Reader
 	}
 
 	resolved := applyAnimaDefaults(request)
+	seeds := make([]uint32, *resolved.OutputCount)
 	if resolved.Seed == nil {
-		var encoded [4]byte
-		if _, err := io.ReadFull(random, encoded[:]); err != nil {
-			return AnimaResolution{}, fmt.Errorf("assign random Anima seed: %w", err)
+		for index := range seeds {
+			var encoded [4]byte
+			if _, err := io.ReadFull(random, encoded[:]); err != nil {
+				return AnimaResolution{}, fmt.Errorf("assign random Anima seed %d: %w", index+1, err)
+			}
+			seeds[index] = binary.LittleEndian.Uint32(encoded[:])
 		}
-		resolved.Seed = new(binary.LittleEndian.Uint32(encoded[:]))
+		resolved.Seed = new(seeds[0])
+	} else {
+		seed := *resolved.Seed
+		for index := range seeds {
+			seeds[index] = seed
+			seed++
+		}
 	}
 
 	mainModel, err := resolveUniqueCompatible(inventory, request.Model, animaMainRequirement)
@@ -67,6 +78,7 @@ func ResolveAnima(request Request, inventory []ModelIdentifier, random io.Reader
 	return AnimaResolution{
 		Request: resolved,
 		Models:  ResolvedModels{Main: mainModel, VAE: vae, Qwen3Encoder: encoder},
+		Seeds:   seeds,
 	}, nil
 }
 
@@ -122,9 +134,6 @@ func validateAnimaSettings(request Request) error {
 	}
 	if *request.OutputCount < 1 {
 		return operation.InvalidRequest("output count must be positive")
-	}
-	if *request.OutputCount != 1 {
-		return operation.InvalidRequest("output count must be 1 for this Anima generation capability")
 	}
 	return nil
 }

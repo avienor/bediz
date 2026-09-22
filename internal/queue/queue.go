@@ -54,6 +54,15 @@ type ItemError struct {
 	Message string `json:"message,omitempty"`
 }
 
+// BatchFieldValue is an InvokeAI batch substitution recorded on one queue
+// item. It is retained for operation-specific receipt verification and is not
+// part of Bediz's public queue-item JSON contract.
+type BatchFieldValue struct {
+	NodePath  string          `json:"node_path"`
+	FieldName string          `json:"field_name"`
+	Value     json.RawMessage `json:"value"`
+}
+
 type Item struct {
 	ItemID      int                `json:"item_id"`
 	QueueID     string             `json:"queue_id"`
@@ -69,6 +78,11 @@ type Item struct {
 	CompletedAt *string            `json:"completed_at,omitempty"`
 	Error       *ItemError         `json:"error,omitempty"`
 	Images      []images.Reference `json:"images"`
+	FieldValues []BatchFieldValue  `json:"-"`
+	// ImageOutputCount preserves raw session-result multiplicity even when
+	// duplicate names are normalized or an image can no longer be hydrated.
+	ImageOutputCount           int    `json:"-"`
+	ImageOutputValidationError string `json:"-"`
 }
 
 type GetResult struct {
@@ -98,20 +112,21 @@ type summaryRecord struct {
 }
 
 type itemRecord struct {
-	ItemID       int     `json:"item_id"`
-	QueueID      string  `json:"queue_id"`
-	BatchID      string  `json:"batch_id"`
-	SessionID    string  `json:"session_id"`
-	Status       string  `json:"status"`
-	Priority     int     `json:"priority"`
-	Origin       *string `json:"origin"`
-	Destination  *string `json:"destination"`
-	CreatedAt    string  `json:"created_at"`
-	UpdatedAt    string  `json:"updated_at"`
-	StartedAt    *string `json:"started_at"`
-	CompletedAt  *string `json:"completed_at"`
-	ErrorType    *string `json:"error_type"`
-	ErrorMessage *string `json:"error_message"`
+	ItemID       int               `json:"item_id"`
+	QueueID      string            `json:"queue_id"`
+	BatchID      string            `json:"batch_id"`
+	SessionID    string            `json:"session_id"`
+	Status       string            `json:"status"`
+	Priority     int               `json:"priority"`
+	Origin       *string           `json:"origin"`
+	Destination  *string           `json:"destination"`
+	CreatedAt    string            `json:"created_at"`
+	UpdatedAt    string            `json:"updated_at"`
+	StartedAt    *string           `json:"started_at"`
+	CompletedAt  *string           `json:"completed_at"`
+	ErrorType    *string           `json:"error_type"`
+	ErrorMessage *string           `json:"error_message"`
+	FieldValues  []BatchFieldValue `json:"field_values"`
 	Session      struct {
 		Results map[string]json.RawMessage `json:"results"`
 	} `json:"session"`
@@ -122,6 +137,10 @@ type outputRecord struct {
 	Image struct {
 		ImageName string `json:"image_name"`
 	} `json:"image"`
+}
+
+type outputTypeRecord struct {
+	Type string `json:"type"`
 }
 
 func List(ctx context.Context, client *httpclient.Client, request ListRequest) (ListResult, error) {
@@ -211,6 +230,7 @@ func Get(ctx context.Context, client *httpclient.Client, request GetRequest) (Ge
 		StartedAt:   response.StartedAt,
 		CompletedAt: response.CompletedAt,
 		Images:      []images.Reference{},
+		FieldValues: response.FieldValues,
 	}
 	if response.ErrorType != nil || response.ErrorMessage != nil {
 		item.Error = &ItemError{}
@@ -224,8 +244,22 @@ func Get(ctx context.Context, client *httpclient.Client, request GetRequest) (Ge
 
 	imageNames := make(map[string]struct{}, len(response.Session.Results))
 	for _, raw := range response.Session.Results {
+		var outputType outputTypeRecord
+		if err := json.Unmarshal(raw, &outputType); err != nil || outputType.Type != "image_output" {
+			continue
+		}
+		item.ImageOutputCount++
 		var output outputRecord
-		if err := json.Unmarshal(raw, &output); err != nil || output.Type != "image_output" || output.Image.ImageName == "" {
+		if err := json.Unmarshal(raw, &output); err != nil {
+			if item.ImageOutputValidationError == "" {
+				item.ImageOutputValidationError = "completed session contains a malformed image output"
+			}
+			continue
+		}
+		if output.Image.ImageName == "" {
+			if item.ImageOutputValidationError == "" {
+				item.ImageOutputValidationError = "completed session contains an image output without an image name"
+			}
 			continue
 		}
 		imageNames[output.Image.ImageName] = struct{}{}
@@ -237,6 +271,14 @@ func Get(ctx context.Context, client *httpclient.Client, request GetRequest) (Ge
 				continue
 			}
 			return GetResult{}, fmt.Errorf("get output image %q: %w", imageName, err)
+		}
+		if image.Image.ImageName != imageName {
+			if item.ImageOutputValidationError == "" {
+				item.ImageOutputValidationError = fmt.Sprintf(
+					"hydrated image output has contradictory image name %q; expected %q", image.Image.ImageName, imageName,
+				)
+			}
+			continue
 		}
 		item.Images = append(item.Images, image.Image)
 	}

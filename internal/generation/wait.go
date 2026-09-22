@@ -2,6 +2,7 @@ package generation
 
 import (
 	"context"
+	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"time"
@@ -45,14 +46,14 @@ func Wait(ctx context.Context, client *httpclient.Client, accepted ExecutionRece
 	if options.Timeout < 0 {
 		return accepted, operation.InvalidRequest("wait timeout cannot be negative")
 	}
-	if len(accepted.Queue.ItemIDs) != 1 || len(accepted.ResolvedSettings.Seeds) != 1 {
+	if len(accepted.Queue.ItemIDs) == 0 || len(accepted.Queue.ItemIDs) != len(accepted.ResolvedSettings.Seeds) ||
+		len(accepted.Queue.ItemIDs) != accepted.ResolvedSettings.OutputCount {
 		return accepted, operation.InvalidRequest(fmt.Sprintf(
-			"wait requires exactly one accepted output: %d queue items and %d resolved seeds",
-			len(accepted.Queue.ItemIDs), len(accepted.ResolvedSettings.Seeds),
+			"wait requires one item and seed per resolved output: %d outputs, %d queue items, and %d resolved seeds",
+			accepted.ResolvedSettings.OutputCount, len(accepted.Queue.ItemIDs), len(accepted.ResolvedSettings.Seeds),
 		))
 	}
 	position := operation.QueuePosition{QueueID: accepted.Queue.QueueID, BatchID: accepted.Queue.BatchID, ItemIDs: accepted.Queue.ItemIDs}
-	itemID := accepted.Queue.ItemIDs[0]
 
 	waitContext := ctx
 	if options.Timeout > 0 {
@@ -60,52 +61,118 @@ func Wait(ctx context.Context, client *httpclient.Client, accepted ExecutionRece
 		waitContext, cancel = context.WithTimeout(ctx, options.Timeout)
 		defer cancel()
 	}
+	accepted.Outputs = []Output{}
+	for index, itemID := range accepted.Queue.ItemIDs {
+		item, err := waitForItem(ctx, waitContext, client, position, itemID)
+		if err != nil {
+			return accepted, err
+		}
+		output, err := completedOutput(position, itemID, accepted.ResolvedSettings.Seeds[index], item)
+		if err != nil {
+			return accepted, err
+		}
+		accepted.Outputs = append(accepted.Outputs, output)
+	}
+	return accepted, nil
+}
+
+func waitForItem(ctx, waitContext context.Context, client *httpclient.Client, position operation.QueuePosition, itemID int) (queue.Item, error) {
 	for interval := firstPollInterval; ; interval = min(interval*2, maxPollInterval) {
 		result, err := queue.Get(waitContext, client, queue.GetRequest{
 			SchemaVersion: 1,
-			QueueID:       accepted.Queue.QueueID,
+			QueueID:       position.QueueID,
 			ItemID:        itemID,
 		})
 		if err != nil {
-			return accepted, waitStopped(ctx, waitContext, position, err)
+			return queue.Item{}, waitStopped(ctx, waitContext, position, err)
 		}
-		switch result.Item.Status {
+		item := result.Item
+		if item.ItemID != itemID || item.QueueID != position.QueueID || item.BatchID != position.BatchID {
+			return queue.Item{}, &operation.InvalidQueueResultError{
+				Position: position, ItemID: itemID, Status: item.Status,
+				Detail: fmt.Sprintf("reported contradictory queue identity: item %d, queue %q, batch %q", item.ItemID, item.QueueID, item.BatchID),
+			}
+		}
+		switch item.Status {
 		case statusPending, statusInProgress, statusWaiting:
 		case statusCompleted:
-			return completedReceipt(accepted, position, itemID, result.Item)
+			return item, nil
 		case statusFailed, statusCanceled:
-			failureType, failureMessage := normalizedFailure(result.Item)
-			return accepted, &operation.ItemFailureError{
-				Position: position, ItemID: itemID, Status: result.Item.Status,
+			failureType, failureMessage := normalizedFailure(item)
+			return queue.Item{}, &operation.ItemFailureError{
+				Position: position, ItemID: itemID, Status: item.Status,
 				FailureType: failureType, FailureMessage: failureMessage,
 			}
 		default:
-			return accepted, &operation.InvalidQueueResultError{
-				Position: position, ItemID: itemID, Status: result.Item.Status,
-				Detail: fmt.Sprintf("reported status %q, which is not a tested InvokeAI queue status", result.Item.Status),
+			return queue.Item{}, &operation.InvalidQueueResultError{
+				Position: position, ItemID: itemID, Status: item.Status,
+				Detail: fmt.Sprintf("reported status %q, which is not a tested InvokeAI queue status", item.Status),
 			}
 		}
 		timer := time.NewTimer(interval)
 		select {
 		case <-waitContext.Done():
 			timer.Stop()
-			return accepted, waitStopped(ctx, waitContext, position, nil)
+			return queue.Item{}, waitStopped(ctx, waitContext, position, nil)
 		case <-timer.C:
 		}
 	}
 }
 
-// completedReceipt associates the completed item with the resolved seed at the
-// same position in the accepted Resolved Seed Set.
-func completedReceipt(accepted ExecutionReceipt, position operation.QueuePosition, itemID int, item queue.Item) (ExecutionReceipt, error) {
-	if len(item.Images) != 1 {
-		return accepted, &operation.InvalidQueueResultError{
-			Position: position, ItemID: itemID, Status: item.Status,
-			Detail: fmt.Sprintf("completed with %d image outputs; expected exactly one", len(item.Images)),
+// completedOutput verifies the batch metadata before associating an image
+// with the same-position seed in the accepted Resolved Seed Set.
+func completedOutput(position operation.QueuePosition, itemID int, expectedSeed uint32, item queue.Item) (Output, error) {
+	seed, err := itemSeed(item)
+	if err != nil {
+		return Output{}, &operation.InvalidQueueResultError{
+			Position: position, ItemID: itemID, Status: item.Status, Detail: err.Error(),
 		}
 	}
-	accepted.Outputs = []Output{{ItemID: itemID, Seed: accepted.ResolvedSettings.Seeds[0], Image: item.Images[0]}}
-	return accepted, nil
+	if seed != expectedSeed {
+		return Output{}, &operation.InvalidQueueResultError{
+			Position: position, ItemID: itemID, Status: item.Status,
+			Detail: fmt.Sprintf("batch metadata seed %d contradicts resolved seed %d", seed, expectedSeed),
+		}
+	}
+	if item.ImageOutputValidationError != "" {
+		return Output{}, &operation.InvalidQueueResultError{
+			Position: position, ItemID: itemID, Status: item.Status, Detail: item.ImageOutputValidationError,
+		}
+	}
+	if item.ImageOutputCount != 1 {
+		return Output{}, &operation.InvalidQueueResultError{
+			Position: position, ItemID: itemID, Status: item.Status,
+			Detail: fmt.Sprintf("completed with %d image outputs; expected exactly one", item.ImageOutputCount),
+		}
+	}
+	if len(item.Images) != 1 {
+		return Output{}, &operation.InvalidQueueResultError{
+			Position: position, ItemID: itemID, Status: item.Status,
+			Detail: fmt.Sprintf("completed with one image output but %d accessible Image References", len(item.Images)),
+		}
+	}
+	return Output{ItemID: itemID, Seed: expectedSeed, Image: item.Images[0]}, nil
+}
+
+func itemSeed(item queue.Item) (uint32, error) {
+	var seed *uint32
+	for _, fieldValue := range item.FieldValues {
+		if fieldValue.NodePath != "seed" || fieldValue.FieldName != "value" {
+			continue
+		}
+		if seed != nil {
+			return 0, errors.New("batch metadata contains several seed values")
+		}
+		var value uint32
+		if err := json.Unmarshal(fieldValue.Value, &value); err != nil {
+			return 0, fmt.Errorf("batch metadata contains an invalid seed: %w", err)
+		}
+		seed = new(value)
+	}
+	if seed == nil {
+		return 0, errors.New("batch metadata is missing the resolved seed")
+	}
+	return *seed, nil
 }
 
 // normalizedFailure returns the concise failure InvokeAI reports for a failed

@@ -1,6 +1,9 @@
 package generation
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 type Components struct {
 	VAE          string `json:"vae,omitempty"`
@@ -128,26 +131,37 @@ type animaLatentsToImageNode struct {
 }
 
 type Batch struct {
-	Origin      string `json:"origin"`
-	Destination string `json:"destination"`
-	Graph       Graph  `json:"graph"`
-	Runs        int    `json:"runs"`
+	Origin      string         `json:"origin"`
+	Destination string         `json:"destination"`
+	Graph       Graph          `json:"graph"`
+	Data        [][]BatchDatum `json:"data"`
+	Runs        int            `json:"runs"`
+}
+
+type BatchDatum struct {
+	NodePath  string   `json:"node_path"`
+	FieldName string   `json:"field_name"`
+	Items     []uint32 `json:"items"`
 }
 
 type EnqueueRequest struct {
 	Batch Batch `json:"batch"`
 }
 
-func CompileAnima(request Request, models ResolvedModels) (EnqueueRequest, error) {
+func CompileAnima(resolved AnimaResolution) (EnqueueRequest, error) {
+	request := resolved.Request
 	if request.Width == nil || request.Height == nil || request.Steps == nil || request.Scheduler == nil ||
 		request.Guidance == nil || request.Seed == nil || request.OutputCount == nil {
 		return EnqueueRequest{}, fmt.Errorf("compile Anima graph: all generation settings must be resolved")
+	}
+	if len(resolved.Seeds) != *request.OutputCount || len(resolved.Seeds) == 0 || resolved.Seeds[0] != *request.Seed {
+		return EnqueueRequest{}, fmt.Errorf("compile Anima graph: resolved seeds do not match the request")
 	}
 
 	nodes := map[string]any{
 		"model_loader": animaModelLoaderNode{
 			ID: "model_loader", IsIntermediate: true, UseCache: true, Type: "anima_model_loader",
-			Model: models.Main, VAEModel: models.VAE, Qwen3EncoderModel: models.Qwen3Encoder,
+			Model: resolved.Models.Main, VAEModel: resolved.Models.VAE, Qwen3EncoderModel: resolved.Models.Qwen3Encoder,
 		},
 		"positive_prompt": stringNode{
 			ID: "positive_prompt", IsIntermediate: true, UseCache: true, Type: "string",
@@ -183,7 +197,7 @@ func CompileAnima(request Request, models ResolvedModels) (EnqueueRequest, error
 			GenerationMode: "anima_txt2img", NegativePrompt: request.NegativePrompt,
 			Width: *request.Width, Height: *request.Height, CFGScale: *request.Guidance,
 			Steps: *request.Steps, Scheduler: *request.Scheduler,
-			Model: models.Main, VAE: models.VAE, Qwen3Encoder: models.Qwen3Encoder,
+			Model: resolved.Models.Main, VAE: resolved.Models.VAE, Qwen3Encoder: resolved.Models.Qwen3Encoder,
 		},
 		"decode": animaLatentsToImageNode{
 			ID: "decode", IsIntermediate: false, UseCache: false, Type: "anima_l2i",
@@ -213,9 +227,16 @@ func CompileAnima(request Request, models ResolvedModels) (EnqueueRequest, error
 		edge("metadata", "metadata", "decode", "metadata"),
 	}
 
+	batchSeeds := slices.Clone(resolved.Seeds)
+	// InvokeAI 6.14 returns enqueue item IDs newest-first while expanding batch
+	// values in listed order. Reverse the adapter payload so each returned item
+	// ID has the same-position seed in the resolved receipt.
+	slices.Reverse(batchSeeds)
 	return EnqueueRequest{Batch: Batch{
 		Origin: "generate", Destination: "generate",
-		Graph: Graph{ID: "bediz_anima_v1", Nodes: nodes, Edges: edges}, Runs: 1,
+		Graph: Graph{ID: "bediz_anima_v1", Nodes: nodes, Edges: edges},
+		Data:  [][]BatchDatum{{{NodePath: "seed", FieldName: "value", Items: batchSeeds}}},
+		Runs:  1,
 	}}, nil
 }
 

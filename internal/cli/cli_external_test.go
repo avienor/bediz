@@ -116,6 +116,14 @@ func newAnimaGenerationServer(openAPI map[string]any, models []map[string]any, e
 	}))
 }
 
+func animaModelInventory() []map[string]any {
+	return []map[string]any{
+		{"key": "main-key", "hash": "blake3:main", "name": "Anima Main", "base": "anima", "type": "main"},
+		{"key": "vae-key", "hash": "blake3:vae", "name": "Anima VAE", "base": "anima", "type": "vae"},
+		{"key": "encoder-key", "hash": "blake3:encoder", "name": "Qwen3 Encoder", "base": "any", "type": "qwen3_encoder"},
+	}
+}
+
 func serveAnimaPreflight(w http.ResponseWriter, r *http.Request, version string, openAPI map[string]any, models []map[string]any) bool {
 	switch r.URL.Path {
 	case "/api/v1/app/version":
@@ -186,11 +194,79 @@ func TestGenerateNoWaitFlagsSubmitExactAnimaRequestOnce(t *testing.T) {
 	if envelope.SchemaVersion != 1 || !envelope.OK || envelope.Operation != "generate" ||
 		envelope.Data.SubmittedRequest["model"] != "main-key" ||
 		envelope.Data.ResolvedSettings.ModelKey != "main-key" ||
+		envelope.Data.ResolvedSettings.BoardID != "board-1" ||
 		!reflect.DeepEqual(envelope.Data.ResolvedSettings.ComponentKeys, map[string]string{"vae": "vae-key", "qwen3_encoder": "encoder-key"}) ||
 		!reflect.DeepEqual(envelope.Data.ResolvedSettings.Seeds, []uint32{42}) ||
 		envelope.Data.Queue.QueueID != "default" || envelope.Data.Queue.BatchID != "batch-1" ||
 		!reflect.DeepEqual(envelope.Data.Queue.ItemIDs, []int{17}) || len(envelope.Data.Outputs) != 0 || len(envelope.Warnings) != 0 {
 		t.Fatalf("unexpected envelope: %#v", envelope)
+	}
+}
+
+func TestGenerateNoWaitSubmitsOneOrderedBatch(t *testing.T) {
+	isolateUserConfigDir(t)
+	var enqueueRequests atomic.Int32
+	server := newAnimaGenerationServer(nil, animaModelInventory(), func(w http.ResponseWriter, r *http.Request) {
+		enqueueRequests.Add(1)
+		var payload struct {
+			Batch struct {
+				Data [][]struct {
+					NodePath  string   `json:"node_path"`
+					FieldName string   `json:"field_name"`
+					Items     []uint32 `json:"items"`
+				} `json:"data"`
+				Graph struct {
+					Nodes map[string]json.RawMessage `json:"nodes"`
+				} `json:"graph"`
+				Runs int `json:"runs"`
+			} `json:"batch"`
+		}
+		if err := jsonv2.UnmarshalRead(r.Body, &payload); err != nil {
+			t.Errorf("decode enqueue request: %v", err)
+			return
+		}
+		if payload.Batch.Runs != 1 || len(payload.Batch.Data) != 1 || len(payload.Batch.Data[0]) != 1 {
+			t.Errorf("unexpected batch shape: %#v", payload.Batch)
+		} else {
+			seedData := payload.Batch.Data[0][0]
+			if seedData.NodePath != "seed" || seedData.FieldName != "value" || !slices.Equal(seedData.Items, []uint32{9, 8, 7}) {
+				t.Errorf("seed batch data = %#v", seedData)
+			}
+		}
+		var decode map[string]any
+		if err := json.Unmarshal(payload.Batch.Graph.Nodes["decode"], &decode); err != nil {
+			t.Errorf("decode output node: %v", err)
+		} else if !reflect.DeepEqual(decode["board"], map[string]any{"board_id": "board-1"}) {
+			t.Errorf("decode board = %#v", decode["board"])
+		}
+		_ = jsonv2.MarshalWrite(w, map[string]any{
+			"queue_id": "default", "enqueued": 3, "requested": 3, "item_ids": []int{23, 22, 21},
+			"batch": map[string]any{"batch_id": "batch-3"},
+		})
+	})
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{
+		"generate", "--no-wait", "--model", "main-key", "--prompt", "test",
+		"--seed", "7", "--output-count", "3", "--board", "board-1",
+		"--vae", "vae-key", "--qwen3-encoder", "encoder-key", "--url", server.URL, "--json",
+	})
+
+	if exitCode != result.ExitSuccess || stderr.Len() != 0 || enqueueRequests.Load() != 1 {
+		t.Fatalf("exit code = %d, enqueue requests = %d, stderr = %q, stdout = %q", exitCode, enqueueRequests.Load(), stderr.String(), stdout.String())
+	}
+	var envelope receiptEnvelope
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Data.ResolvedSettings.OutputCount != 3 ||
+		envelope.Data.ResolvedSettings.BoardID != "board-1" ||
+		!slices.Equal(envelope.Data.ResolvedSettings.Seeds, []uint32{7, 8, 9}) ||
+		!slices.Equal(envelope.Data.Queue.ItemIDs, []int{23, 22, 21}) || len(envelope.Data.Outputs) != 0 {
+		t.Fatalf("unexpected receipt: %#v", envelope.Data)
 	}
 }
 
@@ -665,11 +741,7 @@ func TestGenerateRejectsSeedsOutsideUnsigned32BitRangeBeforeNetwork(t *testing.T
 func TestGenerateDoesNotRetryInconclusiveEnqueue(t *testing.T) {
 	isolateUserConfigDir(t)
 	var enqueueRequests atomic.Int32
-	server := newAnimaGenerationServer(nil, []map[string]any{
-		{"key": "main-key", "hash": "blake3:main", "name": "Anima Main", "base": "anima", "type": "main"},
-		{"key": "vae-key", "hash": "blake3:vae", "name": "Anima VAE", "base": "anima", "type": "vae"},
-		{"key": "encoder-key", "hash": "blake3:encoder", "name": "Qwen3 Encoder", "base": "any", "type": "qwen3_encoder"},
-	}, func(w http.ResponseWriter, _ *http.Request) {
+	server := newAnimaGenerationServer(nil, animaModelInventory(), func(w http.ResponseWriter, _ *http.Request) {
 		enqueueRequests.Add(1)
 		connection, _, err := w.(http.Hijacker).Hijack()
 		if err != nil {
@@ -705,11 +777,7 @@ func TestGenerateDoesNotRetryInconclusiveEnqueue(t *testing.T) {
 func TestGenerateTreatsIncompleteSuccessfulEnqueueResponseAsOutcomeUnknown(t *testing.T) {
 	isolateUserConfigDir(t)
 	var enqueueRequests atomic.Int32
-	server := newAnimaGenerationServer(nil, []map[string]any{
-		{"key": "main-key", "hash": "blake3:main", "name": "Anima Main", "base": "anima", "type": "main"},
-		{"key": "vae-key", "hash": "blake3:vae", "name": "Anima VAE", "base": "anima", "type": "vae"},
-		{"key": "encoder-key", "hash": "blake3:encoder", "name": "Qwen3 Encoder", "base": "any", "type": "qwen3_encoder"},
-	}, func(w http.ResponseWriter, _ *http.Request) {
+	server := newAnimaGenerationServer(nil, animaModelInventory(), func(w http.ResponseWriter, _ *http.Request) {
 		enqueueRequests.Add(1)
 		_ = jsonv2.MarshalWrite(w, map[string]any{})
 	})
@@ -733,6 +801,38 @@ func TestGenerateTreatsIncompleteSuccessfulEnqueueResponseAsOutcomeUnknown(t *te
 		t.Fatal(err)
 	}
 	if envelope.Error == nil || envelope.Error.Code != "outcome_unknown" {
+		t.Fatalf("unexpected envelope: %#v", envelope)
+	}
+}
+
+func TestGenerateTreatsPartiallyAcceptedBatchAsOutcomeUnknown(t *testing.T) {
+	isolateUserConfigDir(t)
+	var enqueueRequests atomic.Int32
+	server := newAnimaGenerationServer(nil, animaModelInventory(), func(w http.ResponseWriter, _ *http.Request) {
+		enqueueRequests.Add(1)
+		_ = jsonv2.MarshalWrite(w, map[string]any{
+			"queue_id": "default", "enqueued": 1, "requested": 2, "item_ids": []int{17},
+			"batch": map[string]any{"batch_id": "partial-batch"},
+		})
+	})
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{
+		"generate", "--no-wait", "--model", "main-key", "--prompt", "test", "--seed", "7", "--output-count", "2",
+		"--vae", "vae-key", "--qwen3-encoder", "encoder-key", "--url", server.URL, "--json",
+	})
+
+	if exitCode != result.ExitInvokeAIFailure || stderr.Len() != 0 || enqueueRequests.Load() != 1 {
+		t.Fatalf("exit code = %d, enqueues = %d, stderr = %q, stdout = %q", exitCode, enqueueRequests.Load(), stderr.String(), stdout.String())
+	}
+	var envelope result.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Error == nil || envelope.Error.Code != result.CodeOutcomeUnknown {
 		t.Fatalf("unexpected envelope: %#v", envelope)
 	}
 }
@@ -765,6 +865,38 @@ func TestGenerateRejectsNonFiniteGuidanceBeforeNetwork(t *testing.T) {
 				t.Fatal(err)
 			}
 			if envelope.Error == nil || envelope.Error.Code != "invalid_request" {
+				t.Fatalf("unexpected envelope: %#v", envelope)
+			}
+		})
+	}
+}
+
+func TestGenerateRejectsNonPositiveOutputCountBeforeNetwork(t *testing.T) {
+	for _, outputCount := range []string{"0", "-1"} {
+		t.Run(outputCount, func(t *testing.T) {
+			isolateUserConfigDir(t)
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				requests.Add(1)
+			}))
+			defer server.Close()
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			app := cli.New(&stdout, &stderr)
+
+			exitCode := app.Run(t.Context(), []string{
+				"generate", "--no-wait", "--model", "main-key", "--prompt", "test",
+				"--output-count", outputCount, "--url", server.URL, "--json",
+			})
+
+			if exitCode != result.ExitInvalidRequest || stderr.Len() != 0 || requests.Load() != 0 {
+				t.Fatalf("exit code = %d, requests = %d, stderr = %q, stdout = %q", exitCode, requests.Load(), stderr.String(), stdout.String())
+			}
+			var envelope result.Envelope
+			if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope.Error == nil || envelope.Error.Code != result.CodeInvalidRequest {
 				t.Fatalf("unexpected envelope: %#v", envelope)
 			}
 		})
@@ -840,8 +972,16 @@ func newGenerateWaitServer(t *testing.T, items []map[string]any, transientFailur
 		case strings.HasPrefix(r.URL.Path, "/api/v1/images/i/"):
 			counters.imageGets.Add(1)
 			name := strings.TrimPrefix(r.URL.Path, "/api/v1/images/i/")
+			if name == "missing.png" {
+				http.NotFound(w, r)
+				return
+			}
+			responseName := name
+			if name == "mismatched.png" {
+				responseName = "other.png"
+			}
 			_ = jsonv2.MarshalWrite(w, map[string]any{
-				"image_name": name, "image_url": "/api/v1/images/i/" + name + "/full",
+				"image_name": responseName, "image_url": "/api/v1/images/i/" + name + "/full",
 				"thumbnail_url": "/api/v1/images/i/" + name + "/thumbnail",
 				"image_origin":  "internal", "image_category": "general", "width": 768, "height": 1024,
 				"created_at": "2026-01-01 00:00:05.000", "updated_at": "2026-01-01 00:00:05.000",
@@ -862,6 +1002,7 @@ func queueItemPayload(status string, extra map[string]any) map[string]any {
 		"item_id": 17, "queue_id": "default", "batch_id": "batch-1", "session_id": "session-1",
 		"status": status, "priority": 0,
 		"created_at": "2026-01-01 00:00:00.000", "updated_at": "2026-01-01 00:00:00.000",
+		"field_values": []map[string]any{{"node_path": "seed", "field_name": "value", "value": 42}},
 	}
 	for key, value := range extra {
 		item[key] = value
@@ -907,6 +1048,7 @@ type receiptEnvelope struct {
 			Scheduler      string            `json:"scheduler"`
 			Guidance       float64           `json:"guidance"`
 			OutputCount    int               `json:"output_count"`
+			BoardID        string            `json:"board_id"`
 			ModelKey       string            `json:"model_key"`
 			ComponentKeys  map[string]string `json:"component_keys"`
 			Seeds          []uint32          `json:"seeds"`
@@ -929,6 +1071,7 @@ type receiptEnvelope struct {
 				Height        int     `json:"height"`
 				SessionID     *string `json:"session_id"`
 				NodeID        *string `json:"node_id"`
+				BoardID       *string `json:"board_id"`
 			} `json:"image"`
 		} `json:"outputs"`
 	} `json:"data"`
@@ -1006,6 +1149,102 @@ func TestGenerateWaitsForCompletionAndReturnsCompletedReceipt(t *testing.T) {
 		output.Image.SessionID == nil || *output.Image.SessionID != "session-1" ||
 		output.Image.NodeID == nil || *output.Image.NodeID != "node-1" {
 		t.Fatalf("unexpected completed output: %#v", output)
+	}
+}
+
+func TestGenerateWaitsForOrderedBatchCompletion(t *testing.T) {
+	isolateUserConfigDir(t)
+	var enqueueRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveAnimaPreflight(w, r, "6.14.1", animaOpenAPIFixture("", ""), animaModelInventory()) {
+			return
+		}
+		switch r.URL.Path {
+		case "/api/v1/queue/default/enqueue_batch":
+			enqueueRequests.Add(1)
+			var payload struct {
+				Batch struct {
+					Data [][]struct {
+						Items []uint32 `json:"items"`
+					} `json:"data"`
+					Graph struct {
+						Nodes map[string]json.RawMessage `json:"nodes"`
+					} `json:"graph"`
+				} `json:"batch"`
+			}
+			if err := jsonv2.UnmarshalRead(r.Body, &payload); err != nil {
+				t.Errorf("decode enqueue request: %v", err)
+				return
+			}
+			if len(payload.Batch.Data) != 1 || len(payload.Batch.Data[0]) != 1 ||
+				!slices.Equal(payload.Batch.Data[0][0].Items, []uint32{43, 42}) {
+				t.Errorf("batch seed data = %#v", payload.Batch.Data)
+			}
+			var decode map[string]any
+			if err := json.Unmarshal(payload.Batch.Graph.Nodes["decode"], &decode); err != nil {
+				t.Errorf("decode output node: %v", err)
+			} else if _, exists := decode["board"]; exists {
+				t.Errorf("decode node unexpectedly contains a board: %#v", decode)
+			}
+			_ = jsonv2.MarshalWrite(w, map[string]any{
+				"queue_id": "default", "enqueued": 2, "requested": 2, "item_ids": []int{23, 22},
+				"batch": map[string]any{"batch_id": "batch-2"},
+			})
+		case "/api/v1/queue/default/i/23":
+			_ = jsonv2.MarshalWrite(w, completedBatchItem(23, "batch-2", 42, "first.png"))
+		case "/api/v1/queue/default/i/22":
+			_ = jsonv2.MarshalWrite(w, completedBatchItem(22, "batch-2", 43, "second.png"))
+		case "/api/v1/images/i/first.png", "/api/v1/images/i/second.png":
+			name := strings.TrimPrefix(r.URL.Path, "/api/v1/images/i/")
+			_ = jsonv2.MarshalWrite(w, map[string]any{
+				"image_name": name, "image_url": r.URL.Path + "/full", "thumbnail_url": r.URL.Path + "/thumbnail",
+				"image_origin": "internal", "image_category": "general", "width": 1024, "height": 1024,
+				"created_at": "2026-01-01", "updated_at": "2026-01-01", "is_intermediate": false,
+				"starred": false, "has_workflow": false,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{
+		"generate", "--model", "main-key", "--prompt", "test", "--seed", "42", "--output-count", "2",
+		"--vae", "vae-key", "--qwen3-encoder", "encoder-key", "--url", server.URL, "--json",
+	})
+
+	if exitCode != result.ExitSuccess || stderr.Len() != 0 || enqueueRequests.Load() != 1 {
+		t.Fatalf("exit code = %d, enqueues = %d, stderr = %q, stdout = %q", exitCode, enqueueRequests.Load(), stderr.String(), stdout.String())
+	}
+	var envelope receiptEnvelope
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(envelope.Data.ResolvedSettings.Seeds, []uint32{42, 43}) ||
+		!slices.Equal(envelope.Data.Queue.ItemIDs, []int{23, 22}) || len(envelope.Data.Outputs) != 2 {
+		t.Fatalf("unexpected receipt: %#v", envelope.Data)
+	}
+	for index, want := range []struct {
+		itemID int
+		seed   uint32
+		image  string
+	}{{23, 42, "first.png"}, {22, 43, "second.png"}} {
+		output := envelope.Data.Outputs[index]
+		if output.ItemID != want.itemID || output.Seed != want.seed || output.Image.ImageName != want.image || output.Image.BoardID != nil {
+			t.Fatalf("output %d = %#v", index, output)
+		}
+	}
+}
+
+func completedBatchItem(itemID int, batchID string, seed uint32, imageName string) map[string]any {
+	return map[string]any{
+		"item_id": itemID, "queue_id": "default", "batch_id": batchID, "session_id": "session-" + strconv.Itoa(itemID),
+		"status": "completed", "priority": 0, "created_at": "2026-01-01", "updated_at": "2026-01-01",
+		"field_values": []map[string]any{{"node_path": "seed", "field_name": "value", "value": seed}},
+		"session":      completedItemResults(imageName),
 	}
 }
 
@@ -1198,6 +1437,41 @@ func TestGenerateRejectsQueueResultsOutsideTheTestedContract(t *testing.T) {
 			}),
 			wantStatus: "completed",
 			wantDetail: "2 image outputs",
+		},
+		{
+			name: "completed with duplicate image output records",
+			item: queueItemPayload("completed", map[string]any{
+				"session": completedItemResults("same.png", "same.png"),
+			}),
+			wantStatus: "completed",
+			wantDetail: "2 image outputs",
+		},
+		{
+			name: "completed with an unavailable image output",
+			item: queueItemPayload("completed", map[string]any{
+				"session": completedItemResults("missing.png"),
+			}),
+			wantStatus: "completed",
+			wantDetail: "0 accessible Image References",
+		},
+		{
+			name: "completed with a malformed typed image output",
+			item: queueItemPayload("completed", map[string]any{
+				"session": map[string]any{"results": map[string]any{
+					"valid":     map[string]any{"type": "image_output", "image": map[string]any{"image_name": "valid.png"}},
+					"malformed": map[string]any{"type": "image_output", "image": "invalid"},
+				}},
+			}),
+			wantStatus: "completed",
+			wantDetail: "malformed image output",
+		},
+		{
+			name: "completed with contradictory hydrated image name",
+			item: queueItemPayload("completed", map[string]any{
+				"session": completedItemResults("mismatched.png"),
+			}),
+			wantStatus: "completed",
+			wantDetail: "contradictory image name",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
