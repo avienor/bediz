@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	json "encoding/json/v2"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -16,6 +17,19 @@ import (
 
 var generationSyncMutations = []string{
 	"POST /api/v1/queue/default/enqueue_batch", "POST /api/v1/recall/default",
+}
+
+type failFirstWrite struct {
+	bytes.Buffer
+	writes int
+}
+
+func (writer *failFirstWrite) Write(data []byte) (int, error) {
+	writer.writes++
+	if writer.writes == 1 {
+		return 0, errors.New("warning output unavailable")
+	}
+	return writer.Buffer.Write(data)
 }
 
 func assertPartialSyncWarning(t *testing.T, receiptWarnings, envelopeWarnings []result.Warning) {
@@ -92,6 +106,37 @@ func TestGenerateNoWaitRecallsFirstResolvedSeedAfterAcceptedBatch(t *testing.T) 
 		t.Fatalf("envelope=%#v", envelope)
 	}
 	assertPartialSyncWarning(t, envelope.Data.Warnings, envelope.Warnings)
+}
+
+func TestGenerateReportsWarningOutputFailureAsLocalOutputFailure(t *testing.T) {
+	isolateUserConfigDir(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveAnimaPreflight(w, r, "6.14.1", animaOpenAPIFixture("", ""), animaModelInventory()) {
+			return
+		}
+		switch r.URL.Path {
+		case "/api/v1/queue/default/enqueue_batch":
+			_ = json.MarshalWrite(w, map[string]any{
+				"queue_id": "default", "enqueued": 1, "requested": 1, "item_ids": []int{17},
+				"batch": map[string]any{"batch_id": "batch-warning"},
+			})
+		case "/api/v1/recall/default":
+			_, _ = w.Write([]byte(`{"status":"success"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	var stdout bytes.Buffer
+	stderr := &failFirstWrite{}
+	code := cli.New(&stdout, stderr).Run(t.Context(), []string{
+		"generate", "--no-wait", "--model", "main-key", "--prompt", "test", "--seed", "1", "--url", server.URL,
+	})
+	if code != result.ExitStatus(result.CodeOutputWriteFailed) ||
+		!bytes.Contains(stdout.Bytes(), []byte("Accepted batch batch-warning")) ||
+		!bytes.Contains(stderr.Bytes(), []byte(result.CodeOutputWriteFailed)) {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
 }
 
 func TestGenerateRecallFailurePreservesSuccessfulReceipt(t *testing.T) {

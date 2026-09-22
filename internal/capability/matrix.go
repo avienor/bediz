@@ -19,6 +19,19 @@ type RecallFieldRequirement struct {
 	Type string
 }
 
+// RecallSchemaAlternative is one type branch in a Recall patch field's anyOf.
+type RecallSchemaAlternative struct {
+	Type string `json:"type"`
+}
+
+// MatchesNullableAlternatives accepts the expected field type and null in
+// either order, without accepting extra or duplicate branches.
+func (field RecallFieldRequirement) MatchesNullableAlternatives(alternatives []RecallSchemaAlternative) bool {
+	return len(alternatives) == 2 &&
+		((alternatives[0].Type == field.Type && alternatives[1].Type == "null") ||
+			(alternatives[0].Type == "null" && alternatives[1].Type == field.Type))
+}
+
 var RecallPatchFields = []RecallFieldRequirement{
 	{Name: "positive_prompt", Type: "string"},
 	{Name: "negative_prompt", Type: "string"},

@@ -783,6 +783,23 @@ func TestDoctorReportsMissingRecallRequirementsSeparatelyFromDirectExecution(t *
 	}
 }
 
+func TestDoctorAcceptsReversedRecallNullableAlternatives(t *testing.T) {
+	document := openAPIFixture(t)
+	schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
+	seed := schemas["RecallParameter"].(map[string]any)["properties"].(map[string]any)["seed"].(map[string]any)
+	seed["anyOf"] = []any{map[string]any{"type": "null"}, map[string]any{"type": "integer"}}
+	server := newCustomInvokeAIServer(t, "6.14.1", document, baselineModels)
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := Run(t.Context(), client, version.Info{Version: "test"})
+	if !report.Ready || report.UISync["generate"] != "partial" {
+		t.Fatalf("valid Recall schema should preserve partial readiness: %#v", report)
+	}
+}
+
 func assertIssuePresent(t *testing.T, report Report, code string) {
 	t.Helper()
 	for _, issue := range report.Issues {

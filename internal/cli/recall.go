@@ -52,7 +52,9 @@ func (c *CLI) executeRecall(ctx context.Context, jsonOutput bool, command *cobra
 		flagsSet = flagsSet || command.Flags().Changed(name)
 	}
 	if flagsSet {
-		request.Model = options.model
+		if command.Flags().Changed("model") {
+			request.Model = new(options.model)
+		}
 		if command.Flags().Changed("prompt") {
 			request.PositivePrompt = new(options.prompt)
 		}

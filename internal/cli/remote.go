@@ -138,7 +138,7 @@ func (e remoteExecution[Request, Result]) run(ctx context.Context, c *CLI, jsonO
 	if e.warnings != nil {
 		for _, warning := range e.warnings(value) {
 			if _, err := fmt.Fprintf(c.stderr, "%s: %s\n", warning.Code, warning.Message); err != nil {
-				return result.ExitInvokeAIFailure
+				return c.fail(e.operation, false, result.CodeOutputWriteFailed, err.Error(), nil)
 			}
 		}
 	}

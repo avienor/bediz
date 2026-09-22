@@ -13,7 +13,7 @@ import (
 
 type Request struct {
 	SchemaVersion  int     `json:"schema_version"`
-	Model          string  `json:"model,omitempty"`
+	Model          *string `json:"model,omitempty"`
 	PositivePrompt *string `json:"positive_prompt,omitempty"`
 	NegativePrompt *string `json:"negative_prompt,omitempty"`
 	Width          *int    `json:"width,omitempty"`
@@ -42,9 +42,7 @@ type openAPIDocument struct {
 	Components struct {
 		Schemas map[string]struct {
 			Properties map[string]struct {
-				AnyOf []struct {
-					Type string `json:"type"`
-				} `json:"anyOf"`
+				AnyOf []capability.RecallSchemaAlternative `json:"anyOf"`
 			} `json:"properties"`
 		} `json:"schemas"`
 	} `json:"components"`
@@ -78,19 +76,19 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Re
 	properties := openAPI.Components.Schemas["RecallParameter"].Properties
 	for _, field := range capability.RecallPatchFields {
 		property, ok := properties[field.Name]
-		if !ok || len(property.AnyOf) != 2 || property.AnyOf[0].Type != field.Type || property.AnyOf[1].Type != "null" {
+		if !ok || !field.MatchesNullableAlternatives(property.AnyOf) {
 			return Result{}, operation.UnsupportedCapability(fmt.Sprintf("InvokeAI Recall schema does not support %s as a patch field", field.Name))
 		}
 	}
 	patch := request
-	if request.Model != "" {
+	if request.Model != nil {
 		var inventory struct {
 			Models []generation.ModelIdentifier `json:"models"`
 		}
 		if err := client.GetJSON(ctx, "/api/v2/models/", &inventory); err != nil {
 			return Result{}, err
 		}
-		model, err := generation.ResolveAnimaMain(inventory.Models, request.Model)
+		model, err := generation.ResolveAnimaMain(inventory.Models, *request.Model)
 		if err != nil {
 			return Result{}, err
 		}
@@ -99,7 +97,7 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Re
 				return Result{}, operation.UnsupportedCapability(fmt.Sprintf("main model name %q is shared by installed models", model.Name))
 			}
 		}
-		patch.Model = model.Name
+		patch.Model = new(model.Name)
 	}
 	if err := client.DoJSON(ctx, http.MethodPost, "/api/v1/recall/default", patchBody(patch), nil); err != nil {
 		return Result{}, err
@@ -111,13 +109,16 @@ func validate(request Request) error {
 	if request.SchemaVersion != 1 {
 		return operation.InvalidRequest(fmt.Sprintf("unsupported request schema version %d", request.SchemaVersion))
 	}
-	if request.Model == "" && request.PositivePrompt == nil && request.NegativePrompt == nil && request.Width == nil && request.Height == nil && request.Steps == nil && request.Seed == nil {
+	if request.Model != nil && *request.Model == "" {
+		return operation.InvalidRequest("model selector must not be empty")
+	}
+	if request.Model == nil && request.PositivePrompt == nil && request.NegativePrompt == nil && request.Width == nil && request.Height == nil && request.Steps == nil && request.Seed == nil {
 		return operation.InvalidRequest("at least one recall field is required")
 	}
 	if (request.Width == nil) != (request.Height == nil) {
 		return operation.InvalidRequest("width and height must be supplied together or both omitted")
 	}
-	if (request.Width != nil || request.Steps != nil) && request.Model == "" {
+	if (request.Width != nil || request.Steps != nil) && request.Model == nil {
 		return operation.InvalidRequest("dimensions and steps require an explicit Anima model")
 	}
 	if request.Width != nil && (*request.Width < 64 || *request.Width%8 != 0 || *request.Height < 64 || *request.Height%8 != 0) {
@@ -131,8 +132,8 @@ func validate(request Request) error {
 
 func patchBody(request Request) map[string]any {
 	patch := make(map[string]any)
-	if request.Model != "" {
-		patch["model"] = request.Model
+	if request.Model != nil {
+		patch["model"] = *request.Model
 	}
 	if request.PositivePrompt != nil {
 		patch["positive_prompt"] = *request.PositivePrompt

@@ -73,6 +73,7 @@ func TestRecallPartialDocumentAndValidationBeforeMutation(t *testing.T) {
 		{"empty negative prompt", `{"schema_version":1,"negative_prompt":""}`, "", "negative_prompt", nil},
 		{"seed only", `{"schema_version":1,"seed":0}`, "", "seed", nil},
 		{"empty patch", `{"schema_version":1}`, "invalid_request", "", nil},
+		{"empty model selector", `{"schema_version":1,"model":"","seed":1}`, "invalid_request", "", nil},
 		{"missing height", `{"schema_version":1,"model":"main-key","width":768}`, "invalid_request", "", nil},
 		{"steps without model", `{"schema_version":1,"steps":20}`, "invalid_request", "", nil},
 		{"bad dimensions", `{"schema_version":1,"model":"main-key","width":770,"height":1024}`, "invalid_request", "", nil},
@@ -137,6 +138,28 @@ func TestRecallPartialDocumentAndValidationBeforeMutation(t *testing.T) {
 	}
 }
 
+func TestRecallRejectsExplicitlyEmptyModelFlagBeforeRequest(t *testing.T) {
+	isolateUserConfigDir(t)
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	var stdout, stderr bytes.Buffer
+	code := cli.New(&stdout, &stderr).Run(t.Context(), []string{
+		"recall", "--model", "", "--seed", "1", "--url", server.URL, "--json",
+	})
+	var envelope result.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("stdout = %q: %v", stdout.String(), err)
+	}
+	if code != result.ExitInvalidRequest || envelope.OK || envelope.Operation != result.OperationRecall ||
+		envelope.Error == nil || envelope.Error.Code != result.CodeInvalidRequest || requests != 0 || stderr.Len() != 0 {
+		t.Fatalf("code=%d envelope=%#v requests=%d stderr=%q", code, envelope, requests, stderr.String())
+	}
+}
+
 func TestRecallRejectsUnsafeModelsAndUnsupportedContract(t *testing.T) {
 	wrongSchema := recallOpenAPI()
 	properties := wrongSchema["components"].(map[string]any)["schemas"].(map[string]any)["RecallParameter"].(map[string]any)["properties"].(map[string]any)
@@ -185,6 +208,35 @@ func TestRecallRejectsUnsafeModelsAndUnsupportedContract(t *testing.T) {
 				t.Fatalf("code=%d envelope=%#v posts=%d stderr=%q", code, envelope, posts, stderr.String())
 			}
 		})
+	}
+}
+
+func TestRecallAcceptsReversedNullableAlternatives(t *testing.T) {
+	isolateUserConfigDir(t)
+	openAPI := recallOpenAPI()
+	properties := openAPI["components"].(map[string]any)["schemas"].(map[string]any)["RecallParameter"].(map[string]any)["properties"].(map[string]any)
+	properties["seed"] = map[string]any{"anyOf": []any{map[string]any{"type": "null"}, map[string]any{"type": "integer"}}}
+	posts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveAnimaPreflight(w, r, "6.14.1", openAPI, animaModelInventory()) {
+			return
+		}
+		if r.URL.Path == "/api/v1/recall/default" {
+			posts++
+			_, _ = w.Write([]byte(`{"status":"success"}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	var stdout, stderr bytes.Buffer
+	code := cli.New(&stdout, &stderr).Run(t.Context(), []string{"recall", "--seed", "1", "--url", server.URL, "--json"})
+	var envelope result.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("stdout = %q: %v", stdout.String(), err)
+	}
+	if code != result.ExitSuccess || !envelope.OK || posts != 1 || stderr.Len() != 0 {
+		t.Fatalf("code=%d envelope=%#v posts=%d stderr=%q", code, envelope, posts, stderr.String())
 	}
 }
 

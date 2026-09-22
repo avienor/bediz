@@ -122,10 +122,8 @@ type openAPISchema struct {
 }
 
 type openAPIProperty struct {
-	Const string `json:"const"`
-	AnyOf []struct {
-		Type string `json:"type"`
-	} `json:"anyOf"`
+	Const string                               `json:"const"`
+	AnyOf []capability.RecallSchemaAlternative `json:"anyOf"`
 }
 
 type modelList struct {
@@ -399,7 +397,7 @@ func recallSchemaFailures(document openAPIDocument) []string {
 	failures := make([]string, 0)
 	for _, field := range capability.RecallPatchFields {
 		property, ok := properties[field.Name]
-		if !ok || len(property.AnyOf) != 2 || property.AnyOf[0].Type != field.Type || property.AnyOf[1].Type != "null" {
+		if !ok || !field.MatchesNullableAlternatives(property.AnyOf) {
 			failures = append(failures, "incompatible_recall_schema:"+field.Name)
 		}
 	}

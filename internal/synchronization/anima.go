@@ -16,7 +16,7 @@ func SynchronizeAnima(ctx context.Context, client *httpclient.Client, receipt ge
 	settings := receipt.ResolvedSettings
 	patch := recall.Request{
 		SchemaVersion:  1,
-		Model:          settings.ModelKey,
+		Model:          new(settings.ModelKey),
 		PositivePrompt: new(settings.PositivePrompt),
 		NegativePrompt: new(settings.NegativePrompt),
 		Width:          new(settings.Width),
