@@ -234,7 +234,7 @@ func Run(ctx context.Context, client *httpclient.Client, bedizVersion version.In
 			report.UISync[entry.Operation] = entry.UISync
 		}
 	}
-	report.Ready = len(report.Capabilities) > 0
+	report.Ready = len(report.Issues) == 0 && len(report.Capabilities) > 0
 	for _, entry := range report.Capabilities {
 		if !entry.Compatible {
 			report.Ready = false

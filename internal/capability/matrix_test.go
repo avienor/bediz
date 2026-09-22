@@ -1,6 +1,30 @@
 package capability
 
-import "testing"
+import (
+	"slices"
+	"testing"
+
+	"github.com/avienor/bediz/internal/result"
+)
+
+func TestMatrixAdvertisesOnlyImplementedOperations(t *testing.T) {
+	want := []string{
+		result.OperationModelsList,
+		result.OperationImagesList,
+		result.OperationImagesGet,
+		result.OperationImagesUpload,
+		result.OperationQueueList,
+		result.OperationQueueGet,
+	}
+	got := make([]string, len(Matrix))
+	for i, entry := range Matrix {
+		got[i] = entry.Operation
+	}
+
+	if !slices.Equal(got, want) {
+		t.Fatalf("advertised operations = %q, want implemented operations %q", got, want)
+	}
+}
 
 func TestSupportsInvokeAI(t *testing.T) {
 	tests := []struct {

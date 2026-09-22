@@ -22,6 +22,7 @@ import (
 
 	"github.com/avienor/bediz/internal/cli"
 	"github.com/avienor/bediz/internal/result"
+	"github.com/avienor/bediz/internal/version"
 )
 
 type errorWriter struct{}
@@ -1525,7 +1526,37 @@ func TestInvalidCommandUsesJSONEnvelope(t *testing.T) {
 	}
 }
 
-func TestGlobalJSONFlagBeforeVersion(t *testing.T) {
+func TestRootHelpListsVersion(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{"--help"})
+
+	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
+		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "  version     Print the Bediz version\n") {
+		t.Fatalf("root help does not list version: %q", stdout.String())
+	}
+}
+
+func TestVersionReturnsStableHumanContract(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{"version"})
+
+	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
+		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
+	}
+	if want := version.Current().Version + "\n"; stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestGlobalJSONFlagBeforeVersionReturnsStableContract(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	app := cli.New(&stdout, &stderr)
@@ -1538,12 +1569,94 @@ func TestGlobalJSONFlagBeforeVersion(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
-	var envelope result.Envelope
+	var envelope struct {
+		SchemaVersion int          `json:"schema_version"`
+		OK            bool         `json:"ok"`
+		Operation     string       `json:"operation"`
+		Data          version.Info `json:"data"`
+		Warnings      []any        `json:"warnings"`
+	}
 	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
 		t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
 	}
-	if !envelope.OK || envelope.Operation != "version" {
+	if envelope.SchemaVersion != 1 || !envelope.OK || envelope.Operation != "version" ||
+		envelope.Data != version.Current() || len(envelope.Warnings) != 0 {
 		t.Fatalf("unexpected envelope: %#v", envelope)
+	}
+}
+
+func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
+	isolateUserConfigDir(t)
+	paths := map[string]any{
+		"/api/v1/app/version":                            map[string]any{"get": map[string]any{}},
+		"/api/v2/models/":                                map[string]any{"get": map[string]any{}},
+		"/api/v1/images/":                                map[string]any{"get": map[string]any{}},
+		"/api/v1/images/i/{image_name}":                  map[string]any{"get": map[string]any{}},
+		"/api/v1/images/upload":                          map[string]any{"post": map[string]any{}},
+		"/api/v1/queue/{queue_id}/item_ids":              map[string]any{"get": map[string]any{}},
+		"/api/v1/queue/{queue_id}/item_summaries_by_ids": map[string]any{"post": map[string]any{}},
+		"/api/v1/queue/{queue_id}/i/{item_id}":           map[string]any{"get": map[string]any{}},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_ = json.NewEncoder(w).Encode(map[string]string{"version": "6.14.1"})
+		case "/openapi.json":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"paths":      paths,
+				"components": map[string]any{"schemas": map[string]any{}},
+			})
+		case "/api/v2/models/":
+			_ = json.NewEncoder(w).Encode(map[string]any{"models": []any{}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{"doctor", "--url", server.URL, "--json"})
+
+	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
+		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
+	}
+	var envelope struct {
+		SchemaVersion int    `json:"schema_version"`
+		OK            bool   `json:"ok"`
+		Operation     string `json:"operation"`
+		Data          struct {
+			Ready        bool `json:"ready"`
+			Capabilities []struct {
+				Operation  string `json:"operation"`
+				Compatible bool   `json:"compatible"`
+			} `json:"capabilities"`
+			UISync  map[string]string `json:"ui_sync"`
+			OpenAPI struct {
+				Invocations []any `json:"required_invocations"`
+			} `json:"openapi"`
+			Models struct {
+				Relevant     []any `json:"relevant"`
+				Requirements []any `json:"requirements"`
+			} `json:"models"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
+	}
+	operations := make([]string, len(envelope.Data.Capabilities))
+	for i, entry := range envelope.Data.Capabilities {
+		if !entry.Compatible {
+			t.Fatalf("implemented capability is not compatible: %#v", entry)
+		}
+		operations[i] = entry.Operation
+	}
+	wantOperations := []string{"models.list", "images.list", "images.get", "images.upload", "queue.list", "queue.get"}
+	if envelope.SchemaVersion != 1 || !envelope.OK || envelope.Operation != "doctor" || !envelope.Data.Ready ||
+		!slices.Equal(operations, wantOperations) || len(envelope.Data.UISync) != 0 ||
+		len(envelope.Data.OpenAPI.Invocations) != 0 || len(envelope.Data.Models.Relevant) != 0 || len(envelope.Data.Models.Requirements) != 0 {
+		t.Fatalf("unexpected doctor envelope: %#v", envelope)
 	}
 }
 

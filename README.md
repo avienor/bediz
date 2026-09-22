@@ -7,16 +7,19 @@ The current implementation includes the first two V1 delivery slices:
 - per-user connection configuration with flag, environment, file, and default precedence;
 - a bounded HTTP client with bearer authentication, safe-read retries, and unknown-outcome classification for mutations;
 - the versioned JSON result and error envelope;
-- `doctor`, which checks InvokeAI version compatibility (`>= 6.14.1, < 6.15.0`), required OpenAPI endpoints and invocation fields, Anima component models, inspection capabilities, and UI synchronization capability;
+- `version`, with concise human output and a stable V1 JSON result envelope;
+- `doctor`, which checks InvokeAI version compatibility (`>= 6.14.1, < 6.15.0`), the OpenAPI endpoints required by implemented capabilities, and readiness for the implemented inspection and upload operations;
 - safe installed-model, gallery-image, and queue inspection;
 - single-file image upload with supported-version validation, no automatic mutation retry, and `outcome_unknown` reporting when the transport result is inconclusive.
 
-Generation and the remaining management commands will be added in the later V1 slices described by the specification.
+Generation is not advertised as a capability until its implementation slice is complete. It and the remaining management commands will be added in the later V1 slices described by the specification.
 
 ## Build and run
 
 ```text
 go build -o bediz ./cmd/bediz
+./bediz version
+./bediz version --json
 ./bediz doctor
 ./bediz doctor --json
 ./bediz models list --json
