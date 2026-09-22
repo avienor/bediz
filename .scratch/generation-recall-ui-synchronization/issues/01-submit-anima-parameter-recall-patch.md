@@ -14,9 +14,15 @@
 
 **Permanent records:** V1 spec and tests — the accepted behavior is already recorded in V1 §12 and ADR-0017; tests must prove the public contract. Update V1 explicitly if live evidence changes it, and supersede ADR-0017 rather than rewriting it if the accepted design changes. `CONTEXT.md` terminology is unchanged.
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] `recall` accepts only the supported typed patch fields through flags or a schema-version-1 Request Document, validates them before mutation, and returns the documented success or structured error.
-- [ ] An exact model is recalled only when its display name maps back to that same single installed main model; unsafe ambiguity never posts Recall.
-- [ ] Live browser evidence shows the accepted patch in the UI while InvokeAI's queue remains unchanged.
-- [ ] The verification gate passes and independent review has no acceptance-blocking finding.
+- [x] `recall` accepts only the supported typed patch fields through flags or a schema-version-1 Request Document, validates them before mutation, and returns the documented success or structured error.
+- [x] An exact model is recalled only when its display name maps back to that same single installed main model; unsafe ambiguity never posts Recall.
+- [x] Live browser evidence shows the accepted patch in the UI while InvokeAI's queue remains unchanged.
+- [x] The verification gate passes and independent review has no acceptance-blocking finding.
+
+## Comments
+
+- InvokeAI 6.14.1's Recall API requires width and height to be at least 64 pixels. The user accepted this Recall-specific bound; V1, the feature spec, and public CLI boundary tests now agree.
+- `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify` passed. Independent standards and spec reviews found no acceptance-blocking issue in the fixed `02209c6...cdb6b2a` diff.
+- Independent live verification submitted one Recall patch and observed both prompts, Anima model, 640×768 dimensions, 21 steps, and seed 310922 in the open browser without reloading. Queue item IDs and total count stayed at 24.
