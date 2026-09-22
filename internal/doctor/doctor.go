@@ -456,30 +456,46 @@ func Failure(report Report) *result.Error {
 	return nil
 }
 
-func (r Report) Human(w io.Writer) {
+// Human writes the concise diagnostic report and returns any output failure.
+func (r Report) Human(w io.Writer) error {
 	status := "ready"
 	if !r.Ready {
 		status = "not ready"
 	}
-	fmt.Fprintf(w, "Bediz %s\n", r.Bediz.Version)
-	fmt.Fprintf(w, "InvokeAI %s (%s, supported: %t)\n", valueOrUnknown(r.InvokeAI.Version), r.InvokeAI.URL, r.InvokeAI.SupportedVersion)
-	fmt.Fprintf(w, "Connection: %s; authentication: %s\n", r.InvokeAI.ConnectionStatus, r.InvokeAI.AuthenticationStatus)
-	fmt.Fprintf(w, "OpenAPI: %t; models: %d\n", r.OpenAPI.Available, r.Models.Total)
+	if _, err := fmt.Fprintf(w, "Bediz %s\n", r.Bediz.Version); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "InvokeAI %s (%s, supported: %t)\n", valueOrUnknown(r.InvokeAI.Version), r.InvokeAI.URL, r.InvokeAI.SupportedVersion); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "Connection: %s; authentication: %s\n", r.InvokeAI.ConnectionStatus, r.InvokeAI.AuthenticationStatus); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "OpenAPI: %t; models: %d\n", r.OpenAPI.Available, r.Models.Total); err != nil {
+		return err
+	}
 	for _, entry := range r.Capabilities {
 		name := entry.Operation
 		if entry.Family != "" {
 			name += "/" + entry.Family
 		}
 		if entry.UISync != "" {
-			fmt.Fprintf(w, "%s compatible: %t (UI sync: %s)\n", name, entry.Compatible, entry.UISync)
+			if _, err := fmt.Fprintf(w, "%s compatible: %t (UI sync: %s)\n", name, entry.Compatible, entry.UISync); err != nil {
+				return err
+			}
 		} else {
-			fmt.Fprintf(w, "%s compatible: %t\n", name, entry.Compatible)
+			if _, err := fmt.Fprintf(w, "%s compatible: %t\n", name, entry.Compatible); err != nil {
+				return err
+			}
 		}
 		for _, failure := range entry.Failures {
-			fmt.Fprintf(w, "  - %s\n", failure)
+			if _, err := fmt.Fprintf(w, "  - %s\n", failure); err != nil {
+				return err
+			}
 		}
 	}
-	fmt.Fprintf(w, "Status: %s\n", status)
+	_, err := fmt.Fprintf(w, "Status: %s\n", status)
+	return err
 }
 
 func valueOrUnknown(value string) string {

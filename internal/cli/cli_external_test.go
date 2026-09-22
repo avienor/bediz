@@ -1526,6 +1526,42 @@ func TestInvalidCommandUsesJSONEnvelope(t *testing.T) {
 	}
 }
 
+func TestInvalidCommandWithJSONDisabledUsesHumanDiagnostic(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{"unknown", "--json=false"})
+
+	if exitCode != result.ExitInvalidRequest {
+		t.Fatalf("exit code = %d, want %d", exitCode, result.ExitInvalidRequest)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "invalid_request:") || !strings.Contains(stderr.String(), "unknown command") {
+		t.Fatalf("stderr = %q, want human invalid-command diagnostic", stderr.String())
+	}
+}
+
+func TestInvalidJSONValueUsesHumanDiagnostic(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{"version", "--json=invalid"})
+
+	if exitCode != result.ExitInvalidRequest {
+		t.Fatalf("exit code = %d, want %d", exitCode, result.ExitInvalidRequest)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "invalid_request:") || !strings.Contains(stderr.String(), "invalid syntax") {
+		t.Fatalf("stderr = %q, want human invalid-Boolean diagnostic", stderr.String())
+	}
+}
+
 func TestRootHelpListsVersion(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -1553,6 +1589,20 @@ func TestVersionReturnsStableHumanContract(t *testing.T) {
 	}
 	if want := version.Current().Version + "\n"; stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestVersionReportsHumanOutputWriteFailure(t *testing.T) {
+	var stderr bytes.Buffer
+	app := cli.New(errorWriter{}, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{"version"})
+
+	if exitCode != result.ExitInvokeAIFailure {
+		t.Fatalf("exit code = %d, want %d", exitCode, result.ExitInvokeAIFailure)
+	}
+	if !strings.Contains(stderr.String(), "output_write_failed") {
+		t.Fatalf("stderr = %q, want output_write_failed", stderr.String())
 	}
 }
 
@@ -1657,6 +1707,25 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 		!slices.Equal(operations, wantOperations) || len(envelope.Data.UISync) != 0 ||
 		len(envelope.Data.OpenAPI.Invocations) != 0 || len(envelope.Data.Models.Relevant) != 0 || len(envelope.Data.Models.Requirements) != 0 {
 		t.Fatalf("unexpected doctor envelope: %#v", envelope)
+	}
+}
+
+func TestDoctorReportsHumanOutputWriteFailure(t *testing.T) {
+	isolateUserConfigDir(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	var stderr bytes.Buffer
+	app := cli.New(errorWriter{}, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{"doctor", "--url", server.URL})
+
+	if exitCode != result.ExitInvokeAIFailure {
+		t.Fatalf("exit code = %d, want %d", exitCode, result.ExitInvokeAIFailure)
+	}
+	if !strings.Contains(stderr.String(), "output_write_failed") {
+		t.Fatalf("stderr = %q, want output_write_failed", stderr.String())
 	}
 }
 

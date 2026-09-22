@@ -19,6 +19,7 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -263,7 +264,7 @@ func TestLiveGate(t *testing.T) {
 		if data.Items == nil {
 			t.Fatal("images list is null, want an array")
 		}
-		assertPageBounds(t, data.pageMetadata, len(data.Items))
+		assertPageBounds(t, data.pageMetadata, len(data.Items), 0, 1)
 		for index, image := range data.Items {
 			if image.ImageName == "" || image.ImageURL == "" || image.ThumbnailURL == "" || image.ImageOrigin == "" || image.ImageCategory == "" || image.Width < 1 || image.Height < 1 || image.CreatedAt == "" || image.UpdatedAt == "" || image.IsIntermediate == nil || image.Starred == nil || image.HasWorkflow == nil {
 				t.Errorf("image %d is not a normalized reference: %#v", index, image)
@@ -281,7 +282,7 @@ func TestLiveGate(t *testing.T) {
 		if data.Items == nil {
 			t.Fatal("queue list is null, want an array")
 		}
-		assertPageBounds(t, data.pageMetadata, len(data.Items))
+		assertPageBounds(t, data.pageMetadata, len(data.Items), 0, 1)
 		for index, item := range data.Items {
 			if item.ItemID < 1 || item.QueueID == "" || item.Status == "" || item.BatchID == "" || item.CreatedAt == "" {
 				t.Errorf("queue item %d is not a normalized summary: %#v", index, item)
@@ -328,18 +329,35 @@ func TestLiveGate(t *testing.T) {
 			t.Fatalf("images get reference differs from upload: upload=%#v get=%#v", uploaded.Image, got.Image)
 		}
 
-		listEnvelope := runJSONCommand(t, binary, target, "images", "list", "--board", "none", "--limit", "100")
-		assertSuccessEnvelope(t, listEnvelope, "images.list")
-		var listed imagesListData
-		unmarshalData(t, listEnvelope.Data, &listed)
-		index := slices.IndexFunc(listed.Items, func(item imageReference) bool {
-			return item.ImageName == imageName
-		})
-		if index == -1 {
+		const pageLimit = 100
+		var listedImage *imageReference
+		for offset := 0; ; {
+			listEnvelope := runJSONCommand(t, binary, target, "images", "list", "--board", "none", "--offset", strconv.Itoa(offset), "--limit", strconv.Itoa(pageLimit))
+			assertSuccessEnvelope(t, listEnvelope, "images.list")
+			var listed imagesListData
+			unmarshalData(t, listEnvelope.Data, &listed)
+			assertPageBounds(t, listed.pageMetadata, len(listed.Items), offset, pageLimit)
+			index := slices.IndexFunc(listed.Items, func(item imageReference) bool {
+				return item.ImageName == imageName
+			})
+			if index >= 0 {
+				listedImage = &listed.Items[index]
+				break
+			}
+			nextOffset := offset + len(listed.Items)
+			if nextOffset >= *listed.Total {
+				break
+			}
+			if len(listed.Items) == 0 {
+				t.Fatalf("images list returned an empty page before reported total %d while searching for %q", *listed.Total, imageName)
+			}
+			offset = nextOffset
+		}
+		if listedImage == nil {
 			t.Fatalf("images list did not contain uploaded fixture %q", imageName)
 		}
-		if !reflect.DeepEqual(listed.Items[index], uploaded.Image) {
-			t.Fatalf("images list reference differs from upload for %q: upload=%#v list=%#v", imageName, uploaded.Image, listed.Items[index])
+		if !reflect.DeepEqual(*listedImage, uploaded.Image) {
+			t.Fatalf("images list reference differs from upload for %q: upload=%#v list=%#v", imageName, uploaded.Image, *listedImage)
 		}
 	}) {
 		return
@@ -452,7 +470,9 @@ func requestImageBackend(t *testing.T, ctx context.Context, method, target, imag
 
 func assertImageRemoved(t *testing.T, binary, target, imageName string) {
 	t.Helper()
-	envelope, exitCode := executeJSONCommandContext(t, context.WithoutCancel(t.Context()), binary, target, "images", "get", imageName)
+	cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 30*time.Second)
+	defer cancel()
+	envelope, exitCode := executeJSONCommandContext(t, cleanupContext, binary, target, "images", "get", imageName)
 	if exitCode != 6 {
 		t.Fatalf("cleanup image %q: final images get exit code = %d, want 6", imageName, exitCode)
 	}
@@ -543,14 +563,21 @@ func executeJSONCommandContext(t *testing.T, ctx context.Context, binary, target
 }
 
 func isolatedEnvironment(configDirectory string) []string {
+	configVariable := "XDG_CONFIG_HOME"
+	switch runtime.GOOS {
+	case "windows":
+		configVariable = "AppData"
+	case "darwin":
+		configVariable = "HOME"
+	}
 	environment := make([]string, 0, len(os.Environ())+1)
 	for _, variable := range os.Environ() {
 		name, _, _ := strings.Cut(variable, "=")
-		if name != "BEDIZ_URL" && name != "BEDIZ_TOKEN" && name != "XDG_CONFIG_HOME" {
+		if !strings.EqualFold(name, "BEDIZ_URL") && !strings.EqualFold(name, "BEDIZ_TOKEN") && !strings.EqualFold(name, configVariable) {
 			environment = append(environment, variable)
 		}
 	}
-	return append(environment, "XDG_CONFIG_HOME="+configDirectory)
+	return append(environment, configVariable+"="+configDirectory)
 }
 
 func assertSuccessEnvelope(t *testing.T, envelope resultEnvelope, operation string) {
@@ -569,12 +596,12 @@ func unmarshalData(t *testing.T, raw jsontext.Value, target any) {
 	}
 }
 
-func assertPageBounds(t *testing.T, metadata pageMetadata, itemCount int) {
+func assertPageBounds(t *testing.T, metadata pageMetadata, itemCount, wantOffset, wantLimit int) {
 	t.Helper()
 	if metadata.Offset == nil || metadata.Limit == nil || metadata.Total == nil {
 		t.Fatalf("list result is missing page metadata: %#v", metadata)
 	}
-	if *metadata.Offset != 0 || *metadata.Limit != 1 || itemCount > *metadata.Limit || *metadata.Total < itemCount {
-		t.Fatalf("unbounded or inconsistent list result: offset=%d limit=%d total=%d items=%d", *metadata.Offset, *metadata.Limit, *metadata.Total, itemCount)
+	if *metadata.Offset != wantOffset || *metadata.Limit != wantLimit || itemCount > *metadata.Limit || *metadata.Total < wantOffset+itemCount {
+		t.Fatalf("unbounded or inconsistent list result: offset=%d limit=%d total=%d items=%d; want offset=%d limit=%d", *metadata.Offset, *metadata.Limit, *metadata.Total, itemCount, wantOffset, wantLimit)
 	}
 }

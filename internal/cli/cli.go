@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/avienor/bediz/internal/config"
@@ -161,7 +162,9 @@ func (c *CLI) executeDoctor(ctx context.Context, jsonOutput bool, options remote
 		}
 		return c.writeResult(result.OperationDoctor, report)
 	}
-	report.Human(c.stdout)
+	if err := report.Human(c.stdout); err != nil {
+		return c.fail(result.OperationDoctor, false, result.CodeOutputWriteFailed, err.Error(), nil)
+	}
 	if failure != nil {
 		return result.ExitStatus(failure.Code)
 	}
@@ -276,7 +279,9 @@ func (c *CLI) executeVersion(jsonOutput bool) int {
 	if jsonOutput {
 		return c.writeResult(result.OperationVersion, info)
 	}
-	fmt.Fprintln(c.stdout, info.Version)
+	if _, err := fmt.Fprintln(c.stdout, info.Version); err != nil {
+		return c.fail(result.OperationVersion, false, result.CodeOutputWriteFailed, err.Error(), nil)
+	}
 	return result.ExitSuccess
 }
 
@@ -376,12 +381,21 @@ func (c *CLI) fail(operation string, jsonOutput bool, code, message string, deta
 }
 
 func containsJSONFlag(args []string) bool {
+	enabled := false
 	for _, arg := range args {
-		if arg == "--json" || strings.HasPrefix(arg, "--json=") {
-			return true
+		if arg == "--json" {
+			enabled = true
+			continue
+		}
+		if value, ok := strings.CutPrefix(arg, "--json="); ok {
+			parsed, err := strconv.ParseBool(value)
+			if err != nil {
+				return false
+			}
+			enabled = parsed
 		}
 	}
-	return false
+	return enabled
 }
 
 func commandOperation(command *cobra.Command) string {
