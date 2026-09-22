@@ -76,6 +76,8 @@ func TestRecallPartialDocumentAndValidationBeforeMutation(t *testing.T) {
 		{"missing height", `{"schema_version":1,"model":"main-key","width":768}`, "invalid_request", "", nil},
 		{"steps without model", `{"schema_version":1,"steps":20}`, "invalid_request", "", nil},
 		{"bad dimensions", `{"schema_version":1,"model":"main-key","width":770,"height":1024}`, "invalid_request", "", nil},
+		{"below Recall minimum", `{"schema_version":1,"model":"main-key","width":56,"height":64}`, "invalid_request", "", nil},
+		{"at Recall minimum", `{"schema_version":1,"model":"main-key","width":64,"height":64}`, "", "width", nil},
 		{"unknown field", `{"schema_version":1,"scheduler":"heun"}`, "invalid_request", "", nil},
 		{"unsupported version", `{"schema_version":2,"seed":1}`, "invalid_request", "", nil},
 		{"mixed inputs", `{"schema_version":1,"seed":1}`, "invalid_request", "", []string{"--seed", "2"}},
