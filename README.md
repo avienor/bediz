@@ -73,7 +73,7 @@ explicitly without requesting a live run, use:
 go test -count=1 -v ./e2e
 ```
 
-This reports `live read-only E2E: NOT REQUESTED` when `BEDIZ_E2E_URL` is
+This reports `live E2E: NOT REQUESTED` when `BEDIZ_E2E_URL` is
 unset. To run the opt-in gate against the local InvokeAI 6.14.1 baseline:
 
 ```text
@@ -81,17 +81,25 @@ BEDIZ_E2E_URL=http://127.0.0.1:9090 go test -count=1 -v ./e2e
 ```
 
 The gate builds the real `bediz` binary and invokes `doctor`, `models list`,
-`images list --limit 1`, and `queue list --limit 1` through the process
-boundary. It checks process exit statuses, one V1 JSON result envelope on
-standard output, empty standard error on success, supported-version readiness,
-normalized result fields, page bounds where the public command supports them,
-and secret redaction. It reports `live read-only E2E: VERIFIED` only after all
-checks pass. Use `-count=1` as shown so a live result is never served from the
-Go test cache.
+bounded image and queue listing, and a self-cleaning image upload round trip
+through the process boundary. The upload case creates a unique 2-by-2 PNG,
+verifies the same normalized Image Reference through `images upload`,
+`images get`, and `images list`, then deletes exactly that image through the
+InvokeAI backend API. A final `images get` must return the V1 `not_found`
+envelope before the gate reports `live E2E: VERIFIED`.
 
-The gate never uploads, generates, cancels, clears, or deletes anything. It
-also does not run `images get` or `queue get`, because doing so would require a
-known fixture rather than an arbitrary existing user resource. Empty model,
-image, and queue collections are valid. The URL must not contain credentials,
-a query, or a fragment; an authentication requirement causes the gate to fail
-instead of accepting or printing a real token.
+Every case checks process exit statuses, one V1 JSON result envelope on
+standard output, empty standard error, supported-version readiness, normalized
+result fields, page bounds where the public command supports them, and secret
+redaction. Upload assertions also cover image origin and category, exact
+dimensions, intermediate status, board absence, metadata-related fields, and
+an empty backend metadata record, and absolute image URLs. Cleanup failures
+name the exact test-created image so it can be removed manually without
+touching unrelated resources; the fixture filename and SHA-256 digest remain
+in failed-test output as inspection evidence when an upload outcome is unknown.
+The gate never generates, cancels, or clears anything, and it does not run
+`queue get` because there is no known queue fixture yet. Empty pre-existing
+model, image, and queue collections are valid. The URL must not contain
+credentials, a query, or a fragment; an authentication requirement causes the
+gate to fail instead of accepting or printing a real token. Use `-count=1` as
+shown so a live result is never served from the Go test cache.

@@ -2,21 +2,32 @@ package e2e_test
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
 	"encoding/json/jsontext"
 	json "encoding/json/v2"
+	"errors"
+	"image"
+	"image/color"
+	"image/png"
+	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
 	"testing"
+	"time"
+	"uuid"
 )
 
 const secretSentinel = "bediz-live-e2e-secret-sentinel"
 
-type successEnvelope struct {
+type resultEnvelope struct {
 	SchemaVersion int            `json:"schema_version"`
 	OK            bool           `json:"ok"`
 	Operation     string         `json:"operation"`
@@ -105,25 +116,42 @@ type pageMetadata struct {
 	Total  *int `json:"total"`
 }
 
+type imageReference struct {
+	ImageName      string  `json:"image_name"`
+	ImageURL       string  `json:"image_url"`
+	ThumbnailURL   string  `json:"thumbnail_url"`
+	ImageOrigin    string  `json:"image_origin"`
+	ImageCategory  string  `json:"image_category"`
+	Width          int     `json:"width"`
+	Height         int     `json:"height"`
+	CreatedAt      string  `json:"created_at"`
+	UpdatedAt      string  `json:"updated_at"`
+	IsIntermediate *bool   `json:"is_intermediate"`
+	SessionID      *string `json:"session_id"`
+	NodeID         *string `json:"node_id"`
+	Starred        *bool   `json:"starred"`
+	HasWorkflow    *bool   `json:"has_workflow"`
+	BoardID        *string `json:"board_id"`
+}
+
+type imageResultData struct {
+	Image imageReference `json:"image"`
+}
+
+type uploadFixture struct {
+	Path   string
+	SHA256 [sha256.Size]byte
+}
+
+type backendResponse struct {
+	StatusCode int
+	Status     string
+	Body       []byte
+}
+
 type imagesListData struct {
 	pageMetadata
-	Items []struct {
-		ImageName      string  `json:"image_name"`
-		ImageURL       string  `json:"image_url"`
-		ThumbnailURL   string  `json:"thumbnail_url"`
-		ImageOrigin    string  `json:"image_origin"`
-		ImageCategory  string  `json:"image_category"`
-		Width          int     `json:"width"`
-		Height         int     `json:"height"`
-		CreatedAt      string  `json:"created_at"`
-		UpdatedAt      string  `json:"updated_at"`
-		IsIntermediate *bool   `json:"is_intermediate"`
-		SessionID      *string `json:"session_id"`
-		NodeID         *string `json:"node_id"`
-		Starred        *bool   `json:"starred"`
-		HasWorkflow    *bool   `json:"has_workflow"`
-		BoardID        *string `json:"board_id"`
-	} `json:"items"`
+	Items []imageReference `json:"items"`
 }
 
 type queueListData struct {
@@ -143,10 +171,10 @@ type queueListData struct {
 	} `json:"items"`
 }
 
-func TestLiveReadOnlyGate(t *testing.T) {
+func TestLiveGate(t *testing.T) {
 	target := strings.TrimSpace(os.Getenv("BEDIZ_E2E_URL"))
 	if target == "" {
-		t.Skip("live read-only E2E: NOT REQUESTED (BEDIZ_E2E_URL is unset)")
+		t.Skip("live E2E: NOT REQUESTED (BEDIZ_E2E_URL is unset)")
 	}
 	validateTarget(t, target)
 	binary := buildBinary(t)
@@ -262,7 +290,185 @@ func TestLiveReadOnlyGate(t *testing.T) {
 	}) {
 		return
 	}
-	t.Log("live read-only E2E: VERIFIED")
+
+	if !t.Run("image upload round trip self-cleans", func(t *testing.T) {
+		fixture := writeUniquePNG(t)
+		t.Logf("upload fixture cleanup evidence: local_file=%q sha256=%x", filepath.Base(fixture.Path), fixture.SHA256)
+
+		envelope := runJSONCommand(t, binary, target, "images", "upload", fixture.Path)
+		var cleanupHint struct {
+			Image struct {
+				ImageName string `json:"image_name"`
+			} `json:"image"`
+		}
+		if err := json.Unmarshal(envelope.Data, &cleanupHint); err != nil || cleanupHint.Image.ImageName == "" {
+			t.Fatalf("upload of fixture %q did not return a stable image identifier: %v; data: %s", filepath.Base(fixture.Path), err, envelope.Data)
+		}
+		imageName := cleanupHint.Image.ImageName
+		t.Logf("uploaded fixture cleanup evidence: image_name=%q", imageName)
+		t.Cleanup(func() {
+			deleteUploadedImage(t, target, imageName)
+			assertImageRemoved(t, binary, target, imageName)
+		})
+
+		assertSuccessEnvelope(t, envelope, "images.upload")
+		var uploaded imageResultData
+		unmarshalData(t, envelope.Data, &uploaded)
+		assertUploadedImageReference(t, uploaded.Image)
+		if uploaded.Image.ImageName != imageName {
+			t.Fatalf("upload returned inconsistent image identifiers: cleanup=%q normalized=%q", imageName, uploaded.Image.ImageName)
+		}
+		assertNoImageMetadata(t, target, imageName)
+
+		getEnvelope := runJSONCommand(t, binary, target, "images", "get", imageName)
+		assertSuccessEnvelope(t, getEnvelope, "images.get")
+		var got imageResultData
+		unmarshalData(t, getEnvelope.Data, &got)
+		if !reflect.DeepEqual(got.Image, uploaded.Image) {
+			t.Fatalf("images get reference differs from upload: upload=%#v get=%#v", uploaded.Image, got.Image)
+		}
+
+		listEnvelope := runJSONCommand(t, binary, target, "images", "list", "--board", "none", "--limit", "100")
+		assertSuccessEnvelope(t, listEnvelope, "images.list")
+		var listed imagesListData
+		unmarshalData(t, listEnvelope.Data, &listed)
+		index := slices.IndexFunc(listed.Items, func(item imageReference) bool {
+			return item.ImageName == imageName
+		})
+		if index == -1 {
+			t.Fatalf("images list did not contain uploaded fixture %q", imageName)
+		}
+		if !reflect.DeepEqual(listed.Items[index], uploaded.Image) {
+			t.Fatalf("images list reference differs from upload for %q: upload=%#v list=%#v", imageName, uploaded.Image, listed.Items[index])
+		}
+	}) {
+		return
+	}
+	t.Log("live E2E: VERIFIED")
+}
+
+func writeUniquePNG(t *testing.T) uploadFixture {
+	t.Helper()
+	identifier := uuid.New()
+	path := filepath.Join(t.TempDir(), "bediz-e2e-upload-"+identifier.String()+".png")
+	var encoded bytes.Buffer
+	fixture := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+	for index := range 4 {
+		fixture.SetNRGBA(index%2, index/2, color.NRGBA{
+			R: identifier[index*4],
+			G: identifier[index*4+1],
+			B: identifier[index*4+2],
+			A: 0xff,
+		})
+	}
+	if err := png.Encode(&encoded, fixture); err != nil {
+		t.Fatalf("encode unique PNG fixture: %v", err)
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		t.Fatalf("create unique PNG fixture: %v", err)
+	}
+	_, writeErr := file.Write(encoded.Bytes())
+	closeErr := file.Close()
+	if writeErr != nil {
+		t.Fatalf("write unique PNG fixture: %v", writeErr)
+	}
+	if closeErr != nil {
+		t.Fatalf("close unique PNG fixture: %v", closeErr)
+	}
+	return uploadFixture{Path: path, SHA256: sha256.Sum256(encoded.Bytes())}
+}
+
+func assertUploadedImageReference(t *testing.T, image imageReference) {
+	t.Helper()
+	if image.ImageName == "" || image.ImageOrigin != "external" || image.ImageCategory != "user" || image.Width != 2 || image.Height != 2 || image.CreatedAt == "" || image.UpdatedAt == "" || image.IsIntermediate == nil || *image.IsIntermediate || image.Starred == nil || *image.Starred || image.HasWorkflow == nil || *image.HasWorkflow || image.BoardID != nil || image.SessionID != nil || image.NodeID != nil {
+		t.Fatalf("uploaded image does not match the unmodified user-image contract: %#v", image)
+	}
+	for field, value := range map[string]string{"image_url": image.ImageURL, "thumbnail_url": image.ThumbnailURL} {
+		parsed, err := url.Parse(value)
+		if err != nil || !parsed.IsAbs() || parsed.Host == "" {
+			t.Fatalf("uploaded image %s = %q, want an absolute URL", field, value)
+		}
+	}
+}
+
+func assertNoImageMetadata(t *testing.T, target, imageName string) {
+	t.Helper()
+	response := requestImageBackend(t, t.Context(), http.MethodGet, target, imageName, "metadata")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("inspect metadata for image %q: GET returned %s: %s", imageName, response.Status, response.Body)
+	}
+	var metadata jsontext.Value
+	if err := json.Unmarshal(response.Body, &metadata); err != nil {
+		t.Fatalf("inspect metadata for image %q: invalid response: %v; body: %s", imageName, err, response.Body)
+	}
+	if !bytes.Equal(bytes.TrimSpace(metadata), []byte("null")) {
+		t.Fatalf("image %q has injected metadata: %s", imageName, metadata)
+	}
+}
+
+func deleteUploadedImage(t *testing.T, target, imageName string) {
+	t.Helper()
+	response := requestImageBackend(t, context.WithoutCancel(t.Context()), http.MethodDelete, target, imageName, "")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("cleanup image %q: DELETE returned %s: %s", imageName, response.Status, response.Body)
+	}
+	var result struct {
+		AffectedBoards []string `json:"affected_boards"`
+		DeletedImages  []string `json:"deleted_images"`
+		FailedImages   []string `json:"failed_images"`
+	}
+	if err := json.Unmarshal(response.Body, &result, json.RejectUnknownMembers(true)); err != nil {
+		t.Fatalf("cleanup image %q: invalid response: %v; body: %s", imageName, err, response.Body)
+	}
+	if !slices.Equal(result.AffectedBoards, []string{"none"}) || !slices.Equal(result.DeletedImages, []string{imageName}) || len(result.FailedImages) != 0 {
+		t.Fatalf("cleanup image %q was not targeted and conclusive: %#v", imageName, result)
+	}
+}
+
+func requestImageBackend(t *testing.T, ctx context.Context, method, target, imageName, resource string) backendResponse {
+	t.Helper()
+	endpoint, err := url.JoinPath(target, "/api/v1/images/i/", imageName, resource)
+	if err != nil {
+		t.Fatalf("%s image %q: build backend endpoint: %v", method, imageName, err)
+	}
+	request, err := http.NewRequestWithContext(ctx, method, endpoint, nil)
+	if err != nil {
+		t.Fatalf("%s image %q: build backend request: %v", method, imageName, err)
+	}
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Authorization", "Bearer "+secretSentinel)
+	response, err := (&http.Client{Timeout: 30 * time.Second}).Do(request)
+	if err != nil {
+		t.Fatalf("%s image %q: backend request failed: %v", method, imageName, err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		t.Fatalf("%s image %q: read backend response: %v", method, imageName, err)
+	}
+	return backendResponse{StatusCode: response.StatusCode, Status: response.Status, Body: body}
+}
+
+func assertImageRemoved(t *testing.T, binary, target, imageName string) {
+	t.Helper()
+	envelope, exitCode := executeJSONCommandContext(t, context.WithoutCancel(t.Context()), binary, target, "images", "get", imageName)
+	if exitCode != 6 {
+		t.Fatalf("cleanup image %q: final images get exit code = %d, want 6", imageName, exitCode)
+	}
+	var structuredError struct {
+		Code    string         `json:"code"`
+		Message string         `json:"message"`
+		Details jsontext.Value `json:"details"`
+	}
+	if err := json.Unmarshal(envelope.Error, &structuredError, json.RejectUnknownMembers(true)); err != nil {
+		t.Fatalf("cleanup image %q: final lookup error is not normalized: %v; error: %s", imageName, err, envelope.Error)
+	}
+	var warnings []jsontext.Value
+	warningsErr := json.Unmarshal(envelope.Warnings, &warnings)
+	if envelope.SchemaVersion != 1 || envelope.OK || envelope.Operation != "images.get" || len(envelope.Data) != 0 || structuredError.Code != "not_found" || structuredError.Message == "" || warningsErr != nil || warnings == nil || len(warnings) != 0 {
+		t.Fatalf("cleanup image %q: final lookup did not return the expected not_found envelope: %#v", imageName, envelope)
+	}
 }
 
 func validateTarget(t *testing.T, target string) {
@@ -297,17 +503,31 @@ func buildBinary(t *testing.T) string {
 	return binary
 }
 
-func runJSONCommand(t *testing.T, binary, target string, args ...string) successEnvelope {
+func runJSONCommand(t *testing.T, binary, target string, args ...string) resultEnvelope {
+	t.Helper()
+	envelope, exitCode := executeJSONCommandContext(t, t.Context(), binary, target, args...)
+	if exitCode != 0 {
+		t.Fatalf("%s exit code = %d, want 0; envelope: %#v", strings.Join(args, " "), exitCode, envelope)
+	}
+	return envelope
+}
+
+func executeJSONCommandContext(t *testing.T, ctx context.Context, binary, target string, args ...string) (resultEnvelope, int) {
 	t.Helper()
 	commandArgs := append(slices.Clone(args), "--url", target, "--token", secretSentinel, "--json")
-	command := exec.CommandContext(t.Context(), binary, commandArgs...)
+	command := exec.CommandContext(ctx, binary, commandArgs...)
 	command.Env = isolatedEnvironment(t.TempDir())
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	command.Stdout = &stdout
 	command.Stderr = &stderr
+	exitCode := 0
 	if err := command.Run(); err != nil {
-		t.Fatalf("%s exited unsuccessfully: %v\nstdout: %s\nstderr: %s", strings.Join(args, " "), err, stdout.Bytes(), stderr.Bytes())
+		exitError, ok := errors.AsType[*exec.ExitError](err)
+		if !ok {
+			t.Fatalf("%s could not execute: %v\nstdout: %s\nstderr: %s", strings.Join(args, " "), err, stdout.Bytes(), stderr.Bytes())
+		}
+		exitCode = exitError.ExitCode()
 	}
 	if bytes.Contains(stdout.Bytes(), []byte(secretSentinel)) || bytes.Contains(stderr.Bytes(), []byte(secretSentinel)) {
 		t.Fatalf("%s exposed the secret sentinel", strings.Join(args, " "))
@@ -315,11 +535,11 @@ func runJSONCommand(t *testing.T, binary, target string, args ...string) success
 	if stderr.Len() != 0 {
 		t.Fatalf("%s wrote diagnostics on successful JSON execution: %q", strings.Join(args, " "), stderr.String())
 	}
-	var envelope successEnvelope
+	var envelope resultEnvelope
 	if err := json.Unmarshal(stdout.Bytes(), &envelope, json.RejectUnknownMembers(true)); err != nil {
 		t.Fatalf("%s stdout is not exactly one V1 result envelope: %v\nstdout: %s", strings.Join(args, " "), err, stdout.Bytes())
 	}
-	return envelope
+	return envelope, exitCode
 }
 
 func isolatedEnvironment(configDirectory string) []string {
@@ -333,7 +553,7 @@ func isolatedEnvironment(configDirectory string) []string {
 	return append(environment, "XDG_CONFIG_HOME="+configDirectory)
 }
 
-func assertSuccessEnvelope(t *testing.T, envelope successEnvelope, operation string) {
+func assertSuccessEnvelope(t *testing.T, envelope resultEnvelope, operation string) {
 	t.Helper()
 	var warnings []jsontext.Value
 	warningsErr := json.Unmarshal(envelope.Warnings, &warnings)
