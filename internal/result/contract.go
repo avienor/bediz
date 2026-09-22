@@ -30,6 +30,7 @@ const (
 	CodeOutputWriteFailed        = "output_write_failed"
 	CodeUnsupportedCapability    = "unsupported_capability"
 	CodeSelectionRequired        = "selection_required"
+	CodeMissingComponent         = "missing_component"
 	CodeConnectionFailed         = "connection_failed"
 	CodeAuthenticationFailed     = "authentication_failed"
 	CodeOutcomeUnknown           = "outcome_unknown"
@@ -55,6 +56,7 @@ var exitStatuses = map[string]int{
 	CodeConfigurationWriteFailed: ExitInvalidRequest,
 	CodeUnsupportedCapability:    ExitUnsupportedCapability,
 	CodeSelectionRequired:        ExitSelectionRequired,
+	CodeMissingComponent:         ExitUnsupportedCapability,
 	CodeConnectionFailed:         ExitConnection,
 	CodeAuthenticationFailed:     ExitConnection,
 	CodeInterrupted:              ExitInterrupted,

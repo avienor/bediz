@@ -149,6 +149,14 @@ func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
 			"kind": selection.Kind, "selector": selection.Selector, "candidates": selection.Candidates,
 		})
 	}
+	if missing, ok := errors.AsType[*operation.MissingComponentError](err); ok {
+		return c.fail(operationName, jsonOutput, result.CodeMissingComponent, missing.Error(), map[string]any{
+			"component_type":        missing.ComponentType,
+			"required_base":         missing.RequiredBase,
+			"required_type":         missing.RequiredType,
+			"installation_guidance": missing.InstallationGuidance,
+		})
+	}
 	if timeout, ok := errors.AsType[*operation.WaitTimeoutError](err); ok {
 		return c.fail(operationName, jsonOutput, result.CodeWaitTimeout, timeout.Error(), queuePositionDetails(timeout.Position))
 	}

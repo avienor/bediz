@@ -48,6 +48,7 @@ func TestErrorCodesReportTheirPublishedExitStatus(t *testing.T) {
 		{name: "configuration write failed", code: CodeConfigurationWriteFailed, wire: "configuration_write_failed", status: ExitInvalidRequest},
 		{name: "unsupported capability", code: CodeUnsupportedCapability, wire: "unsupported_capability", status: ExitUnsupportedCapability},
 		{name: "selection required", code: CodeSelectionRequired, wire: "selection_required", status: ExitSelectionRequired},
+		{name: "missing component", code: CodeMissingComponent, wire: "missing_component", status: ExitUnsupportedCapability},
 		{name: "connection failed", code: CodeConnectionFailed, wire: "connection_failed", status: ExitConnection},
 		{name: "authentication failed", code: CodeAuthenticationFailed, wire: "authentication_failed", status: ExitConnection},
 		{name: "interrupted", code: CodeInterrupted, wire: "interrupted", status: ExitInterrupted},

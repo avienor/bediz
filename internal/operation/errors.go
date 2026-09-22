@@ -48,6 +48,24 @@ func SelectionRequired(kind, selector string, candidates []SelectionCandidate) e
 	return &SelectionRequiredError{Kind: kind, Selector: selector, Candidates: candidates}
 }
 
+type MissingComponentError struct {
+	ComponentType        string
+	RequiredBase         string
+	RequiredType         string
+	InstallationGuidance string
+}
+
+func (e *MissingComponentError) Error() string {
+	return fmt.Sprintf("no compatible %s is installed; %s", e.ComponentType, e.InstallationGuidance)
+}
+
+func MissingComponent(componentType, requiredBase, requiredType, installationGuidance string) error {
+	return &MissingComponentError{
+		ComponentType: componentType, RequiredBase: requiredBase, RequiredType: requiredType,
+		InstallationGuidance: installationGuidance,
+	}
+}
+
 // QueuePosition identifies accepted remote work: the InvokeAI queue, batch, and
 // ordered item identifiers returned by a conclusive enqueue. Failures that
 // happen after acceptance report it so callers can inspect or continue the
