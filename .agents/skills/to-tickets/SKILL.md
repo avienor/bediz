@@ -45,6 +45,8 @@ A ticket may be marked `ready-for-agent` only when:
 - The ticket is self-contained for a fresh context. Record the accepted behavior and relevant source-of-truth references rather than relying on unrecorded conversation context.
 - Acceptance criteria are observable and identify the applicable project-defined checks or live verification. An executor's completion claim is not evidence.
 
+Declare the ticket's **Permanent records**: every durable source that the accepted change must update (`CONTEXT.md` for terminology, the V1 spec for behavior or public contracts, a new or superseding ADR for an accepted design decision, and tests for contract evidence), or `None` with a brief reason when terminology, accepted design, and behavior remain unchanged. If implementation evidence contradicts this declaration, escalate before changing the agreement.
+
 Classify each ticket by ambiguity, blast radius, failure cost, and verification strength—not by code volume or expected token use:
 
 - **`worker + independent review`**: the accepted behavior is complete, the scope is bounded and reversible, and automated or live checks can reliably detect an incorrect implementation.
@@ -64,6 +66,7 @@ Present the proposed breakdown as a numbered list. For each ticket, show:
 - **Execution route**: `worker + independent review` or `frontier-owned`, with a brief reason
 - **Verification gate**: the evidence required to accept the ticket
 - **Escalate when**: ticket-specific conditions that require a new decision or stronger owner
+- **Permanent records**: `CONTEXT.md`, V1 spec, ADR, tests, or `None`, with a brief reason
 
 Ask the user:
 
@@ -99,6 +102,8 @@ Do NOT close or modify any parent issue.
 **Verification gate:** the observable evidence and applicable project-defined checks required for acceptance.
 
 **Escalate when:** the ticket-specific conditions that require a new decision or stronger owner.
+
+**Permanent records:** `CONTEXT.md` / V1 spec / ADR / tests / None — a brief reason.
 
 **Status:** ready-for-agent
 
@@ -137,6 +142,10 @@ The observable evidence and applicable project-defined checks required for accep
 ## Escalate when
 
 The ticket-specific conditions that require a new decision or stronger owner.
+
+## Permanent records
+
+`CONTEXT.md` / V1 spec / ADR / tests / None — a brief reason.
 
 </issue-template>
 
