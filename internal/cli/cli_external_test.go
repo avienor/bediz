@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1676,5 +1677,57 @@ func TestDoctorFlagErrorKeepsOperationInJSONEnvelope(t *testing.T) {
 	}
 	if envelope.OK || envelope.Operation != "doctor" || envelope.Error == nil || envelope.Error.Code != "invalid_request" {
 		t.Fatalf("unexpected envelope: %#v", envelope)
+	}
+}
+
+// Every implemented remote command reports its authoritative operation name,
+// structured error code, and exit status. A rejected connection is one class
+// they must all classify identically, including doctor, which shares
+// connection resolution but keeps its own diagnostic path.
+func TestImplementedRemoteCommandsReportStableOperationsAndFailures(t *testing.T) {
+	isolateUserConfigDir(t)
+	imagePath := filepath.Join(t.TempDir(), "source.png")
+	writeTestPNG(t, imagePath)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "denied", http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	tests := []struct {
+		name      string
+		args      []string
+		operation string
+	}{
+		{name: "doctor", args: []string{"doctor"}, operation: result.OperationDoctor},
+		{name: "models list", args: []string{"models", "list"}, operation: result.OperationModelsList},
+		{name: "images list", args: []string{"images", "list"}, operation: result.OperationImagesList},
+		{name: "images get", args: []string{"images", "get", "image-1.png"}, operation: result.OperationImagesGet},
+		{name: "images upload", args: []string{"images", "upload", imagePath}, operation: result.OperationImagesUpload},
+		{name: "queue list", args: []string{"queue", "list"}, operation: result.OperationQueueList},
+		{name: "queue get", args: []string{"queue", "get", "5"}, operation: result.OperationQueueGet},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			app := cli.New(&stdout, &stderr)
+			args := slices.Concat(test.args, []string{"--url", server.URL, "--json"})
+
+			exitCode := app.Run(t.Context(), args)
+
+			if exitCode != result.ExitConnection {
+				t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("stderr = %q, want empty", stderr.String())
+			}
+			var envelope result.Envelope
+			if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+				t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
+			}
+			if envelope.OK || envelope.Operation != test.operation || envelope.Error == nil || envelope.Error.Code != result.CodeAuthenticationFailed {
+				t.Fatalf("unexpected envelope: %#v", envelope)
+			}
+		})
 	}
 }

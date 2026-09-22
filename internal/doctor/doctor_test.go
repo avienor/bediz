@@ -270,9 +270,9 @@ func TestRunDetectsMissingInvocationField(t *testing.T) {
 	if !found {
 		t.Fatalf("missing property was not reported: %#v", report.OpenAPI.Invocations)
 	}
-	exitCode, code, _ := Failure(report)
-	if exitCode != 4 || code != "unsupported_capability" {
-		t.Fatalf("failure = (%d, %q)", exitCode, code)
+	failure := Failure(report)
+	if failure == nil || failure.Code != result.CodeUnsupportedCapability {
+		t.Fatalf("failure = %#v", failure)
 	}
 }
 
@@ -300,9 +300,9 @@ func TestRunClassifiesRejectedAuthentication(t *testing.T) {
 	if report.InvokeAI.AuthenticationStatus != "rejected" {
 		t.Fatalf("authentication status = %q", report.InvokeAI.AuthenticationStatus)
 	}
-	exitCode, code, _ := Failure(report)
-	if exitCode != 5 || code != "authentication_failed" {
-		t.Fatalf("failure = (%d, %q)", exitCode, code)
+	failure := Failure(report)
+	if failure == nil || failure.Code != result.CodeAuthenticationFailed {
+		t.Fatalf("failure = %#v", failure)
 	}
 }
 
@@ -388,10 +388,10 @@ func TestFailureClassifiesInvokeAIHTTPError(t *testing.T) {
 	}
 
 	report := Run(t.Context(), client, version.Info{Version: "test"})
-	exitCode, code, _ := Failure(report)
+	failure := Failure(report)
 
-	if exitCode != result.ExitInvokeAIFailure || code != "invokeai_http_error" {
-		t.Fatalf("failure = (%d, %q), want (%d, %q)", exitCode, code, result.ExitInvokeAIFailure, "invokeai_http_error")
+	if failure == nil || failure.Code != result.CodeInvokeAIHTTPError {
+		t.Fatalf("failure = %#v, want %q", failure, result.CodeInvokeAIHTTPError)
 	}
 }
 
@@ -420,10 +420,10 @@ func TestFailureClassifiesInvalidInvokeAIResponse(t *testing.T) {
 	}
 
 	report := Run(t.Context(), client, version.Info{Version: "test"})
-	exitCode, code, _ := Failure(report)
+	failure := Failure(report)
 
-	if exitCode != result.ExitInvokeAIFailure || code != "invalid_invokeai_response" {
-		t.Fatalf("failure = (%d, %q), want (%d, %q)", exitCode, code, result.ExitInvokeAIFailure, "invalid_invokeai_response")
+	if failure == nil || failure.Code != result.CodeInvalidInvokeAIResponse {
+		t.Fatalf("failure = %#v, want %q", failure, result.CodeInvalidInvokeAIResponse)
 	}
 }
 
@@ -433,8 +433,8 @@ func TestFailureClassifiesInvalidVersionPayloads(t *testing.T) {
 		version      string
 		expectedCode string
 	}{
-		{name: "empty version", version: "", expectedCode: "invalid_version_response"},
-		{name: "unparsable version", version: "latest", expectedCode: "invalid_invokeai_version"},
+		{name: "empty version", version: "", expectedCode: result.CodeInvalidVersionResponse},
+		{name: "unparsable version", version: "latest", expectedCode: result.CodeInvalidInvokeAIVersion},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -462,10 +462,10 @@ func TestFailureClassifiesInvalidVersionPayloads(t *testing.T) {
 			}
 
 			report := Run(t.Context(), client, version.Info{Version: "test"})
-			exitCode, code, _ := Failure(report)
+			failure := Failure(report)
 
-			if exitCode != result.ExitInvokeAIFailure || code != test.expectedCode {
-				t.Fatalf("failure = (%d, %q), want (%d, %q)", exitCode, code, result.ExitInvokeAIFailure, test.expectedCode)
+			if failure == nil || failure.Code != test.expectedCode {
+				t.Fatalf("failure = %#v, want %q", failure, test.expectedCode)
 			}
 		})
 	}

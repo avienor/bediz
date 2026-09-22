@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/avienor/bediz/internal/result"
 )
 
 const SupportedInvokeAIRange = ">= 6.14.1, < 6.15.0"
@@ -46,28 +48,28 @@ type Entry struct {
 
 var Matrix = []Entry{
 	{
-		Operation:     "models.list",
+		Operation:     result.OperationModelsList,
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v2/models/"},
 		},
 	},
 	{
-		Operation:     "images.list",
+		Operation:     result.OperationImagesList,
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v1/images/"},
 		},
 	},
 	{
-		Operation:     "images.get",
+		Operation:     result.OperationImagesGet,
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v1/images/i/{image_name}"},
 		},
 	},
 	{
-		Operation:     "images.upload",
+		Operation:     result.OperationImagesUpload,
 		VersionPolicy: VersionPolicySupportedRange,
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v1/app/version"},
@@ -75,7 +77,7 @@ var Matrix = []Entry{
 		},
 	},
 	{
-		Operation:     "queue.list",
+		Operation:     result.OperationQueueList,
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v1/queue/{queue_id}/item_ids"},
@@ -83,7 +85,7 @@ var Matrix = []Entry{
 		},
 	},
 	{
-		Operation:     "queue.get",
+		Operation:     result.OperationQueueGet,
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v1/queue/{queue_id}/i/{item_id}"},

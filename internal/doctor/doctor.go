@@ -144,9 +144,9 @@ func Run(ctx context.Context, client *httpclient.Client, bedizVersion version.In
 		report.InvokeAI.ConnectionStatus = "ok"
 		report.InvokeAI.Version = versionResponse.Version
 		if versionResponse.Version == "" {
-			report.Issues = append(report.Issues, Issue{Code: "invalid_version_response", Message: "InvokeAI version response did not contain a version"})
+			report.Issues = append(report.Issues, Issue{Code: result.CodeInvalidVersionResponse, Message: "InvokeAI version response did not contain a version"})
 		} else if supported, err := capability.SupportsInvokeAI(versionResponse.Version); err != nil {
-			report.Issues = append(report.Issues, Issue{Code: "invalid_invokeai_version", Message: err.Error()})
+			report.Issues = append(report.Issues, Issue{Code: result.CodeInvalidInvokeAIVersion, Message: err.Error()})
 		} else {
 			report.InvokeAI.SupportedVersion = supported
 			if !supported {
@@ -349,13 +349,13 @@ func appendRequestIssue(report *Report, check string, err error) {
 	networkErr, networkErrMatched := errors.AsType[*httpclient.NetworkError](err)
 	switch {
 	case httpErrMatched && httpErr.AuthenticationFailure():
-		report.Issues = append(report.Issues, Issue{Code: "authentication_failed", Message: fmt.Sprintf("%s check was rejected by InvokeAI", check), Details: map[string]any{"status": httpErr.StatusCode}})
+		report.Issues = append(report.Issues, Issue{Code: result.CodeAuthenticationFailed, Message: fmt.Sprintf("%s check was rejected by InvokeAI", check), Details: map[string]any{"status": httpErr.StatusCode}})
 	case networkErrMatched:
-		report.Issues = append(report.Issues, Issue{Code: "connection_failed", Message: fmt.Sprintf("%s check could not reach InvokeAI", check), Details: map[string]any{"error": networkErr.Err.Error()}})
+		report.Issues = append(report.Issues, Issue{Code: result.CodeConnectionFailed, Message: fmt.Sprintf("%s check could not reach InvokeAI", check), Details: map[string]any{"error": networkErr.Err.Error()}})
 	case httpErrMatched:
-		report.Issues = append(report.Issues, Issue{Code: "invokeai_http_error", Message: fmt.Sprintf("%s check failed", check), Details: map[string]any{"status": httpErr.StatusCode}})
+		report.Issues = append(report.Issues, Issue{Code: result.CodeInvokeAIHTTPError, Message: fmt.Sprintf("%s check failed", check), Details: map[string]any{"status": httpErr.StatusCode}})
 	default:
-		report.Issues = append(report.Issues, Issue{Code: "invalid_invokeai_response", Message: fmt.Sprintf("%s check failed: %v", check, err)})
+		report.Issues = append(report.Issues, Issue{Code: result.CodeInvalidInvokeAIResponse, Message: fmt.Sprintf("%s check failed: %v", check, err)})
 	}
 }
 
@@ -433,24 +433,27 @@ func modelRequirementSatisfied(checks []ModelRequirement, name string) bool {
 	return false
 }
 
-func Failure(report Report) (int, string, string) {
+// Failure reports the structured failure that decides doctor's outcome, or nil
+// when the diagnostic run is ready. The process exit status follows from the
+// error code.
+func Failure(report Report) *result.Error {
 	for _, issue := range report.Issues {
-		if issue.Code == "connection_failed" || issue.Code == "authentication_failed" {
-			return result.ExitConnection, issue.Code, issue.Message
+		if issue.Code == result.CodeConnectionFailed || issue.Code == result.CodeAuthenticationFailed {
+			return &result.Error{Code: issue.Code, Message: issue.Message}
 		}
 	}
 	for _, issue := range report.Issues {
-		if issue.Code == "invokeai_http_error" ||
-			issue.Code == "invalid_invokeai_response" ||
-			issue.Code == "invalid_version_response" ||
-			issue.Code == "invalid_invokeai_version" {
-			return result.ExitInvokeAIFailure, issue.Code, issue.Message
+		if issue.Code == result.CodeInvokeAIHTTPError ||
+			issue.Code == result.CodeInvalidInvokeAIResponse ||
+			issue.Code == result.CodeInvalidVersionResponse ||
+			issue.Code == result.CodeInvalidInvokeAIVersion {
+			return &result.Error{Code: issue.Code, Message: issue.Message}
 		}
 	}
 	if !report.Ready {
-		return result.ExitUnsupportedCapability, "unsupported_capability", "InvokeAI is not ready for the registered Bediz capabilities"
+		return &result.Error{Code: result.CodeUnsupportedCapability, Message: "InvokeAI is not ready for the registered Bediz capabilities"}
 	}
-	return result.ExitSuccess, "", ""
+	return nil
 }
 
 func (r Report) Human(w io.Writer) {
