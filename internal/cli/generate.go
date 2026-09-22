@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/avienor/bediz/internal/generation"
+	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/result"
 	"github.com/spf13/cobra"
 )
@@ -14,6 +16,7 @@ type generateOptions struct {
 	remoteOptions
 	requestPath    string
 	noWait         bool
+	waitTimeout    time.Duration
 	model          string
 	prompt         string
 	negativePrompt string
@@ -41,7 +44,8 @@ func (c *CLI) newGenerateCommand(exitCode *int, jsonOutput *bool) *cobra.Command
 			*exitCode = c.executeGenerate(cmd.Context(), *jsonOutput, cmd, options)
 		},
 	}
-	addRemoteFlags(command, &options.remoteOptions, requestTimeoutUsage)
+	addConnectionFlags(command, &options.remoteOptions)
+	command.Flags().DurationVar(&options.waitTimeout, "timeout", 0, "total local wait timeout; zero waits until the queue item reaches a terminal state")
 	command.Flags().StringVar(&options.requestPath, "request", "", "read a request document from a file or standard input with -")
 	command.Flags().BoolVar(&options.noWait, "no-wait", false, "return after InvokeAI accepts the request")
 	command.Flags().StringVar(&options.model, "model", "", "Anima main model key or unique name")
@@ -61,8 +65,11 @@ func (c *CLI) newGenerateCommand(exitCode *int, jsonOutput *bool) *cobra.Command
 }
 
 func (c *CLI) executeGenerate(ctx context.Context, jsonOutput bool, command *cobra.Command, options generateOptions) int {
-	if !options.noWait {
-		return c.fail(result.OperationGenerate, jsonOutput, result.CodeInvalidRequest, "generate currently requires --no-wait", nil)
+	if options.waitTimeout < 0 {
+		return c.fail(result.OperationGenerate, jsonOutput, result.CodeInvalidRequest, "timeout cannot be negative", nil)
+	}
+	if options.noWait && options.waitTimeout > 0 {
+		return c.fail(result.OperationGenerate, jsonOutput, result.CodeInvalidRequest, "--timeout cannot be combined with --no-wait", nil)
 	}
 	operationFlags := []string{
 		"model", "prompt", "negative-prompt", "width", "height", "steps", "scheduler", "guidance",
@@ -109,13 +116,29 @@ func (c *CLI) executeGenerate(ctx context.Context, jsonOutput bool, command *cob
 		request:           request,
 		requestPath:       options.requestPath,
 		operationFlagsSet: fieldsSet,
-		invoke:            generation.Submit,
-		render:            renderAcceptedExecutionReceipt,
+		invoke: func(ctx context.Context, client *httpclient.Client, request generation.Request) (generation.ExecutionReceipt, error) {
+			accepted, err := generation.Submit(ctx, client, request)
+			if err != nil || options.noWait {
+				return accepted, err
+			}
+			return generation.Wait(ctx, client, accepted, generation.WaitOptions{Timeout: options.waitTimeout})
+		},
+		render: renderExecutionReceipt,
 	}
 	return execution.run(ctx, c, jsonOutput)
 }
 
-func renderAcceptedExecutionReceipt(receipt generation.ExecutionReceipt, w io.Writer) error {
-	_, err := fmt.Fprintf(w, "Accepted batch %s in queue %s (item %d)\n", receipt.Queue.BatchID, receipt.Queue.QueueID, receipt.Queue.ItemIDs[0])
-	return err
+// renderExecutionReceipt writes the accepted queue position of a --no-wait
+// result or the completed image of a generation that waited for its item.
+func renderExecutionReceipt(receipt generation.ExecutionReceipt, w io.Writer) error {
+	if len(receipt.Outputs) == 0 {
+		_, err := fmt.Fprintf(w, "Accepted batch %s in queue %s (item %d)\n", receipt.Queue.BatchID, receipt.Queue.QueueID, receipt.Queue.ItemIDs[0])
+		return err
+	}
+	for _, output := range receipt.Outputs {
+		if _, err := fmt.Fprintf(w, "Generated %s for seed %d from queue item %d\n", output.Image.ImageName, output.Seed, output.ItemID); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -53,6 +53,7 @@ func TestErrorCodesReportTheirPublishedExitStatus(t *testing.T) {
 		{name: "interrupted", code: CodeInterrupted, wire: "interrupted", status: ExitInterrupted},
 		{name: "output write failed", code: CodeOutputWriteFailed, wire: "output_write_failed", status: ExitInvokeAIFailure},
 		{name: "outcome unknown", code: CodeOutcomeUnknown, wire: "outcome_unknown", status: ExitInvokeAIFailure},
+		{name: "wait timeout", code: CodeWaitTimeout, wire: "wait_timeout", status: ExitInvokeAIFailure},
 		{name: "not found", code: CodeNotFound, wire: "not_found", status: ExitInvokeAIFailure},
 		{name: "InvokeAI operation failed", code: CodeInvokeAIOperationFailed, wire: "invokeai_operation_failed", status: ExitInvokeAIFailure},
 		{name: "InvokeAI HTTP error", code: CodeInvokeAIHTTPError, wire: "invokeai_http_error", status: ExitInvokeAIFailure},

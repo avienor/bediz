@@ -39,12 +39,18 @@ func defaultRemoteOptions() remoteOptions {
 	return remoteOptions{timeout: httpclient.DefaultTimeout}
 }
 
-// addRemoteFlags registers the connection flags shared by every implemented
-// remote command. timeoutUsage names what the deadline bounds, because doctor
-// bounds its whole diagnostic run instead of a single request.
-func addRemoteFlags(command *cobra.Command, options *remoteOptions, timeoutUsage string) {
+// addConnectionFlags registers the InvokeAI connection flags shared by every
+// implemented remote command.
+func addConnectionFlags(command *cobra.Command, options *remoteOptions) {
 	command.Flags().StringVar(&options.url, "url", "", "InvokeAI base URL")
 	command.Flags().StringVar(&options.token, "token", "", "InvokeAI bearer token")
+}
+
+// addRemoteFlags registers the connection flags and the deadline that bounds one
+// request or diagnostic run. Commands whose deadline bounds local waiting
+// instead register --timeout themselves.
+func addRemoteFlags(command *cobra.Command, options *remoteOptions, timeoutUsage string) {
+	addConnectionFlags(command, options)
 	command.Flags().DurationVar(&options.timeout, "timeout", httpclient.DefaultTimeout, timeoutUsage)
 }
 
@@ -143,6 +149,18 @@ func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
 			"kind": selection.Kind, "selector": selection.Selector, "candidates": selection.Candidates,
 		})
 	}
+	if timeout, ok := errors.AsType[*operation.WaitTimeoutError](err); ok {
+		return c.fail(operationName, jsonOutput, result.CodeWaitTimeout, timeout.Error(), queuePositionDetails(timeout.Position))
+	}
+	if interrupted, ok := errors.AsType[*operation.InterruptedError](err); ok {
+		return c.fail(operationName, jsonOutput, result.CodeInterrupted, interrupted.Error(), queuePositionDetails(interrupted.Position))
+	}
+	if failure, ok := errors.AsType[*operation.ItemFailureError](err); ok {
+		return c.fail(operationName, jsonOutput, result.CodeInvokeAIOperationFailed, failure.Error(), acceptedItemDetails(failure.Position, failure.ItemID, failure.Status))
+	}
+	if invalid, ok := errors.AsType[*operation.InvalidQueueResultError](err); ok {
+		return c.fail(operationName, jsonOutput, result.CodeInvalidInvokeAIResponse, invalid.Error(), acceptedItemDetails(invalid.Position, invalid.ItemID, invalid.Status))
+	}
 	if _, ok := errors.AsType[*httpclient.OutcomeUnknownError](err); ok {
 		return c.fail(operationName, jsonOutput, result.CodeOutcomeUnknown, "InvokeAI may have accepted the operation; inspect remote state before retrying", nil)
 	}
@@ -166,6 +184,25 @@ func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
 		}
 	}
 	return c.fail(operationName, jsonOutput, result.CodeInvokeAIOperationFailed, err.Error(), nil)
+}
+
+// queuePositionDetails reports accepted remote work in the structured failure
+// details of a wait-path error.
+func queuePositionDetails(position operation.QueuePosition) map[string]any {
+	return map[string]any{
+		"queue_id": position.QueueID,
+		"batch_id": position.BatchID,
+		"item_ids": position.ItemIDs,
+	}
+}
+
+// acceptedItemDetails reports accepted remote work and the queue item that
+// produced the failure.
+func acceptedItemDetails(position operation.QueuePosition, itemID int, status string) map[string]any {
+	details := queuePositionDetails(position)
+	details["item_id"] = itemID
+	details["status"] = status
+	return details
 }
 
 type queueListOptions struct {

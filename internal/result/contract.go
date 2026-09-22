@@ -33,6 +33,7 @@ const (
 	CodeConnectionFailed         = "connection_failed"
 	CodeAuthenticationFailed     = "authentication_failed"
 	CodeOutcomeUnknown           = "outcome_unknown"
+	CodeWaitTimeout              = "wait_timeout"
 	CodeNotFound                 = "not_found"
 	CodeInvokeAIOperationFailed  = "invokeai_operation_failed"
 	CodeInvokeAIHTTPError        = "invokeai_http_error"
@@ -59,6 +60,7 @@ var exitStatuses = map[string]int{
 	CodeInterrupted:              ExitInterrupted,
 	CodeOutputWriteFailed:        ExitInvokeAIFailure,
 	CodeOutcomeUnknown:           ExitInvokeAIFailure,
+	CodeWaitTimeout:              ExitInvokeAIFailure,
 	CodeNotFound:                 ExitInvokeAIFailure,
 	CodeInvokeAIOperationFailed:  ExitInvokeAIFailure,
 	CodeInvokeAIHTTPError:        ExitInvokeAIFailure,

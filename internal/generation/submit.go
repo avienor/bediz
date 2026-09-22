@@ -11,6 +11,7 @@ import (
 
 	"github.com/avienor/bediz/internal/capability"
 	"github.com/avienor/bediz/internal/httpclient"
+	"github.com/avienor/bediz/internal/images"
 	"github.com/avienor/bediz/internal/operation"
 )
 
@@ -36,8 +37,9 @@ type QueueReceipt struct {
 }
 
 type Output struct {
-	ItemID int    `json:"item_id"`
-	Seed   uint32 `json:"seed"`
+	ItemID int              `json:"item_id"`
+	Seed   uint32           `json:"seed"`
+	Image  images.Reference `json:"image"`
 }
 
 type ExecutionReceipt struct {

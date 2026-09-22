@@ -102,27 +102,8 @@ func TestGenerateNoWaitFlagsSubmitExactAnimaRequestOnce(t *testing.T) {
 	if exitCode != result.ExitSuccess || stderr.Len() != 0 || enqueueRequests.Load() != 1 {
 		t.Fatalf("exit code = %d, enqueue requests = %d, stderr = %q, stdout = %q", exitCode, enqueueRequests.Load(), stderr.String(), stdout.String())
 	}
-	var envelope struct {
-		SchemaVersion int    `json:"schema_version"`
-		OK            bool   `json:"ok"`
-		Operation     string `json:"operation"`
-		Data          struct {
-			SubmittedRequest map[string]any `json:"submitted_request"`
-			ResolvedSettings struct {
-				ModelKey      string            `json:"model_key"`
-				ComponentKeys map[string]string `json:"component_keys"`
-				Seeds         []uint32          `json:"seeds"`
-			} `json:"resolved_settings"`
-			Queue struct {
-				QueueID string `json:"queue_id"`
-				BatchID string `json:"batch_id"`
-				ItemIDs []int  `json:"item_ids"`
-			} `json:"queue"`
-			Outputs []any `json:"outputs"`
-		} `json:"data"`
-		Warnings []result.Warning `json:"warnings"`
-	}
-	if err := jsonv2.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+	var envelope receiptEnvelope
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
 		t.Fatalf("stdout is not a JSON object: %v; stdout = %q", err, stdout.String())
 	}
 	if envelope.SchemaVersion != 1 || !envelope.OK || envelope.Operation != "generate" ||
@@ -448,6 +429,517 @@ func TestGenerateRejectsNonFiniteGuidanceBeforeNetwork(t *testing.T) {
 				t.Fatalf("unexpected envelope: %#v", envelope)
 			}
 		})
+	}
+}
+
+// generateWaitCounters records the requests a waiting generate performs so a
+// test can prove the enqueue mutation is sent exactly once, polling stays
+// read-only, and no cancellation endpoint is called.
+type generateWaitCounters struct {
+	enqueues  atomic.Int32
+	itemPolls atomic.Int32
+	imageGets atomic.Int32
+	mutex     sync.Mutex
+	mutations []string
+}
+
+func (c *generateWaitCounters) recordMutation(method, path string) {
+	if method == http.MethodGet {
+		return
+	}
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.mutations = append(c.mutations, method+" "+path)
+}
+
+func (c *generateWaitCounters) mutationRequests() []string {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	return slices.Clone(c.mutations)
+}
+
+// newGenerateWaitServer serves the version, model inventory, single enqueue, and
+// scripted queue-item polls of a waiting generate. items holds one queue-item
+// payload per poll and repeats its last entry; transientFailures counts leading
+// item polls answered with a service-unavailable failure; onPoll runs after each
+// item response so a test can interrupt or observe the wait.
+func newGenerateWaitServer(t *testing.T, items []map[string]any, transientFailures int, onPoll func(poll int)) (*httptest.Server, *generateWaitCounters) {
+	t.Helper()
+	counters := &generateWaitCounters{}
+	var failures atomic.Int32
+	failures.Store(int32(transientFailures))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		counters.recordMutation(r.Method, r.URL.Path)
+		switch {
+		case r.URL.Path == "/api/v1/app/version":
+			_ = jsonv2.MarshalWrite(w, map[string]any{"version": "6.14.1"})
+		case r.URL.Path == "/api/v2/models/":
+			_ = jsonv2.MarshalWrite(w, map[string]any{"models": []map[string]any{
+				{"key": "main-key", "hash": "blake3:main", "name": "Anima Main", "base": "anima", "type": "main"},
+				{"key": "vae-key", "hash": "blake3:vae", "name": "Anima VAE", "base": "anima", "type": "vae"},
+				{"key": "encoder-key", "hash": "blake3:encoder", "name": "Qwen3 Encoder", "base": "any", "type": "qwen3_encoder"},
+			}})
+		case r.URL.Path == "/api/v1/queue/default/enqueue_batch":
+			counters.enqueues.Add(1)
+			_ = jsonv2.MarshalWrite(w, map[string]any{
+				"queue_id": "default", "enqueued": 1, "requested": 1, "item_ids": []int{17},
+				"batch": map[string]any{"batch_id": "batch-1"},
+			})
+		case r.URL.Path == "/api/v1/queue/default/i/17":
+			requests := int(counters.itemPolls.Add(1))
+			if failures.Load() > 0 {
+				failures.Add(-1)
+				http.Error(w, "queue inspection is temporarily unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			poll := requests - 1 - transientFailures
+			_ = jsonv2.MarshalWrite(w, items[min(poll, len(items)-1)])
+			if onPoll != nil {
+				onPoll(poll)
+			}
+		case strings.HasPrefix(r.URL.Path, "/api/v1/images/i/"):
+			counters.imageGets.Add(1)
+			name := strings.TrimPrefix(r.URL.Path, "/api/v1/images/i/")
+			_ = jsonv2.MarshalWrite(w, map[string]any{
+				"image_name": name, "image_url": "/api/v1/images/i/" + name + "/full",
+				"thumbnail_url": "/api/v1/images/i/" + name + "/thumbnail",
+				"image_origin":  "internal", "image_category": "general", "width": 768, "height": 1024,
+				"created_at": "2026-01-01 00:00:05.000", "updated_at": "2026-01-01 00:00:05.000",
+				"is_intermediate": false, "starred": false, "has_workflow": false,
+				"session_id": "session-1", "node_id": "node-1",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server, counters
+}
+
+// queueItemPayload is one InvokeAI queue-item record as queue get returns it.
+func queueItemPayload(status string, extra map[string]any) map[string]any {
+	item := map[string]any{
+		"item_id": 17, "queue_id": "default", "batch_id": "batch-1", "session_id": "session-1",
+		"status": status, "priority": 0,
+		"created_at": "2026-01-01 00:00:00.000", "updated_at": "2026-01-01 00:00:00.000",
+	}
+	for key, value := range extra {
+		item[key] = value
+	}
+	return item
+}
+
+// completedItemResults is the queue-item session result of completed image
+// outputs, keyed the way InvokeAI records one result per invocation node.
+func completedItemResults(imageNames ...string) map[string]any {
+	results := make(map[string]any, len(imageNames))
+	for index, name := range imageNames {
+		results["node-"+strconv.Itoa(index+1)] = map[string]any{
+			"type": "image_output", "image": map[string]any{"image_name": name},
+		}
+	}
+	return map[string]any{"results": results}
+}
+
+// generateWaitArgs is the convenience-flag form of one exact Anima request.
+func generateWaitArgs(serverURL string, extra ...string) []string {
+	return slices.Concat([]string{
+		"generate", "--model", "main-key", "--prompt", "a lighthouse in a storm", "--negative-prompt", "text",
+		"--width", "768", "--height", "1024", "--steps", "24", "--scheduler", "heun", "--guidance", "4.25",
+		"--seed", "42", "--output-count", "1", "--vae", "vae-key", "--qwen3-encoder", "encoder-key",
+		"--url", serverURL,
+	}, extra)
+}
+
+// receiptEnvelope is the public Execution Receipt envelope; outputs is empty for
+// an accepted --no-wait result.
+type receiptEnvelope struct {
+	SchemaVersion int    `json:"schema_version"`
+	OK            bool   `json:"ok"`
+	Operation     string `json:"operation"`
+	Data          struct {
+		SubmittedRequest map[string]any `json:"submitted_request"`
+		ResolvedSettings struct {
+			ModelKey      string            `json:"model_key"`
+			ComponentKeys map[string]string `json:"component_keys"`
+			Seeds         []uint32          `json:"seeds"`
+		} `json:"resolved_settings"`
+		Queue struct {
+			QueueID string `json:"queue_id"`
+			BatchID string `json:"batch_id"`
+			ItemIDs []int  `json:"item_ids"`
+		} `json:"queue"`
+		Outputs []struct {
+			ItemID int    `json:"item_id"`
+			Seed   uint32 `json:"seed"`
+			Image  struct {
+				ImageName     string  `json:"image_name"`
+				ImageURL      string  `json:"image_url"`
+				ThumbnailURL  string  `json:"thumbnail_url"`
+				ImageOrigin   string  `json:"image_origin"`
+				ImageCategory string  `json:"image_category"`
+				Width         int     `json:"width"`
+				Height        int     `json:"height"`
+				SessionID     *string `json:"session_id"`
+				NodeID        *string `json:"node_id"`
+			} `json:"image"`
+		} `json:"outputs"`
+	} `json:"data"`
+	Warnings []result.Warning `json:"warnings"`
+}
+
+// queueFailure is the public structured failure of a generation whose queue
+// item did not produce a completed receipt.
+type queueFailure struct {
+	SchemaVersion int    `json:"schema_version"`
+	OK            bool   `json:"ok"`
+	Operation     string `json:"operation"`
+	Error         *struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+		Details struct {
+			QueueID string `json:"queue_id"`
+			BatchID string `json:"batch_id"`
+			ItemIDs []int  `json:"item_ids"`
+			ItemID  int    `json:"item_id"`
+			Status  string `json:"status"`
+		} `json:"details"`
+	} `json:"error"`
+	Warnings []result.Warning `json:"warnings"`
+}
+
+func TestGenerateWaitsForCompletionAndReturnsCompletedReceipt(t *testing.T) {
+	isolateUserConfigDir(t)
+	server, counters := newGenerateWaitServer(t, []map[string]any{
+		queueItemPayload("pending", nil),
+		queueItemPayload("waiting", nil),
+		queueItemPayload("in_progress", map[string]any{"started_at": "2026-01-01 00:00:01.000"}),
+		queueItemPayload("completed", map[string]any{
+			"completed_at": "2026-01-01 00:00:05.000",
+			"session":      completedItemResults("generated.png"),
+		}),
+	}, 0, nil)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), generateWaitArgs(server.URL, "--json"))
+
+	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
+		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
+	}
+	if counters.enqueues.Load() != 1 || counters.itemPolls.Load() < 3 || counters.imageGets.Load() != 1 {
+		t.Fatalf("enqueues = %d, item polls = %d, image gets = %d", counters.enqueues.Load(), counters.itemPolls.Load(), counters.imageGets.Load())
+	}
+	if mutations := counters.mutationRequests(); !slices.Equal(mutations, []string{"POST /api/v1/queue/default/enqueue_batch"}) {
+		t.Fatalf("non-read requests = %v, want only the single enqueue", mutations)
+	}
+	var envelope receiptEnvelope
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
+	}
+	if envelope.SchemaVersion != 1 || !envelope.OK || envelope.Operation != "generate" ||
+		envelope.Data.SubmittedRequest["model"] != "main-key" || envelope.Data.ResolvedSettings.ModelKey != "main-key" ||
+		!reflect.DeepEqual(envelope.Data.ResolvedSettings.ComponentKeys, map[string]string{"vae": "vae-key", "qwen3_encoder": "encoder-key"}) ||
+		!reflect.DeepEqual(envelope.Data.ResolvedSettings.Seeds, []uint32{42}) ||
+		envelope.Data.Queue.QueueID != "default" || envelope.Data.Queue.BatchID != "batch-1" ||
+		!reflect.DeepEqual(envelope.Data.Queue.ItemIDs, []int{17}) || len(envelope.Warnings) != 0 {
+		t.Fatalf("unexpected receipt: %#v", envelope)
+	}
+	if len(envelope.Data.Outputs) != 1 {
+		t.Fatalf("outputs = %#v, want one completed output", envelope.Data.Outputs)
+	}
+	output := envelope.Data.Outputs[0]
+	if output.ItemID != 17 || output.Seed != 42 ||
+		output.Image.ImageName != "generated.png" ||
+		output.Image.ImageURL != server.URL+"/api/v1/images/i/generated.png/full" ||
+		output.Image.ThumbnailURL != server.URL+"/api/v1/images/i/generated.png/thumbnail" ||
+		output.Image.ImageOrigin != "internal" || output.Image.ImageCategory != "general" ||
+		output.Image.Width != 768 || output.Image.Height != 1024 ||
+		output.Image.SessionID == nil || *output.Image.SessionID != "session-1" ||
+		output.Image.NodeID == nil || *output.Image.NodeID != "node-1" {
+		t.Fatalf("unexpected completed output: %#v", output)
+	}
+}
+
+func TestGenerateWaitSurvivesTransientPollFailures(t *testing.T) {
+	isolateUserConfigDir(t)
+	server, counters := newGenerateWaitServer(t, []map[string]any{
+		queueItemPayload("in_progress", nil),
+		queueItemPayload("completed", map[string]any{"session": completedItemResults("generated.png")}),
+	}, 1, nil)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), generateWaitArgs(server.URL, "--json"))
+
+	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
+		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
+	}
+	var envelope receiptEnvelope
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
+	}
+	if len(envelope.Data.Outputs) != 1 || envelope.Data.Outputs[0].ItemID != 17 {
+		t.Fatalf("a transient read failure ended the wait: %#v", envelope.Data.Outputs)
+	}
+	if counters.enqueues.Load() != 1 || counters.itemPolls.Load() < 2 {
+		t.Fatalf("enqueues = %d, item polls = %d", counters.enqueues.Load(), counters.itemPolls.Load())
+	}
+	if mutations := counters.mutationRequests(); !slices.Equal(mutations, []string{"POST /api/v1/queue/default/enqueue_batch"}) {
+		t.Fatalf("non-read requests = %v, want only the single enqueue", mutations)
+	}
+}
+
+func TestGenerateWaitTimeoutReportsTheUncanceledItem(t *testing.T) {
+	isolateUserConfigDir(t)
+	server, counters := newGenerateWaitServer(t, []map[string]any{queueItemPayload("in_progress", nil)}, 0, nil)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), generateWaitArgs(server.URL, "--timeout", "150ms", "--json"))
+
+	if exitCode != result.ExitInvokeAIFailure || stderr.Len() != 0 {
+		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
+	}
+	var envelope queueFailure
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
+	}
+	if envelope.OK || envelope.Operation != "generate" || envelope.Error == nil || envelope.Error.Code != result.CodeWaitTimeout {
+		t.Fatalf("unexpected envelope: %#v", envelope)
+	}
+	if envelope.Error.Details.QueueID != "default" || envelope.Error.Details.BatchID != "batch-1" ||
+		!reflect.DeepEqual(envelope.Error.Details.ItemIDs, []int{17}) {
+		t.Fatalf("timeout details = %#v, want the accepted queue identifiers", envelope.Error.Details)
+	}
+	if !strings.Contains(strings.ToLower(envelope.Error.Message), "not cancel") {
+		t.Fatalf("timeout message does not state that the remote item was not canceled: %q", envelope.Error.Message)
+	}
+	if counters.enqueues.Load() != 1 || counters.itemPolls.Load() < 1 {
+		t.Fatalf("enqueues = %d, item polls = %d", counters.enqueues.Load(), counters.itemPolls.Load())
+	}
+	if mutations := counters.mutationRequests(); !slices.Equal(mutations, []string{"POST /api/v1/queue/default/enqueue_batch"}) {
+		t.Fatalf("non-read requests = %v, want only the single enqueue", mutations)
+	}
+}
+
+func TestGenerateInterruptionStopsOnlyTheLocalWait(t *testing.T) {
+	isolateUserConfigDir(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	server, counters := newGenerateWaitServer(t, []map[string]any{queueItemPayload("in_progress", nil)}, 0, func(int) { cancel() })
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(ctx, generateWaitArgs(server.URL, "--json"))
+
+	if exitCode != result.ExitInterrupted || stderr.Len() != 0 {
+		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
+	}
+	var envelope queueFailure
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
+	}
+	if envelope.OK || envelope.Operation != "generate" || envelope.Error == nil || envelope.Error.Code != result.CodeInterrupted {
+		t.Fatalf("unexpected envelope: %#v", envelope)
+	}
+	if envelope.Error.Details.QueueID != "default" || envelope.Error.Details.BatchID != "batch-1" ||
+		!reflect.DeepEqual(envelope.Error.Details.ItemIDs, []int{17}) {
+		t.Fatalf("interruption details = %#v, want the accepted queue identifiers", envelope.Error.Details)
+	}
+	if counters.enqueues.Load() != 1 {
+		t.Fatalf("enqueues = %d, want the accepted item to be enqueued exactly once", counters.enqueues.Load())
+	}
+	if mutations := counters.mutationRequests(); !slices.Equal(mutations, []string{"POST /api/v1/queue/default/enqueue_batch"}) {
+		t.Fatalf("non-read requests = %v, want only the single enqueue", mutations)
+	}
+}
+
+func TestGenerateReportsConclusiveItemFailuresWithoutTracebacks(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		item        map[string]any
+		wantStatus  string
+		wantMessage []string
+	}{
+		{
+			name: "failed",
+			item: queueItemPayload("failed", map[string]any{
+				"error_type":      "TypeError",
+				"error_message":   "the anima graph rejected the request",
+				"error_traceback": "/server/private/traceback",
+			}),
+			wantStatus:  "failed",
+			wantMessage: []string{"queue item 17", "failed", "TypeError", "the anima graph rejected the request"},
+		},
+		{
+			name:        "canceled",
+			item:        queueItemPayload("canceled", nil),
+			wantStatus:  "canceled",
+			wantMessage: []string{"queue item 17", "canceled"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			isolateUserConfigDir(t)
+			server, counters := newGenerateWaitServer(t, []map[string]any{test.item}, 0, nil)
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			app := cli.New(&stdout, &stderr)
+
+			exitCode := app.Run(t.Context(), generateWaitArgs(server.URL, "--json"))
+
+			if exitCode != result.ExitInvokeAIFailure || stderr.Len() != 0 {
+				t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
+			}
+			var envelope queueFailure
+			if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+				t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
+			}
+			if envelope.OK || envelope.Operation != "generate" || envelope.Error == nil || envelope.Error.Code != result.CodeInvokeAIOperationFailed {
+				t.Fatalf("unexpected envelope: %#v", envelope)
+			}
+			for _, want := range test.wantMessage {
+				if !strings.Contains(envelope.Error.Message, want) {
+					t.Fatalf("failure message %q does not contain %q", envelope.Error.Message, want)
+				}
+			}
+			if envelope.Error.Details.QueueID != "default" || envelope.Error.Details.BatchID != "batch-1" ||
+				!reflect.DeepEqual(envelope.Error.Details.ItemIDs, []int{17}) ||
+				envelope.Error.Details.ItemID != 17 || envelope.Error.Details.Status != test.wantStatus {
+				t.Fatalf("failure details = %#v, want the accepted item", envelope.Error.Details)
+			}
+			if counters.imageGets.Load() != 0 {
+				t.Fatalf("image gets = %d, want no hydration for a failed item", counters.imageGets.Load())
+			}
+			if output := stdout.String() + stderr.String(); strings.Contains(output, "/server/private/traceback") {
+				t.Fatalf("output exposes a server traceback: %q", output)
+			}
+			if mutations := counters.mutationRequests(); !slices.Equal(mutations, []string{"POST /api/v1/queue/default/enqueue_batch"}) {
+				t.Fatalf("non-read requests = %v, want only the single enqueue", mutations)
+			}
+		})
+	}
+}
+
+func TestGenerateRejectsQueueResultsOutsideTheTestedContract(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		item       map[string]any
+		wantStatus string
+		wantDetail string
+	}{
+		{
+			name:       "undocumented status",
+			item:       queueItemPayload("queued", nil),
+			wantStatus: "queued",
+			wantDetail: `status "queued"`,
+		},
+		{
+			name:       "completed without an image output",
+			item:       queueItemPayload("completed", nil),
+			wantStatus: "completed",
+			wantDetail: "0 image outputs",
+		},
+		{
+			name: "completed with several image outputs",
+			item: queueItemPayload("completed", map[string]any{
+				"session": completedItemResults("first.png", "second.png"),
+			}),
+			wantStatus: "completed",
+			wantDetail: "2 image outputs",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			isolateUserConfigDir(t)
+			server, counters := newGenerateWaitServer(t, []map[string]any{test.item}, 0, nil)
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			app := cli.New(&stdout, &stderr)
+
+			exitCode := app.Run(t.Context(), generateWaitArgs(server.URL, "--json"))
+
+			if exitCode != result.ExitInvokeAIFailure || stderr.Len() != 0 {
+				t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
+			}
+			var envelope queueFailure
+			if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+				t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
+			}
+			if envelope.OK || envelope.Operation != "generate" || envelope.Error == nil || envelope.Error.Code != result.CodeInvalidInvokeAIResponse {
+				t.Fatalf("unexpected envelope: %#v", envelope)
+			}
+			if !strings.Contains(envelope.Error.Message, test.wantDetail) {
+				t.Fatalf("failure message %q does not contain %q", envelope.Error.Message, test.wantDetail)
+			}
+			if envelope.Error.Details.ItemID != 17 || envelope.Error.Details.Status != test.wantStatus ||
+				!reflect.DeepEqual(envelope.Error.Details.ItemIDs, []int{17}) {
+				t.Fatalf("failure details = %#v, want the rejected item", envelope.Error.Details)
+			}
+			if counters.itemPolls.Load() != 1 {
+				t.Fatalf("item polls = %d, want the rejected result to stop the wait", counters.itemPolls.Load())
+			}
+			if mutations := counters.mutationRequests(); !slices.Equal(mutations, []string{"POST /api/v1/queue/default/enqueue_batch"}) {
+				t.Fatalf("non-read requests = %v, want only the single enqueue", mutations)
+			}
+		})
+	}
+}
+
+func TestGenerateRejectsWaitOptionsThatCannotApply(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{name: "wait timeout without waiting", args: []string{"--no-wait", "--timeout", "1s"}},
+		{name: "negative wait timeout", args: []string{"--timeout=-1s"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			isolateUserConfigDir(t)
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				requests.Add(1)
+			}))
+			defer server.Close()
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			app := cli.New(&stdout, &stderr)
+
+			exitCode := app.Run(t.Context(), generateWaitArgs(server.URL, slices.Concat(test.args, []string{"--json"})...))
+
+			if exitCode != result.ExitInvalidRequest || stderr.Len() != 0 || requests.Load() != 0 {
+				t.Fatalf("exit code = %d, requests = %d, stderr = %q, stdout = %q", exitCode, requests.Load(), stderr.String(), stdout.String())
+			}
+			var envelope result.Envelope
+			if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope.Error == nil || envelope.Error.Code != result.CodeInvalidRequest {
+				t.Fatalf("unexpected envelope: %#v", envelope)
+			}
+		})
+	}
+}
+
+func TestGenerateHumanOutputReportsTheCompletedImage(t *testing.T) {
+	isolateUserConfigDir(t)
+	server, _ := newGenerateWaitServer(t, []map[string]any{
+		queueItemPayload("completed", map[string]any{"session": completedItemResults("generated.png")}),
+	}, 0, nil)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), generateWaitArgs(server.URL))
+
+	if exitCode != result.ExitSuccess || stderr.Len() != 0 {
+		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
+	}
+	if want := "Generated generated.png for seed 42 from queue item 17\n"; stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
 }
 
