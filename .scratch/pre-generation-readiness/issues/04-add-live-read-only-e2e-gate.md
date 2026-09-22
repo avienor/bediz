@@ -10,9 +10,40 @@
 
 **Escalate when:** The live target requires authentication that cannot be supplied without exposing a token; a read-only command changes remote state; the baseline version or OpenAPI contract differs from the accepted support range; or a test would need to depend on arbitrary existing user data.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The opt-in harness builds and tests the real binary at the process boundary.
-- [ ] Supported-version, JSON-envelope, exit-status, stderr, normalization, bounds, and secret-redaction assertions are observable.
-- [ ] The read-only gate is deterministic and never claims verification when it was skipped or could not reach the baseline.
-- [ ] Ordinary and live verification instructions are documented and all project-defined Go checks pass.
+- [x] The opt-in harness builds and tests the real binary at the process boundary.
+- [x] Supported-version, JSON-envelope, exit-status, stderr, normalization, bounds, and secret-redaction assertions are observable.
+- [x] The read-only gate is deterministic and never claims verification when it was skipped or could not reach the baseline.
+- [x] Ordinary and live verification instructions are documented and all project-defined Go checks pass.
+
+## Comments
+
+Added an opt-in Go E2E package gated by `BEDIZ_E2E_URL`. With the variable
+unset, `go test -count=1 -v ./e2e` makes no network request and reports
+`live read-only E2E: NOT REQUESTED`. With a target supplied, the harness builds
+`./cmd/bediz` into a temporary directory and invokes the resulting binary for
+`doctor`, `models list`, `images list --limit 1`, and
+`queue list --limit 1`.
+
+Every smoke case requires exit status zero, exactly one successful V1 result
+envelope on stdout, and empty stderr. Independently declared public result
+shapes reject backend-only or otherwise unknown fields. The doctor case
+requires the supported 6.14.1 baseline, the accepted support range, and the
+exact compatible implemented-capability surface. Image and queue pages are
+limited to one and checked against the returned page metadata. A non-secret
+token sentinel exercises the configured-token path and is rejected if it
+appears in either output stream.
+
+The cases accept empty collections and never select an arbitrary model, image,
+or queue item. The gate is fail-fast after doctor, so an unavailable or
+unsupported target cannot reach the `VERIFIED` status. A direct run against an
+unavailable loopback port exited nonzero and did not print `VERIFIED`. A ready
+synthetic target reporting supported-range version 6.14.2 was also rejected
+because it was not the pinned 6.14.1 integration baseline.
+
+The README documents both ordinary and live commands, including `-count=1` to
+prevent a live result from coming from the Go test cache. The live gate passed
+against the local InvokeAI 6.14.1 baseline at `http://127.0.0.1:9090`, with all
+four smoke cases and the final `VERIFIED` status. `go test ./...`,
+`go test -race ./...`, `go vet ./...`, and `go mod verify` all pass.

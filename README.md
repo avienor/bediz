@@ -65,3 +65,33 @@ go test -race ./...
 go vet ./...
 go mod verify
 ```
+
+The ordinary checks do not contact InvokeAI. To display the live-gate status
+explicitly without requesting a live run, use:
+
+```text
+go test -count=1 -v ./e2e
+```
+
+This reports `live read-only E2E: NOT REQUESTED` when `BEDIZ_E2E_URL` is
+unset. To run the opt-in gate against the local InvokeAI 6.14.1 baseline:
+
+```text
+BEDIZ_E2E_URL=http://127.0.0.1:9090 go test -count=1 -v ./e2e
+```
+
+The gate builds the real `bediz` binary and invokes `doctor`, `models list`,
+`images list --limit 1`, and `queue list --limit 1` through the process
+boundary. It checks process exit statuses, one V1 JSON result envelope on
+standard output, empty standard error on success, supported-version readiness,
+normalized result fields, page bounds where the public command supports them,
+and secret redaction. It reports `live read-only E2E: VERIFIED` only after all
+checks pass. Use `-count=1` as shown so a live result is never served from the
+Go test cache.
+
+The gate never uploads, generates, cancels, clears, or deletes anything. It
+also does not run `images get` or `queue get`, because doing so would require a
+known fixture rather than an arbitrary existing user resource. Empty model,
+image, and queue collections are valid. The URL must not contain credentials,
+a query, or a fragment; an authentication requirement causes the gate to fail
+instead of accepting or printing a real token.
