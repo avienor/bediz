@@ -8,7 +8,8 @@
     "/api/v1/queue/{queue_id}/item_ids": {"get": {}},
     "/api/v1/queue/{queue_id}/item_summaries_by_ids": {"post": {}},
     "/api/v1/queue/{queue_id}/i/{item_id}": {"get": {}},
-    "/api/v1/queue/{queue_id}/enqueue_batch": {"post": {}}
+    "/api/v1/queue/{queue_id}/enqueue_batch": {"post": {}},
+    "/api/v1/recall/{queue_id}": {"post": {"requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/RecallParameter"}}}}}}
   },
   "components": {
     "schemas": {
@@ -99,6 +100,17 @@
           "qwen3_encoder": {},
           "seed": {},
           "positive_prompt": {}
+        }
+      },
+      "RecallParameter": {
+        "properties": {
+          "positive_prompt": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+          "negative_prompt": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+          "model": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+          "width": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+          "height": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+          "steps": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+          "seed": {"anyOf": [{"type": "integer"}, {"type": "null"}]}
         }
       },
       "AnimaLatentsToImageInvocation": {

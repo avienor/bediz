@@ -11,6 +11,24 @@ import (
 
 const SupportedInvokeAIRange = ">= 6.14.1, < 6.15.0"
 
+const RecallEndpoint = "/api/v1/recall/{queue_id}"
+const RecallSchemaRef = "#/components/schemas/RecallParameter"
+
+type RecallFieldRequirement struct {
+	Name string
+	Type string
+}
+
+var RecallPatchFields = []RecallFieldRequirement{
+	{Name: "positive_prompt", Type: "string"},
+	{Name: "negative_prompt", Type: "string"},
+	{Name: "model", Type: "string"},
+	{Name: "width", Type: "integer"},
+	{Name: "height", Type: "integer"},
+	{Name: "steps", Type: "integer"},
+	{Name: "seed", Type: "integer"},
+}
+
 type EndpointRequirement struct {
 	Method string
 	Path   string
@@ -93,6 +111,13 @@ var Matrix = []Entry{
 		},
 	},
 	AnimaGenerationEntry(),
+	{
+		Operation:     result.OperationRecall,
+		VersionPolicy: VersionPolicySupportedRange,
+		Endpoints: []EndpointRequirement{
+			{Method: "POST", Path: RecallEndpoint},
+		},
+	},
 }
 
 // AnimaGenerationEntry returns the tested InvokeAI requirements shared by
@@ -101,6 +126,7 @@ func AnimaGenerationEntry() Entry {
 	return Entry{
 		Operation:     result.OperationGenerate,
 		Family:        "anima",
+		UISync:        "partial",
 		VersionPolicy: VersionPolicySupportedRange,
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v1/app/version"},

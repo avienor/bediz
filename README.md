@@ -2,18 +2,23 @@
 
 Bediz is a deterministic Go CLI for controlling a local InvokeAI installation. The V1 contract is defined in [`docs/spec/v1.md`](docs/spec/v1.md).
 
-The current implementation includes the first three V1 delivery slices:
+The current implementation includes the first four V1 delivery slices:
 
 - per-user connection configuration with flag, environment, file, and default precedence;
 - a bounded HTTP client with bearer authentication, safe-read retries, and unknown-outcome classification for mutations;
 - the versioned JSON result and error envelope;
 - `version`, with concise human output and a stable V1 JSON result envelope;
-- `doctor`, which checks InvokeAI version compatibility (`>= 6.14.1, < 6.15.0`), the OpenAPI endpoints and invocation schemas/properties required by implemented capabilities, and readiness for inspection, upload, and Anima text-to-image generation;
+- `doctor`, which checks InvokeAI version compatibility (`>= 6.14.1, < 6.15.0`), the OpenAPI endpoints and schemas required by implemented capabilities, and separate readiness for Anima Direct Execution and Parameter Recall;
 - safe installed-model, gallery-image, and queue inspection;
 - single-file image upload with supported-version validation, no automatic mutation retry, and `outcome_unknown` reporting when the transport result is inconclusive;
-- Anima text-to-image direct execution with deterministic model and component resolution, ordered multi-output seed resolution, graph compilation targeting the tested InvokeAI 6.14.x baseline, safe queue-polling to an Execution Receipt, and `--no-wait` support.
+- Anima text-to-image Direct Execution with deterministic model and component resolution, ordered multi-output seed resolution, graph compilation targeting the tested InvokeAI 6.14.x baseline, safe queue-polling to an Execution Receipt, and `--no-wait` support;
+- manual Anima Parameter Recall and automatic generation UI Synchronization after enqueue, with the verified `partial` level on stock InvokeAI 6.14.x.
 
-Generation UI Synchronization and Recall are delivery step 4 and are not yet advertised. The remaining management commands will be added in later V1 slices described by the specification.
+On a compatible 6.14.x installation, `doctor --json` reports `generate` as compatible and `ui_sync.generate` as `partial` when the tested Recall endpoint and patch schema are present. Missing Recall requirements appear under the separate `recall` capability; they do not make Direct Execution incompatible. An unsupported InvokeAI version is not advertised as ready for generation or Recall.
+
+The partial Handoff restores positive and negative prompts, the exact Anima main model, dimensions, steps, and the first output seed in an open InvokeAI browser after Recall is accepted. It does not restore scheduler, guidance, VAE, Qwen3 encoder, output count, or Output Board controls. The visible queue item, result image, metadata, and complete Execution Receipt retain the resolved settings and every output seed. A successful generation carries `ui_sync_partial`; if the Recall patch fails, generation still succeeds with `ui_sync_failed`. Recall API acceptance does not prove that a browser was open to receive the event. V1 does not support `recall --replace` or claim `full` UI Synchronization.
+
+The remaining management commands will be added in later V1 slices described by the specification.
 
 ## Build and run
 
@@ -30,6 +35,7 @@ go build -o bediz ./cmd/bediz
 ./bediz queue list --json
 ./bediz queue get ITEM_ID --json
 ./bediz generate --model "Anima Base 1.0" --prompt "a lighthouse in a storm" --json
+./bediz recall --model "Anima Base 1.0" --prompt "a lighthouse in a storm" --seed 42 --json
 ```
 
 Inspection commands return normalized Bediz records rather than raw InvokeAI response documents. List output is page-bounded, image selectors use stable InvokeAI image names, and queue listing hydrates only the requested page of lightweight summaries. On supported InvokeAI 6.14.x versions, preserving queue order and total count requires reading the complete lightweight item-ID index; the configured HTTP response-size limit bounds that response, and Bediz never fetches execution graphs while listing.

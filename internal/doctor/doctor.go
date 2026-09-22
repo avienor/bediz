@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -122,6 +123,9 @@ type openAPISchema struct {
 
 type openAPIProperty struct {
 	Const string `json:"const"`
+	AnyOf []struct {
+		Type string `json:"type"`
+	} `json:"anyOf"`
 }
 
 type modelList struct {
@@ -245,8 +249,8 @@ func Run(ctx context.Context, client *httpclient.Client, bedizVersion version.In
 	if report.InvokeAI.ConnectionStatus == "unknown" {
 		report.InvokeAI.ConnectionStatus = "failed"
 	}
-	report.Capabilities = buildCapabilities(report)
-	for _, entry := range capability.Matrix {
+	report.Capabilities = buildCapabilities(report, document)
+	for _, entry := range report.Capabilities {
 		if entry.UISync != "" {
 			report.UISync[entry.Operation] = entry.UISync
 		}
@@ -318,7 +322,7 @@ func inspectModels(models []modelInventoryEntry) ([]ModelSummary, []ModelRequire
 	return relevant, checks
 }
 
-func buildCapabilities(report Report) []CapabilityReport {
+func buildCapabilities(report Report, document openAPIDocument) []CapabilityReport {
 	capabilities := make([]CapabilityReport, 0, len(capability.Matrix))
 	for _, entry := range capability.Matrix {
 		failures := make([]string, 0)
@@ -350,15 +354,56 @@ func buildCapabilities(report Report) []CapabilityReport {
 				}
 			}
 		}
+		if entry.Operation == result.OperationRecall && report.OpenAPI.Available &&
+			endpointAvailable(report.OpenAPI.Endpoints, capability.EndpointRequirement{Method: "POST", Path: capability.RecallEndpoint}) {
+			failures = append(failures, recallSchemaFailures(document)...)
+		}
 		capabilities = append(capabilities, CapabilityReport{
 			Operation:  entry.Operation,
 			Family:     entry.Family,
 			Compatible: len(failures) == 0,
-			UISync:     entry.UISync,
 			Failures:   failures,
 		})
 	}
+	recallReady := false
+	for _, entry := range capabilities {
+		if entry.Operation == result.OperationRecall && entry.Compatible {
+			recallReady = true
+		}
+	}
+	if recallReady {
+		for i := range capabilities {
+			if capabilities[i].Operation == result.OperationGenerate && capabilities[i].Compatible {
+				capabilities[i].UISync = capability.Matrix[i].UISync
+			}
+		}
+	}
 	return capabilities
+}
+
+func recallSchemaFailures(document openAPIDocument) []string {
+	var body struct {
+		RequestBody struct {
+			Content map[string]struct {
+				Schema struct {
+					Ref string `json:"$ref"`
+				} `json:"schema"`
+			} `json:"content"`
+		} `json:"requestBody"`
+	}
+	post := document.Paths[capability.RecallEndpoint]["post"]
+	if err := jsonv2.Unmarshal(post, &body); err != nil || body.RequestBody.Content["application/json"].Schema.Ref != capability.RecallSchemaRef {
+		return []string{"incompatible_recall_schema:request_body"}
+	}
+	properties := document.Components.Schemas["RecallParameter"].Properties
+	failures := make([]string, 0)
+	for _, field := range capability.RecallPatchFields {
+		property, ok := properties[field.Name]
+		if !ok || len(property.AnyOf) != 2 || property.AnyOf[0].Type != field.Type || property.AnyOf[1].Type != "null" {
+			failures = append(failures, "incompatible_recall_schema:"+field.Name)
+		}
+	}
+	return failures
 }
 
 func appendRequestIssue(report *Report, check string, err error) {

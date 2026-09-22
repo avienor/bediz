@@ -16,6 +16,7 @@ func TestMatrixAdvertisesOnlyImplementedOperations(t *testing.T) {
 		result.OperationQueueList,
 		result.OperationQueueGet,
 		result.OperationGenerate,
+		result.OperationRecall,
 	}
 	got := make([]string, len(Matrix))
 	for i, entry := range Matrix {
@@ -44,8 +45,8 @@ func TestMatrixRegistersAnimaDirectExecutionRequirements(t *testing.T) {
 	if animaEntry.VersionPolicy != VersionPolicySupportedRange {
 		t.Fatalf("VersionPolicy = %q, want %q", animaEntry.VersionPolicy, VersionPolicySupportedRange)
 	}
-	if animaEntry.UISync != "" {
-		t.Fatalf("UISync = %q, want unadvertised empty string before delivery step 4", animaEntry.UISync)
+	if animaEntry.UISync != "partial" {
+		t.Fatalf("UISync = %q, want verified partial level", animaEntry.UISync)
 	}
 
 	wantEndpoints := []EndpointRequirement{
@@ -116,6 +117,19 @@ func TestMatrixRegistersAnimaDirectExecutionRequirements(t *testing.T) {
 			slices.Equal(a.Types, b.Types) && slices.Equal(a.Bases, b.Bases)
 	}) {
 		t.Fatalf("Models = %#v, want %#v", animaEntry.Models, wantModels)
+	}
+}
+
+func TestMatrixRegistersRecallSeparatelyFromDirectExecution(t *testing.T) {
+	recall := Matrix[len(Matrix)-1]
+	if recall.Operation != result.OperationRecall || recall.VersionPolicy != VersionPolicySupportedRange ||
+		recall.UISync != "" || !slices.Equal(recall.Endpoints, []EndpointRequirement{{Method: "POST", Path: RecallEndpoint}}) {
+		t.Fatalf("Recall capability = %#v, want independent supported-version Recall requirement", recall)
+	}
+	for _, endpoint := range AnimaGenerationEntry().Endpoints {
+		if endpoint.Path == RecallEndpoint {
+			t.Fatalf("Direct Execution incorrectly requires Recall: %#v", endpoint)
+		}
 	}
 }
 

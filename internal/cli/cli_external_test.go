@@ -3189,6 +3189,7 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 		"/api/v1/queue/{queue_id}/enqueue_batch":         map[string]any{"post": map[string]any{}},
 	}
 	openAPIDocument := animaOpenAPIFixture("", "")
+	paths["/api/v1/recall/{queue_id}"] = openAPIDocument["paths"].(map[string]any)["/api/v1/recall/{queue_id}"]
 	openAPIDocument["paths"] = paths
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -3246,9 +3247,9 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 		}
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate"}
+	wantOperations := []string{"models.list", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "recall"}
 	if envelope.SchemaVersion != 1 || !envelope.OK || envelope.Operation != "doctor" || !envelope.Data.Ready ||
-		!slices.Equal(operations, wantOperations) || len(envelope.Data.UISync) != 0 ||
+		!slices.Equal(operations, wantOperations) || envelope.Data.UISync["generate"] != "partial" ||
 		len(envelope.Data.OpenAPI.Invocations) != 8 || len(envelope.Data.Models.Relevant) != 3 || len(envelope.Data.Models.Requirements) != 3 {
 		t.Fatalf("unexpected doctor envelope: %#v", envelope)
 	}

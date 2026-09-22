@@ -71,19 +71,15 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Re
 	if err := client.GetJSON(ctx, "/openapi.json", &openAPI); err != nil {
 		return Result{}, err
 	}
-	path := openAPI.Paths["/api/v1/recall/{queue_id}"]
-	if path.Post.RequestBody.Content["application/json"].Schema.Ref != "#/components/schemas/RecallParameter" {
+	path := openAPI.Paths[capability.RecallEndpoint]
+	if path.Post.RequestBody.Content["application/json"].Schema.Ref != capability.RecallSchemaRef {
 		return Result{}, operation.UnsupportedCapability("InvokeAI Recall endpoint does not expose the tested request schema")
 	}
 	properties := openAPI.Components.Schemas["RecallParameter"].Properties
-	for _, field := range []string{"positive_prompt", "negative_prompt", "model", "width", "height", "steps", "seed"} {
-		property, ok := properties[field]
-		wantType := "string"
-		if field == "width" || field == "height" || field == "steps" || field == "seed" {
-			wantType = "integer"
-		}
-		if !ok || len(property.AnyOf) != 2 || property.AnyOf[0].Type != wantType || property.AnyOf[1].Type != "null" {
-			return Result{}, operation.UnsupportedCapability(fmt.Sprintf("InvokeAI Recall schema does not support %s as a patch field", field))
+	for _, field := range capability.RecallPatchFields {
+		property, ok := properties[field.Name]
+		if !ok || len(property.AnyOf) != 2 || property.AnyOf[0].Type != field.Type || property.AnyOf[1].Type != "null" {
+			return Result{}, operation.UnsupportedCapability(fmt.Sprintf("InvokeAI Recall schema does not support %s as a patch field", field.Name))
 		}
 	}
 	patch := request
