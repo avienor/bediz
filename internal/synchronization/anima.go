@@ -25,17 +25,17 @@ func SynchronizeAnima(ctx context.Context, client *httpclient.Client, receipt ge
 		Seed:           new(settings.Seeds[0]),
 	}
 	if _, err := recall.Submit(ctx, client, patch); err != nil {
-		receipt.Warnings = []result.Warning{{
+		receipt.Warnings = append(receipt.Warnings, result.Warning{
 			Code: "ui_sync_failed", Message: "Generation was accepted, but the UI Recall patch could not be confirmed.",
-		}}
+		})
 		return receipt
 	}
-	receipt.Warnings = []result.Warning{{
+	receipt.Warnings = append(receipt.Warnings, result.Warning{
 		Code:    "ui_sync_partial",
 		Message: "InvokeAI accepted the Recall patch; stock InvokeAI does not restore all generation controls.",
 		Details: map[string]any{"not_restored": []string{
 			"scheduler", "guidance", "vae", "qwen3_encoder", "output_count", "board_id",
 		}},
-	}}
+	})
 	return receipt
 }
