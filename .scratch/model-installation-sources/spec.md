@@ -1,6 +1,6 @@
 # Model installation, authentication, and source resolution
 
-**Status:** Approved ticket plan; tickets 01–07 are done and ticket 08 remains ready for implementation.
+**Status:** Approved ticket plan; tickets 01–08 are done.
 
 The accepted product boundary is Bediz V1 specification sections 5-10, 14, 17-18, and 20-23, together with ADR 0018 (source resolution and credential boundaries), ADR 0006 (Request Documents), ADR 0007 (Result Envelope), and ADR 0008 (unsafe retries). ADR 0018 supersedes historical ADR 0005. This file records decisions needed to execute delivery step 5; the V1 specification now contains these accepted public behaviors. An implementing ticket must keep it aligned with any newly accepted discovery. A contradiction with the V1 specification or an ADR is an escalation, not permission to silently change the contract.
 

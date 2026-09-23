@@ -14,7 +14,7 @@
 
 **Permanent records:** V1 spec, ADR 0018, and tests — define the version-candidate result shape and resubmission behavior. Supersede ADR 0018 with a new ADR if its decision changes.
 
-**Status:** awaiting-review
+**Status:** done
 
 - [x] A Civitai model page yields version candidates and no install job, even when only one version is listed.
 - [x] Candidate identifiers can be submitted as exact version references through ticket 07.
@@ -22,4 +22,6 @@
 
 Worker evidence: fixture verification passed with `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify`. Model-page fixtures cover multi-version numeric ordering with and without a slug segment, a single-version page that still returns a choice, `file_id` rejected before metadata, malformed model metadata, and CLI resubmission of a chosen version ID through the ticket-07 resolver. A current Civitai model metadata response for model 827184 listed 17 versions; the CLI returned all 17 as `civitai_version` choices sorted from 925049 to 2883731 with exit 3 and no InvokeAI request. Resubmitting chosen version 2514310 with an out-of-version `file_id` against local InvokeAI 6.14.1 reached the exact-version resolver and was rejected before mutation; the install job list held 8 jobs before and after.
 
-A supplied `--token-stdin` token is also sent as a Bearer header to Civitai's HTTPS model-metadata endpoint, under the same no-redirect boundary as version metadata; V1 section 14 records it. The fixed-diff self review left one open question for the independent reviewer: candidate names are echoed from Civitai metadata without a length cap.
+A supplied `--token-stdin` token is also sent as a Bearer header to Civitai's HTTPS model-metadata endpoint, under the same no-redirect boundary as version metadata; V1 section 14 records it. The owner accepted both the model-metadata token boundary and echoing candidate names without a length cap, since the JSON envelope escapes them and truncation would alter the caller's choice.
+
+Independent review of the fixed diff `c31409c..57c7e90` accepted the change with no blocking findings. The reviewer derived the expected choices from the fixtures and from a live model 827184 response. The binary's 17 candidates matched exactly for both the bare and slug page URLs, with no InvokeAI request, and `go test`, `go test -race`, `go vet`, and `go mod verify` passed. A non-blocking note is that one unnamed version rejects the whole page as invalid metadata; this is strict but deterministic and fails before mutation.
