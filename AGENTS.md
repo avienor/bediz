@@ -52,7 +52,7 @@ A Go change is complete when all applicable commands pass:
 - `go vet ./...`
 - `go mod verify`
 
-For InvokeAI integration changes, also exercise the narrowest affected behavior against the supported local InvokeAI baseline when available, and report when live verification was unavailable.
+For InvokeAI integration changes, also exercise the narrowest affected behavior against the supported local InvokeAI baseline when available, and report when live verification was unavailable. Before a live check, model installation, or InvokeAI UI observation, read `docs/agents/live-verification.md`.
 
 ## Git and pull requests
 
