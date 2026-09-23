@@ -49,18 +49,18 @@ func (c *CLI) newGenerateCommand(exitCode *int, jsonOutput *bool) *cobra.Command
 	command.Flags().DurationVar(&options.waitTimeout, "timeout", 0, "total local wait timeout; zero waits until the queue item reaches a terminal state")
 	command.Flags().StringVar(&options.requestPath, "request", "", "read a request document from a file or standard input with -")
 	command.Flags().BoolVar(&options.noWait, "no-wait", false, "return after InvokeAI accepts the request")
-	command.Flags().StringVar(&options.model, "model", "", "Anima main model key or unique name")
+	command.Flags().StringVar(&options.model, "model", "", "supported main model key or unique name")
 	command.Flags().StringVar(&options.prompt, "prompt", "", "positive prompt")
 	command.Flags().StringVar(&options.negativePrompt, "negative-prompt", "", "negative prompt")
 	command.Flags().IntVar(&options.width, "width", 0, "output width")
 	command.Flags().IntVar(&options.height, "height", 0, "output height")
 	command.Flags().IntVar(&options.steps, "steps", 0, "denoising steps")
-	command.Flags().StringVar(&options.scheduler, "scheduler", "", "Anima scheduler")
-	command.Flags().Float64Var(&options.guidance, "guidance", 0, "Anima guidance scale")
+	command.Flags().StringVar(&options.scheduler, "scheduler", "", "model family scheduler")
+	command.Flags().Float64Var(&options.guidance, "guidance", 0, "model family guidance scale")
 	command.Flags().Uint32Var(&options.seed, "seed", 0, "generation seed")
 	command.Flags().IntVar(&options.outputCount, "output-count", 0, "number of outputs")
 	command.Flags().StringVar(&options.boardID, "board", "", "exact output board id")
-	command.Flags().StringVar(&options.vae, "vae", "", "Anima VAE key or unique name")
+	command.Flags().StringVar(&options.vae, "vae", "", "applicable VAE key or unique name")
 	command.Flags().StringVar(&options.qwen3Encoder, "qwen3-encoder", "", "Qwen3 encoder key or unique name")
 	return command
 }
@@ -123,7 +123,7 @@ func (c *CLI) executeGenerate(ctx context.Context, jsonOutput bool, command *cob
 			if err != nil {
 				return accepted, err
 			}
-			accepted = synchronization.SynchronizeAnima(ctx, client, accepted)
+			accepted = synchronization.Synchronize(ctx, client, accepted)
 			if options.noWait {
 				return accepted, nil
 			}

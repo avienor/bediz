@@ -852,13 +852,22 @@ func TestGenerateTreatsPartiallyAcceptedBatchAsOutcomeUnknown(t *testing.T) {
 	}
 }
 
-func TestGenerateRejectsNonFiniteGuidanceBeforeNetwork(t *testing.T) {
+func TestGenerateRejectsNonFiniteGuidanceAfterInventory(t *testing.T) {
 	for _, guidance := range []string{"NaN", "+Inf"} {
 		t.Run(guidance, func(t *testing.T) {
 			isolateUserConfigDir(t)
-			var requests atomic.Int32
-			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-				requests.Add(1)
+			var inventoryReads, enqueues atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v2/models/" {
+					inventoryReads.Add(1)
+				}
+				if serveAnimaPreflight(w, r, "6.14.1", animaOpenAPIFixture("", ""), animaModelInventory()) {
+					return
+				}
+				if r.URL.Path == "/api/v1/queue/default/enqueue_batch" {
+					enqueues.Add(1)
+				}
+				http.NotFound(w, r)
 			}))
 			defer server.Close()
 			var stdout bytes.Buffer
@@ -872,8 +881,8 @@ func TestGenerateRejectsNonFiniteGuidanceBeforeNetwork(t *testing.T) {
 				"--url", server.URL, "--json",
 			})
 
-			if exitCode != result.ExitInvalidRequest || stderr.Len() != 0 || requests.Load() != 0 {
-				t.Fatalf("exit code = %d, requests = %d, stderr = %q, stdout = %q", exitCode, requests.Load(), stderr.String(), stdout.String())
+			if exitCode != result.ExitInvalidRequest || stderr.Len() != 0 || inventoryReads.Load() != 1 || enqueues.Load() != 0 {
+				t.Fatalf("exit code = %d, inventory reads = %d, enqueues = %d, stderr = %q, stdout = %q", exitCode, inventoryReads.Load(), enqueues.Load(), stderr.String(), stdout.String())
 			}
 			var envelope result.Envelope
 			if err := jsonv2.Unmarshal(stdout.Bytes(), &envelope); err != nil {
@@ -886,13 +895,22 @@ func TestGenerateRejectsNonFiniteGuidanceBeforeNetwork(t *testing.T) {
 	}
 }
 
-func TestGenerateRejectsNonPositiveOutputCountBeforeNetwork(t *testing.T) {
+func TestGenerateRejectsNonPositiveOutputCountAfterInventory(t *testing.T) {
 	for _, outputCount := range []string{"0", "-1"} {
 		t.Run(outputCount, func(t *testing.T) {
 			isolateUserConfigDir(t)
-			var requests atomic.Int32
-			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-				requests.Add(1)
+			var inventoryReads, enqueues atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v2/models/" {
+					inventoryReads.Add(1)
+				}
+				if serveAnimaPreflight(w, r, "6.14.1", animaOpenAPIFixture("", ""), animaModelInventory()) {
+					return
+				}
+				if r.URL.Path == "/api/v1/queue/default/enqueue_batch" {
+					enqueues.Add(1)
+				}
+				http.NotFound(w, r)
 			}))
 			defer server.Close()
 			var stdout bytes.Buffer
@@ -904,8 +922,8 @@ func TestGenerateRejectsNonPositiveOutputCountBeforeNetwork(t *testing.T) {
 				"--output-count", outputCount, "--url", server.URL, "--json",
 			})
 
-			if exitCode != result.ExitInvalidRequest || stderr.Len() != 0 || requests.Load() != 0 {
-				t.Fatalf("exit code = %d, requests = %d, stderr = %q, stdout = %q", exitCode, requests.Load(), stderr.String(), stdout.String())
+			if exitCode != result.ExitInvalidRequest || stderr.Len() != 0 || inventoryReads.Load() != 1 || enqueues.Load() != 0 {
+				t.Fatalf("exit code = %d, inventory reads = %d, enqueues = %d, stderr = %q, stdout = %q", exitCode, inventoryReads.Load(), enqueues.Load(), stderr.String(), stdout.String())
 			}
 			var envelope result.Envelope
 			if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {

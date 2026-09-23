@@ -35,7 +35,7 @@ func (c *CLI) newRecallCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
 	}
 	addRemoteFlags(command, &options.remoteOptions, requestTimeoutUsage)
 	command.Flags().StringVar(&options.requestPath, "request", "", "read a request document from a file or standard input with -")
-	command.Flags().StringVar(&options.model, "model", "", "Anima main model key or unique name")
+	command.Flags().StringVar(&options.model, "model", "", "supported main model key or unique name")
 	command.Flags().StringVar(&options.prompt, "prompt", "", "positive prompt")
 	command.Flags().StringVar(&options.negativePrompt, "negative-prompt", "", "negative prompt")
 	command.Flags().IntVar(&options.width, "width", 0, "output width")

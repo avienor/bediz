@@ -11,13 +11,16 @@ import (
 	"github.com/avienor/bediz/internal/operation"
 )
 
-// AnimaResolution contains the complete generation values and exact installed
-// model identifiers needed to compile one Anima execution graph.
-type AnimaResolution struct {
+// Resolution contains the complete generation values and exact installed
+// model identifiers needed to compile a family execution graph.
+type Resolution struct {
 	Request Request
 	Models  ResolvedModels
 	Seeds   []uint32
 }
+
+// AnimaResolution is the Anima compiler's resolution value.
+type AnimaResolution = Resolution
 
 type modelRequirement struct {
 	kind      string
@@ -26,7 +29,6 @@ type modelRequirement struct {
 }
 
 var (
-	animaMainRequirement    = modelRequirement{kind: "main_model", base: "anima", modelType: "main"}
 	animaVAERequirement     = modelRequirement{kind: "vae", base: "anima", modelType: "vae"}
 	qwen3EncoderRequirement = modelRequirement{kind: "qwen3_encoder", base: "any", modelType: "qwen3_encoder"}
 )
@@ -34,11 +36,24 @@ var (
 // ResolveAnima applies Anima family defaults and resolves the required
 // installed models without consulting browser state.
 func ResolveAnima(request Request, inventory []ModelIdentifier, random io.Reader) (AnimaResolution, error) {
-	if err := validateAnimaRequest(request); err != nil {
+	if err := validateCommonRequest(request); err != nil {
 		return AnimaResolution{}, err
 	}
+	mainModel, err := ResolveFamilyMain(inventory, request.Model)
+	if err != nil {
+		return AnimaResolution{}, fmt.Errorf("resolve Anima main model: %w", err)
+	}
+	if mainModel.Base != "anima" {
+		return AnimaResolution{}, operation.UnsupportedCapability(fmt.Sprintf("model %q is not an Anima main model", mainModel.Key))
+	}
+	return resolveAnima(request, mainModel, inventory, random)
+}
 
+func resolveAnima(request Request, mainModel ModelIdentifier, inventory []ModelIdentifier, random io.Reader) (AnimaResolution, error) {
 	resolved := applyAnimaDefaults(request)
+	if err := validateAnimaSettings(resolved); err != nil {
+		return AnimaResolution{}, err
+	}
 	seeds := make([]uint32, *resolved.OutputCount)
 	if resolved.Seed == nil {
 		for index := range seeds {
@@ -57,10 +72,6 @@ func ResolveAnima(request Request, inventory []ModelIdentifier, random io.Reader
 		}
 	}
 
-	mainModel, err := resolveUniqueCompatible(inventory, request.Model, animaMainRequirement)
-	if err != nil {
-		return AnimaResolution{}, fmt.Errorf("resolve Anima main model: %w", err)
-	}
 	var vaeSelector string
 	var encoderSelector string
 	if request.Components != nil {
@@ -82,7 +93,7 @@ func ResolveAnima(request Request, inventory []ModelIdentifier, random io.Reader
 	}, nil
 }
 
-func validateAnimaRequest(request Request) error {
+func validateCommonRequest(request Request) error {
 	if request.SchemaVersion != 1 {
 		return operation.InvalidRequest(fmt.Sprintf("unsupported request schema version %d", request.SchemaVersion))
 	}
@@ -95,7 +106,7 @@ func validateAnimaRequest(request Request) error {
 	if (request.Width == nil) != (request.Height == nil) {
 		return operation.InvalidRequest("width and height must be supplied together or both omitted")
 	}
-	return validateAnimaSettings(applyAnimaDefaults(request))
+	return nil
 }
 
 func applyAnimaDefaults(request Request) Request {
@@ -175,12 +186,6 @@ func resolveUniqueCompatible(inventory []ModelIdentifier, selector string, requi
 		return ModelIdentifier{}, operation.SelectionRequired(requirement.kind, selector, candidates)
 	}
 	return ModelIdentifier{}, operation.InvalidRequest(fmt.Sprintf("model selector %q did not resolve to an installed model", selector))
-}
-
-// ResolveAnimaMain resolves an explicit selector using the same rules as an
-// Anima Generation Request, without requiring generation components.
-func ResolveAnimaMain(inventory []ModelIdentifier, selector string) (ModelIdentifier, error) {
-	return resolveUniqueCompatible(inventory, selector, animaMainRequirement)
 }
 
 func resolveOnlyCompatible(inventory []ModelIdentifier, requirement modelRequirement) (ModelIdentifier, error) {

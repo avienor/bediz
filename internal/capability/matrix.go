@@ -40,6 +40,12 @@ type RecallFieldRequirement struct {
 	Type string
 }
 
+// RecallPatchField is an adapter-owned field paired with its tested schema.
+type RecallPatchField struct {
+	Requirement RecallFieldRequirement
+	Value       any
+}
+
 // RecallSchemaAlternative is one type branch in a Recall patch field's anyOf.
 type RecallSchemaAlternative struct {
 	Type string `json:"type"`

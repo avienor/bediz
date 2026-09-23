@@ -22,7 +22,7 @@ type ResolvedSettings struct {
 	Height         int               `json:"height"`
 	Steps          int               `json:"steps"`
 	Scheduler      string            `json:"scheduler"`
-	Guidance       float64           `json:"guidance"`
+	Guidance       float64           `json:"guidance,omitzero"`
 	OutputCount    int               `json:"output_count"`
 	BoardID        string            `json:"board_id,omitempty"`
 	ModelKey       string            `json:"model_key"`
@@ -43,6 +43,7 @@ type Output struct {
 }
 
 type ExecutionReceipt struct {
+	Family           string           `json:"-"`
 	SubmittedRequest Request          `json:"submitted_request"`
 	ResolvedSettings ResolvedSettings `json:"resolved_settings"`
 	Queue            QueueReceipt     `json:"queue"`
@@ -65,7 +66,7 @@ type enqueueResponse struct {
 }
 
 func Submit(ctx context.Context, client *httpclient.Client, request Request) (ExecutionReceipt, error) {
-	if err := validateAnimaRequest(request); err != nil {
+	if err := validateCommonRequest(request); err != nil {
 		return ExecutionReceipt{}, err
 	}
 	var versionResponse struct {
@@ -83,23 +84,30 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 			"InvokeAI %s is outside the supported range %s", versionResponse.Version, capability.SupportedInvokeAIRange,
 		))
 	}
-	var openAPI openAPIDocument
-	if err := client.GetJSON(ctx, "/openapi.json", &openAPI); err != nil {
-		return ExecutionReceipt{}, err
-	}
-	if err := validateAnimaOpenAPI(openAPI); err != nil {
-		return ExecutionReceipt{}, err
-	}
-
 	var inventory modelListResponse
 	if err := client.GetJSON(ctx, "/api/v2/models/", &inventory); err != nil {
 		return ExecutionReceipt{}, err
 	}
-	resolved, err := ResolveAnima(request, inventory.Models, rand.Reader)
+	main, err := ResolveFamilyMain(inventory.Models, request.Model)
 	if err != nil {
 		return ExecutionReceipt{}, err
 	}
-	enqueueRequest, err := CompileAnima(resolved)
+	adapter, err := adapterForBase(main.Base)
+	if err != nil {
+		return ExecutionReceipt{}, err
+	}
+	var openAPI openAPIDocument
+	if err := client.GetJSON(ctx, "/openapi.json", &openAPI); err != nil {
+		return ExecutionReceipt{}, err
+	}
+	if err := validateFamilyOpenAPI(openAPI, adapter.invocations()); err != nil {
+		return ExecutionReceipt{}, err
+	}
+	resolved, err := adapter.resolve(request, main, inventory.Models, rand.Reader)
+	if err != nil {
+		return ExecutionReceipt{}, err
+	}
+	enqueueRequest, err := adapter.compile(resolved)
 	if err != nil {
 		return ExecutionReceipt{}, err
 	}
@@ -120,7 +128,12 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 		}
 	}
 
+	var guidance float64
+	if resolved.Request.Guidance != nil {
+		guidance = *resolved.Request.Guidance
+	}
 	return ExecutionReceipt{
+		Family:           main.Base,
 		SubmittedRequest: request,
 		ResolvedSettings: ResolvedSettings{
 			PositivePrompt: resolved.Request.PositivePrompt,
@@ -129,11 +142,11 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 			Height:         *resolved.Request.Height,
 			Steps:          *resolved.Request.Steps,
 			Scheduler:      *resolved.Request.Scheduler,
-			Guidance:       *resolved.Request.Guidance,
+			Guidance:       guidance,
 			OutputCount:    *resolved.Request.OutputCount,
 			BoardID:        resolved.Request.BoardID,
 			ModelKey:       resolved.Models.Main.Key,
-			ComponentKeys:  map[string]string{"vae": resolved.Models.VAE.Key, "qwen3_encoder": resolved.Models.Qwen3Encoder.Key},
+			ComponentKeys:  adapter.componentKeys(resolved),
 			Seeds:          slices.Clone(resolved.Seeds),
 		},
 		Queue:    QueueReceipt{QueueID: response.QueueID, BatchID: response.Batch.BatchID, ItemIDs: response.ItemIDs},
