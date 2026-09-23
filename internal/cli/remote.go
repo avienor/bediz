@@ -150,6 +150,12 @@ func (e remoteExecution[Request, Result]) run(ctx context.Context, c *CLI, jsonO
 // the single place command failures become structured error codes; doctor
 // classifies its own diagnostic issues before it reports one.
 func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
+	if _, ok := errors.AsType[*models.RepositoryAccessError](err); ok {
+		return c.fail(operationName, jsonOutput, result.CodeConnectionFailed, "could not verify public Hugging Face repository access", nil)
+	}
+	if auth, ok := errors.AsType[*operation.AuthenticationRequiredError](err); ok {
+		return c.fail(operationName, jsonOutput, result.CodeAuthenticationFailed, auth.Error(), nil)
+	}
 	if _, ok := errors.AsType[*huggingface.RejectedTokenError](err); ok {
 		return c.fail(operationName, jsonOutput, result.CodeAuthenticationFailed, "Hugging Face rejected the token", nil)
 	}

@@ -76,6 +76,13 @@ type InstallEndpoint struct {
 		In       string `json:"in"`
 		Required bool   `json:"required"`
 	} `json:"parameters"`
+	Responses map[string]struct {
+		Content map[string]struct {
+			Schema struct {
+				Ref string `json:"$ref"`
+			} `json:"schema"`
+		} `json:"content"`
+	} `json:"responses"`
 }
 
 func (endpoint InstallEndpoint) HasRequiredSource() bool {
@@ -94,6 +101,10 @@ func (endpoint InstallEndpoint) HasAccessTokenQuery() bool {
 		}
 	}
 	return false
+}
+
+func (endpoint InstallEndpoint) HasJobResponse() bool {
+	return endpoint.Responses["201"].Content["application/json"].Schema.Ref == "#/components/schemas/ModelInstallJob"
 }
 
 type InvocationRequirement struct {

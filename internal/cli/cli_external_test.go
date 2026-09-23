@@ -3178,9 +3178,12 @@ func TestGlobalJSONFlagBeforeVersionReturnsStableContract(t *testing.T) {
 func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 	isolateUserConfigDir(t)
 	paths := map[string]any{
-		"/api/v1/app/version":                            map[string]any{"get": map[string]any{}},
-		"/api/v2/models/":                                map[string]any{"get": map[string]any{}},
-		"/api/v2/models/install":                         map[string]any{"post": map[string]any{"parameters": []any{map[string]any{"name": "source", "in": "query", "required": true}}}},
+		"/api/v1/app/version": map[string]any{"get": map[string]any{}},
+		"/api/v2/models/":     map[string]any{"get": map[string]any{}},
+		"/api/v2/models/install": map[string]any{"post": map[string]any{
+			"parameters": []any{map[string]any{"name": "source", "in": "query", "required": true}},
+			"responses":  map[string]any{"201": map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/ModelInstallJob"}}}}},
+		}},
 		"/api/v2/models/install/{id}":                    map[string]any{"get": map[string]any{}},
 		"/api/v1/images/":                                map[string]any{"get": map[string]any{}},
 		"/api/v1/images/i/{image_name}":                  map[string]any{"get": map[string]any{}},

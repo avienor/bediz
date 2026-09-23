@@ -24,7 +24,7 @@ type modelInstallOptions struct {
 func (c *CLI) newModelsInstallCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
 	options := modelInstallOptions{remoteOptions: defaultRemoteOptions()}
 	command := &cobra.Command{
-		Use: "install", Short: "Install a model from an exact URL", Args: cobra.NoArgs,
+		Use: "install", Short: "Install a model from an exact URL or Hugging Face repository", Args: cobra.NoArgs,
 		Annotations: map[string]string{operationAnnotation: result.OperationModelsInstall},
 		Run: func(cmd *cobra.Command, _ []string) {
 			if options.requestPath == "-" && options.tokenStdin {
@@ -56,8 +56,8 @@ func (c *CLI) newModelsInstallCommand(exitCode *int, jsonOutput *bool) *cobra.Co
 	}
 	addRemoteFlags(command, &options.remoteOptions, requestTimeoutUsage)
 	command.Flags().StringVar(&options.requestPath, "request", "", "read a request document from a file or standard input with -")
-	command.Flags().StringVar(&options.sourceType, "source-type", "", "model source type (url)")
-	command.Flags().StringVar(&options.source, "source", "", "exact HTTP(S) artifact URL")
+	command.Flags().StringVar(&options.sourceType, "source-type", "", "model source type (url or huggingface)")
+	command.Flags().StringVar(&options.source, "source", "", "exact artifact URL or Hugging Face org/repo reference")
 	command.Flags().BoolVar(&options.tokenStdin, "token-stdin", false, "read a temporary source access token from standard input")
 	return command
 }

@@ -2,7 +2,7 @@
   "paths": {
     "/api/v1/app/version": {"get": {}},
     "/api/v2/models/": {"get": {}},
-    "/api/v2/models/install": {"post": {"parameters": [{"name": "source", "in": "query", "required": true}]}, "get": {}},
+    "/api/v2/models/install": {"post": {"parameters": [{"name": "source", "in": "query", "required": true}], "responses": {"201": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ModelInstallJob"}}}}}}, "get": {}},
     "/api/v2/models/install/{id}": {"get": {}},
 	"/api/v2/models/hf_login": {"get": {}, "post": {"requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/Body_do_hf_login"}}}}}, "delete": {}},
     "/api/v1/images/": {"get": {}},

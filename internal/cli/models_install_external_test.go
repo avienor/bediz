@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"encoding/json/v2"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +16,8 @@ import (
 	"github.com/avienor/bediz/internal/result"
 )
 
+const huggingFaceInstallOpenAPI = `{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}},"/api/v2/models/hugging_face":{"get":{}}}}`
+
 func installTestServer(t *testing.T, posts *atomic.Int32) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -22,7 +25,7 @@ func installTestServer(t *testing.T, posts *atomic.Int32) *httptest.Server {
 		case "/api/v1/app/version":
 			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
 		case "/openapi.json":
-			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}]}}}}`))
+			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
 		case "/api/v2/models/install":
 			posts.Add(1)
 			if r.Method != http.MethodPost || r.URL.Query().Get("source") != "https://example.org/model.safetensors" {
@@ -46,6 +49,132 @@ func runModelCommand(t *testing.T, stdin string, args ...string) (int, string, s
 	app := cli.NewWithIO(strings.NewReader(stdin), &stdout, &stderr)
 	code := app.Run(t.Context(), args)
 	return code, stdout.String(), stderr.String()
+}
+
+type huggingFaceTransport func(*http.Request) (*http.Response, error)
+
+func (transport huggingFaceTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	return transport(request)
+}
+
+func mockPublicHuggingFaceRepository(t *testing.T, gated string) {
+	t.Helper()
+	previous := http.DefaultTransport
+	http.DefaultTransport = huggingFaceTransport(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Host == "huggingface.co" {
+			if request.URL.String() != "https://huggingface.co/api/models/sample/model" || request.Header.Get("Authorization") != "" {
+				t.Errorf("unexpected Hugging Face access check: %s", request.URL)
+			}
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"gated":` + gated + `,"private":false}`)), Header: make(http.Header)}, nil
+		}
+		return previous.RoundTrip(request)
+	})
+	t.Cleanup(func() { http.DefaultTransport = previous })
+}
+
+func TestHuggingFaceInstallFlagsAndDocumentProduceSameCanonicalJob(t *testing.T) {
+	isolateUserConfigDir(t)
+	mockPublicHuggingFaceRepository(t, `false`)
+	var posts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(huggingFaceInstallOpenAPI))
+		case "/api/v2/models/hugging_face":
+			_, _ = w.Write([]byte(`{"urls":["https://huggingface.co/sample/model/resolve/main/model.safetensors"],"is_diffusers":false}`))
+		case "/api/v2/models/install":
+			posts.Add(1)
+			if r.Method != http.MethodPost || r.URL.Query().Get("source") != "https://huggingface.co/sample/model" {
+				t.Errorf("unexpected installation: %s %s", r.Method, r.URL)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":3,"status":"waiting"}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+		}
+	}))
+	t.Cleanup(server.Close)
+	for _, input := range []struct {
+		stdin string
+		args  []string
+	}{
+		{"", []string{"--source-type", "huggingface", "--source", "sample/model"}},
+		{`{"schema_version":1,"source":{"type":"huggingface","reference":"https://huggingface.co/sample/model"}}`, []string{"--request", "-"}},
+	} {
+		args := append([]string{"models", "install"}, input.args...)
+		args = append(args, "--url", server.URL, "--json")
+		code, stdout, stderr := runModelCommand(t, input.stdin, args...)
+		if code != result.ExitSuccess || stderr != "" || !strings.Contains(stdout, `"job_id":3`) || !strings.Contains(stdout, `"source_type":"huggingface"`) || strings.Contains(stdout, "sample/model") {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+		}
+	}
+	if posts.Load() != 2 {
+		t.Fatalf("posts=%d", posts.Load())
+	}
+}
+
+func TestGatedHuggingFaceInstallFailsAuthenticationBeforeSubmission(t *testing.T) {
+	isolateUserConfigDir(t)
+	mockPublicHuggingFaceRepository(t, `"manual"`)
+	var posts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(huggingFaceInstallOpenAPI))
+		case "/api/v2/models/install":
+			posts.Add(1)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+		}
+	}))
+	t.Cleanup(server.Close)
+	code, stdout, stderr := runModelCommand(t, "", "models", "install", "--source-type", "huggingface", "--source", "sample/model", "--url", server.URL, "--json")
+	if code != result.ExitConnection || stderr != "" || !strings.Contains(stdout, `"code":"authentication_failed"`) || posts.Load() != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q posts=%d", code, stdout, stderr, posts.Load())
+	}
+}
+
+func TestProtectedHuggingFaceInstallAndStatusUseInspectableJobWithoutLeakingToken(t *testing.T) {
+	isolateUserConfigDir(t)
+	mockPublicHuggingFaceRepository(t, `"manual"`)
+	const token = "hf-download-secret-742"
+	var posts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(huggingFaceInstallOpenAPI))
+		case "/api/v2/models/hf_login":
+			_, _ = w.Write([]byte(`"valid"`))
+		case "/api/v2/models/hugging_face":
+			_, _ = w.Write([]byte(`{"urls":["https://huggingface.co/sample/model/resolve/main/model.safetensors"],"is_diffusers":false}`))
+		case "/api/v2/models/install":
+			posts.Add(1)
+			if r.Method != http.MethodPost || r.URL.Query().Get("access_token") != token || r.URL.Query().Get("source") != "https://huggingface.co/sample/model" {
+				t.Error("incorrect protected installation request")
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":8,"status":"waiting","source":{"access_token":"` + token + `"}}`))
+		case "/api/v2/models/install/8":
+			_, _ = w.Write([]byte(`{"id":8,"status":"completed","config_out":{"key":"model-key"},"source":{"access_token":"` + token + `"}}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+		}
+	}))
+	t.Cleanup(server.Close)
+	code, stdout, stderr := runModelCommand(t, token+"\n", "models", "install", "--source-type", "huggingface", "--source", "sample/model", "--token-stdin", "--url", server.URL, "--json")
+	if code != result.ExitSuccess || stderr != "" || !strings.Contains(stdout, `"job_id":8`) || strings.Contains(stdout, token) || posts.Load() != 1 {
+		t.Fatalf("install code=%d stdout=%q stderr=%q posts=%d", code, stdout, stderr, posts.Load())
+	}
+	code, stdout, stderr = runModelCommand(t, "", "models", "status", "--job-id", "8", "--url", server.URL, "--json")
+	if code != result.ExitSuccess || stderr != "" || !strings.Contains(stdout, `"model_key":"model-key"`) || strings.Contains(stdout, token) {
+		t.Fatalf("status code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
 }
 
 func TestModelsInstallFlagsAndDocumentProduceSameSafeEnvelope(t *testing.T) {
@@ -100,7 +229,7 @@ func TestModelsInstallProtectedURLUsesTemporaryStdinToken(t *testing.T) {
 		case "/api/v1/app/version":
 			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
 		case "/openapi.json":
-			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}]}}}}`))
+			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
 		case "/api/v2/models/install":
 			posts.Add(1)
 			if r.Method != http.MethodPost || r.URL.Query().Get("source") != "https://example.org/protected.safetensors" || r.URL.Query().Get("access_token") != sourceToken || r.Header.Get("Authorization") != "Bearer "+connectionToken || len(r.URL.Query()) != 2 {
@@ -183,7 +312,7 @@ func TestModelsInstallProtectedURLFailuresNeverRevealTokenOrRetry(t *testing.T) 
 				case "/api/v1/app/version":
 					_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
 				case "/openapi.json":
-					_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}]}}}}`))
+					_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
 				case "/api/v2/models/install":
 					posts.Add(1)
 					if r.URL.Query().Get("access_token") != token {
@@ -266,7 +395,7 @@ func TestModelsInstallLostResponseGivesInventoryAndJobInspectionGuidance(t *test
 		case "/api/v1/app/version":
 			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
 		case "/openapi.json":
-			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}]}}}}`))
+			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
 		case "/api/v2/models/install":
 			posts.Add(1)
 			connection, _, err := w.(http.Hijacker).Hijack()

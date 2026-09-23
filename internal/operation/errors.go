@@ -17,6 +17,12 @@ func InvalidRequest(message string) error {
 	return &InvalidRequestError{Message: message}
 }
 
+type AuthenticationRequiredError struct {
+	Message string
+}
+
+func (e *AuthenticationRequiredError) Error() string { return e.Message }
+
 type UnsupportedCapabilityError struct {
 	Message string
 }

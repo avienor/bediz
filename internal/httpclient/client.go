@@ -162,9 +162,9 @@ func (c *Client) DoJSON(ctx context.Context, method, path string, requestBody, t
 	return c.doJSON(ctx, method, path, requestBody, target, safeRead)
 }
 
-// DoJSONPrivate sends a credential-bearing mutation without exposing its URL,
-// backend response body, or transport error through any returned error. It
-// also refuses redirects so the credential cannot be forwarded elsewhere.
+// DoJSONPrivate sends a mutation without exposing its URL, backend response
+// body, or transport error through any returned error. It refuses redirects so
+// a credential cannot be forwarded and the mutation cannot be replayed.
 func (c *Client) DoJSONPrivate(ctx context.Context, method, path string, requestBody, target any) error {
 	privateClient := *c
 	privateHTTP := *c.http

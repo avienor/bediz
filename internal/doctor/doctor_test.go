@@ -87,6 +87,28 @@ func TestDoctorDoesNotAdvertiseInstallWithoutGenericSourceParameter(t *testing.T
 	t.Fatal("install capability absent")
 }
 
+func TestDoctorDoesNotAdvertiseInstallWithoutInspectableJobResponse(t *testing.T) {
+	document := openAPIFixture(t)
+	post := document["paths"].(map[string]any)["/api/v2/models/install"].(map[string]any)["post"].(map[string]any)
+	delete(post, "responses")
+	server := newCustomInvokeAIServer(t, "6.14.1", document, baselineModels)
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := Run(t.Context(), client, version.Info{Version: "test"})
+	for _, entry := range report.Capabilities {
+		if entry.Operation == result.OperationModelsInstall {
+			if entry.Compatible || !slices.Contains(entry.Failures, "incompatible_install_schema:job_response") {
+				t.Fatalf("install capability = %#v", entry)
+			}
+			return
+		}
+	}
+	t.Fatal("install capability absent")
+}
+
 func TestDoctorChecksHuggingFaceAuthMethodsAndLoginBody(t *testing.T) {
 	document := openAPIFixture(t)
 	paths := document["paths"].(map[string]any)
