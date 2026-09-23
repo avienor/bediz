@@ -49,6 +49,12 @@ type openAPIDocument struct {
 }
 
 func Submit(ctx context.Context, client *httpclient.Client, request Request) (Result, error) {
+	return SubmitWithFields(ctx, client, request, nil)
+}
+
+// SubmitWithFields submits the common typed patch plus adapter-owned fields.
+// Each additional field must match the live InvokeAI Recall schema.
+func SubmitWithFields(ctx context.Context, client *httpclient.Client, request Request, additional []capability.RecallPatchField) (Result, error) {
 	if err := validate(request); err != nil {
 		return Result{}, err
 	}
@@ -80,6 +86,17 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Re
 			return Result{}, operation.UnsupportedCapability(fmt.Sprintf("InvokeAI Recall schema does not support %s as a patch field", field.Name))
 		}
 	}
+	for _, field := range additional {
+		for _, common := range capability.RecallPatchFields {
+			if field.Requirement.Name == common.Name {
+				return Result{}, operation.InvalidRequest(fmt.Sprintf("additional Recall field %q overlaps a common patch field", field.Requirement.Name))
+			}
+		}
+		property, ok := properties[field.Requirement.Name]
+		if !ok || !field.Requirement.MatchesNullableAlternatives(property.AnyOf) {
+			return Result{}, operation.UnsupportedCapability(fmt.Sprintf("InvokeAI Recall schema does not support %s as a patch field", field.Requirement.Name))
+		}
+	}
 	patch := request
 	if request.Model != nil {
 		var inventory struct {
@@ -88,8 +105,11 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Re
 		if err := client.GetJSON(ctx, "/api/v2/models/", &inventory); err != nil {
 			return Result{}, err
 		}
-		model, err := generation.ResolveAnimaMain(inventory.Models, *request.Model)
+		model, err := generation.ResolveFamilyMain(inventory.Models, *request.Model)
 		if err != nil {
+			return Result{}, err
+		}
+		if err := generation.ValidateRecall(model, request.Width, request.Height, request.Steps); err != nil {
 			return Result{}, err
 		}
 		for _, candidate := range inventory.Models {
@@ -99,7 +119,11 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Re
 		}
 		patch.Model = new(model.Name)
 	}
-	if err := client.DoJSON(ctx, http.MethodPost, "/api/v1/recall/default", patchBody(patch), nil); err != nil {
+	body := patchBody(patch)
+	for _, field := range additional {
+		body[field.Requirement.Name] = field.Value
+	}
+	if err := client.DoJSON(ctx, http.MethodPost, "/api/v1/recall/default", body, nil); err != nil {
 		return Result{}, err
 	}
 	return Result{QueueID: "default", Mode: "patch"}, nil
@@ -119,13 +143,7 @@ func validate(request Request) error {
 		return operation.InvalidRequest("width and height must be supplied together or both omitted")
 	}
 	if (request.Width != nil || request.Steps != nil) && request.Model == nil {
-		return operation.InvalidRequest("dimensions and steps require an explicit Anima model")
-	}
-	if request.Width != nil && (*request.Width < 64 || *request.Width%8 != 0 || *request.Height < 64 || *request.Height%8 != 0) {
-		return operation.InvalidRequest("width and height must be multiples of 8 and at least 64 for Recall")
-	}
-	if request.Steps != nil && *request.Steps < 1 {
-		return operation.InvalidRequest("steps must be positive")
+		return operation.InvalidRequest("dimensions and steps require an explicit model")
 	}
 	return nil
 }

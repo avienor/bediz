@@ -40,7 +40,7 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 	for i, entry := range report.Capabilities {
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
+	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "generate", "generate", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if !slices.Equal(operations, wantOperations) {
 		t.Fatalf("reported operations = %q, want implemented operations %q", operations, wantOperations)
 	}
@@ -52,8 +52,8 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 			t.Fatalf("invocation check failed: %#v", invocation)
 		}
 	}
-	if len(report.Models.Requirements) != 3 {
-		t.Fatalf("model requirements count = %d, want 3", len(report.Models.Requirements))
+	if len(report.Models.Requirements) != 8 {
+		t.Fatalf("model requirements count = %d, want 8", len(report.Models.Requirements))
 	}
 	for _, requirement := range report.Models.Requirements {
 		if !requirement.Satisfied {
@@ -649,7 +649,7 @@ func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 		components := baseline["components"].(map[string]any)
 		schemas := components["schemas"].(map[string]any)
 		for _, schemaName := range slices.Sorted(maps.Keys(schemas)) {
-			if schemaName == "RecallParameter" || schemaName == "Body_do_hf_login" || schemaName == "HFTokenStatus" {
+			if !slices.Contains(animaInvocationSchemas, schemaName) {
 				continue
 			}
 			schema := schemas[schemaName].(map[string]any)
@@ -657,6 +657,9 @@ func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 			typeProperty := properties["type"].(map[string]any)
 			typeName := typeProperty["const"].(string)
 			for _, property := range slices.Sorted(maps.Keys(properties)) {
+				if schemaName == "CoreMetadataInvocation" && slices.Contains([]string{"cfg_rescale_multiplier", "rand_device"}, property) {
+					continue
+				}
 				t.Run(schemaName+"."+property, func(t *testing.T) {
 					document := openAPIFixture(t)
 					documentComponents := document["components"].(map[string]any)
@@ -688,7 +691,7 @@ func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 		components := baseline["components"].(map[string]any)
 		schemas := components["schemas"].(map[string]any)
 		for _, schemaName := range slices.Sorted(maps.Keys(schemas)) {
-			if schemaName == "RecallParameter" || schemaName == "Body_do_hf_login" || schemaName == "HFTokenStatus" {
+			if !slices.Contains(animaInvocationSchemas, schemaName) {
 				continue
 			}
 			schema := schemas[schemaName].(map[string]any)
@@ -820,6 +823,49 @@ func TestDoctorReportsVerifiedPartialGenerationUISynchronization(t *testing.T) {
 	}
 	if strings.Contains(output.String(), "UI sync: full") {
 		t.Fatalf("human output overstates UI synchronization: %q", output.String())
+	}
+}
+
+func TestDoctorReportsSDXLOnlyWithSchemaModelAndRecallCFG(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		edit     func(map[string]any, *[]map[string]string)
+		failure  string
+		wantSync string
+	}{
+		{"ready", func(map[string]any, *[]map[string]string) {}, "", "partial"},
+		{"missing SDXL model", func(_ map[string]any, models *[]map[string]string) { *models = (*models)[:len(*models)-1] }, "missing_component:SDXL main model", ""},
+		{"missing noise schema", func(document map[string]any, _ *[]map[string]string) {
+			delete(document["components"].(map[string]any)["schemas"].(map[string]any), "NoiseInvocation")
+		}, "incompatible_invocation:noise", ""},
+		{"missing SDXL metadata field", func(document map[string]any, _ *[]map[string]string) {
+			delete(document["components"].(map[string]any)["schemas"].(map[string]any)["CoreMetadataInvocation"].(map[string]any)["properties"].(map[string]any), "rand_device")
+		}, "incompatible_invocation:core_metadata", ""},
+		{"missing CFG Recall", func(document map[string]any, _ *[]map[string]string) {
+			delete(document["components"].(map[string]any)["schemas"].(map[string]any)["RecallParameter"].(map[string]any)["properties"].(map[string]any), "cfg_scale")
+		}, "", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			document := openAPIFixture(t)
+			models := slices.Clone(baselineModels)
+			test.edit(document, &models)
+			server := newCustomInvokeAIServer(t, "6.14.1", document, models)
+			defer server.Close()
+			client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			report := Run(t.Context(), client, version.Info{Version: "test"})
+			var sdxl CapabilityReport
+			for _, entry := range report.Capabilities {
+				if entry.Operation == "generate" && entry.Family == "sdxl" {
+					sdxl = entry
+				}
+			}
+			if sdxl.Family != "sdxl" || sdxl.UISync != test.wantSync || sdxl.Compatible != (test.failure == "") || (test.failure != "" && !slices.Contains(sdxl.Failures, test.failure)) {
+				t.Fatalf("SDXL capability = %#v", sdxl)
+			}
+		})
 	}
 }
 
@@ -957,7 +1003,54 @@ var baselineModels = []map[string]string{
 	{"key": "main", "hash": "blake3:main", "name": "Anima", "base": "anima", "type": "main", "format": "checkpoint"},
 	{"key": "vae", "hash": "blake3:vae", "name": "VAE", "base": "anima", "type": "vae", "format": "checkpoint"},
 	{"key": "encoder", "hash": "blake3:encoder", "name": "Qwen3", "base": "any", "type": "qwen3_encoder", "format": "checkpoint"},
+	{"key": "flux-main", "hash": "blake3:flux-main", "name": "FLUX dev", "base": "flux", "type": "main", "format": "checkpoint", "variant": "dev"},
+	{"key": "flux-vae", "hash": "blake3:flux-vae", "name": "FLUX VAE", "base": "flux", "type": "vae", "format": "checkpoint"},
+	{"key": "flux-t5", "hash": "blake3:flux-t5", "name": "T5", "base": "any", "type": "t5_encoder", "format": "diffusers"},
+	{"key": "flux-clip", "hash": "blake3:flux-clip", "name": "CLIP", "base": "any", "type": "clip_embed", "format": "diffusers"},
+	{"key": "sdxl", "hash": "blake3:sdxl", "name": "SDXL", "base": "sdxl", "type": "main", "format": "diffusers"},
 }
+
+func TestDoctorFLUXMainRequirementUsesVariantAndFormat(t *testing.T) {
+	for _, tc := range []struct {
+		name, variant, format string
+		compatible            bool
+	}{
+		{"dev", "dev", "checkpoint", true},
+		{"schnell", "schnell", "gguf_quantized", true},
+		{"dev fill", "dev_fill", "checkpoint", false},
+		{"unknown", "", "checkpoint", false},
+		{"SDNQ", "dev", "sdnq_quantized", false},
+		{"diffusers", "dev", "diffusers", false},
+		{"unknown format", "schnell", "unknown", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			models := slices.Clone(baselineModels)
+			models[3] = maps.Clone(models[3])
+			models[3]["variant"], models[3]["format"] = tc.variant, tc.format
+			server := newCustomInvokeAIServer(t, "6.14.1", openAPIFixture(t), models)
+			defer server.Close()
+			client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			report := Run(t.Context(), client, version.Info{Version: "test"})
+			for _, entry := range report.Capabilities {
+				if entry.Operation == result.OperationGenerate && entry.Family == "flux" {
+					if entry.Compatible != tc.compatible {
+						t.Fatalf("FLUX capability = %#v", entry)
+					}
+					if tc.compatible && entry.UISync != "partial" {
+						t.Fatalf("UI sync = %q", entry.UISync)
+					}
+					return
+				}
+			}
+			t.Fatal("FLUX capability absent")
+		})
+	}
+}
+
+var animaInvocationSchemas = []string{"AnimaModelLoaderInvocation", "StringInvocation", "AnimaTextEncoderInvocation", "CollectInvocation", "IntegerInvocation", "AnimaDenoiseInvocation", "CoreMetadataInvocation", "AnimaLatentsToImageInvocation"}
 
 func newCustomInvokeAIServer(t *testing.T, version string, document any, models any) *httptest.Server {
 	t.Helper()

@@ -78,7 +78,7 @@ func TestResolveAnimaReturnsStableSelectionCandidates(t *testing.T) {
 			name: "ambiguous encoder name",
 			request: generation.Request{
 				SchemaVersion: 1, Model: main.Key, PositivePrompt: "test", Seed: new(uint32(1)),
-				Components: &generation.Components{VAE: vae.Key, Qwen3Encoder: "Same Encoder"},
+				Components: &generation.Components{VAE: new(vae.Key), Qwen3Encoder: new("Same Encoder")},
 			},
 			inventory: []generation.ModelIdentifier{main, {Key: "encoder-b", Hash: "b", Name: "Same Encoder", Base: "any", Type: "qwen3_encoder"}, vae, {Key: "encoder-a", Hash: "a", Name: "Same Encoder", Base: "any", Type: "qwen3_encoder"}},
 			kind:      "qwen3_encoder", selector: "Same Encoder", candidates: []string{"encoder-a", "encoder-b"},
@@ -117,8 +117,8 @@ func TestResolveAnimaExplicitSettingsAndCompatibleSelectorsWin(t *testing.T) {
 		Seed:           new(uint32(42)),
 		OutputCount:    new(1),
 		Components: &generation.Components{
-			VAE:          "vae-b",
-			Qwen3Encoder: "Encoder B",
+			VAE:          new("vae-b"),
+			Qwen3Encoder: new("Encoder B"),
 		},
 	}
 	inventory := []generation.ModelIdentifier{
@@ -322,7 +322,7 @@ func TestResolveAnimaRejectsIncompatibleOrIncompleteExactModels(t *testing.T) {
 			name: "FLUX VAE fallback",
 			request: generation.Request{
 				SchemaVersion: 1, Model: main.Key, PositivePrompt: "test", Seed: new(uint32(1)),
-				Components: &generation.Components{VAE: "flux-vae", Qwen3Encoder: encoder.Key},
+				Components: &generation.Components{VAE: new("flux-vae"), Qwen3Encoder: new(encoder.Key)},
 			},
 			inventory: []generation.ModelIdentifier{main, {Key: "flux-vae", Hash: "flux", Name: "FLUX VAE", Base: "flux", Type: "vae"}, encoder},
 		},
@@ -330,7 +330,7 @@ func TestResolveAnimaRejectsIncompatibleOrIncompleteExactModels(t *testing.T) {
 			name: "FLUX VAE fallback selected by unique name",
 			request: generation.Request{
 				SchemaVersion: 1, Model: main.Key, PositivePrompt: "test", Seed: new(uint32(1)),
-				Components: &generation.Components{VAE: "FLUX VAE", Qwen3Encoder: encoder.Key},
+				Components: &generation.Components{VAE: new("FLUX VAE"), Qwen3Encoder: new(encoder.Key)},
 			},
 			inventory: []generation.ModelIdentifier{main, {Key: "flux-vae", Hash: "flux", Name: "FLUX VAE", Base: "flux", Type: "vae"}, encoder},
 		},
@@ -338,7 +338,7 @@ func TestResolveAnimaRejectsIncompatibleOrIncompleteExactModels(t *testing.T) {
 			name: "encoder type",
 			request: generation.Request{
 				SchemaVersion: 1, Model: main.Key, PositivePrompt: "test", Seed: new(uint32(1)),
-				Components: &generation.Components{VAE: vae.Key, Qwen3Encoder: "clip-key"},
+				Components: &generation.Components{VAE: new(vae.Key), Qwen3Encoder: new("clip-key")},
 			},
 			inventory: []generation.ModelIdentifier{main, vae, {Key: "clip-key", Hash: "clip", Name: "CLIP", Base: "any", Type: "clip_embed"}},
 		},

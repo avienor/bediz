@@ -24,6 +24,8 @@ import (
 	"testing"
 	"time"
 	"uuid"
+
+	"github.com/avienor/bediz/internal/capability"
 )
 
 const secretSentinel = "bediz-live-e2e-secret-sentinel"
@@ -38,11 +40,12 @@ type resultEnvelope struct {
 }
 
 type modelSummaryData struct {
-	Key    string `json:"key"`
-	Name   string `json:"name"`
-	Base   string `json:"base"`
-	Type   string `json:"type"`
-	Format string `json:"format"`
+	Key     string `json:"key"`
+	Name    string `json:"name"`
+	Base    string `json:"base"`
+	Type    string `json:"type"`
+	Format  string `json:"format"`
+	Variant string `json:"variant"`
 }
 
 type liveAnimaModelKeys struct {
@@ -183,6 +186,8 @@ type queueListData struct {
 type generationComponentsData struct {
 	VAE          string `json:"vae"`
 	Qwen3Encoder string `json:"qwen3_encoder"`
+	T5Encoder    string `json:"t5_encoder"`
+	CLIPEmbed    string `json:"clip_embed"`
 }
 
 type generationRequestData struct {
@@ -248,6 +253,8 @@ func TestLiveGate(t *testing.T) {
 	validateTarget(t, target)
 	binary := buildBinary(t)
 	var animaModels liveAnimaModelKeys
+	var sdxlMain string
+	var fluxSchnell string
 
 	if !t.Run("doctor verifies the supported baseline", func(t *testing.T) {
 		envelope := runJSONCommand(t, binary, target, "doctor")
@@ -290,36 +297,43 @@ func TestLiveGate(t *testing.T) {
 				animaModels.VAE = firstKey(animaModels.VAE, model.Key)
 			case model.Base == "any" && model.Type == "qwen3_encoder":
 				animaModels.Qwen3Encoder = firstKey(animaModels.Qwen3Encoder, model.Key)
+			case model.Base == "sdxl" && model.Type == "main":
+				sdxlMain = firstKey(sdxlMain, model.Key)
+			case model.Base == "flux" && model.Type == "main" && model.Variant == "schnell" && capability.SupportsFLUXMain(model.Variant, model.Format):
+				fluxSchnell = firstKey(fluxSchnell, model.Key)
 			}
 		}
 		if animaModels.Main == "" || animaModels.VAE == "" || animaModels.Qwen3Encoder == "" {
 			t.Fatalf("doctor did not report exact keys for the required Anima models: %#v", animaModels)
+		}
+		if sdxlMain == "" {
+			t.Fatal("doctor did not report an exact SDXL main model key")
+		}
+		if fluxSchnell == "" {
+			t.Fatal("doctor did not report an exact FLUX.1 schnell main model key")
 		}
 		for _, requirement := range data.Models.Requirements {
 			if requirement.Name == "" || requirement.Available == nil || requirement.Required == nil || requirement.Satisfied == nil || !*requirement.Satisfied {
 				t.Errorf("doctor returned an unsatisfied or incomplete model requirement: %#v", requirement)
 			}
 		}
-		wantOperations := []string{"auth.huggingface.login", "auth.huggingface.logout", "auth.huggingface.status", "generate", "images.get", "images.list", "images.upload", "models.install", "models.install", "models.list", "models.status", "queue.get", "queue.list", "recall"}
+		wantOperations := []string{"auth.huggingface.login", "auth.huggingface.logout", "auth.huggingface.status", "generate", "generate", "generate", "images.get", "images.list", "images.upload", "models.install", "models.install", "models.list", "models.status", "queue.get", "queue.list", "recall"}
 		operations := make([]string, 0, len(data.Capabilities))
-		var generateFound bool
+		generateFamilies := map[string]bool{}
 		for _, capability := range data.Capabilities {
 			if capability.Compatible == nil || !*capability.Compatible || capability.Failures == nil || len(capability.Failures) != 0 {
 				t.Errorf("doctor reported an incompatible capability: %#v", capability)
 			}
 			operations = append(operations, capability.Operation)
 			if capability.Operation == "generate" {
-				generateFound = true
-				if capability.Family != "anima" {
-					t.Errorf("generate family = %q, want anima", capability.Family)
-				}
+				generateFamilies[capability.Family] = true
 				if capability.UISync != "partial" {
 					t.Errorf("generate ui_sync = %q, want partial", capability.UISync)
 				}
 			}
 		}
-		if !generateFound {
-			t.Error("doctor did not report generate capability")
+		if !generateFamilies["anima"] || !generateFamilies["sdxl"] || !generateFamilies["flux"] || len(generateFamilies) != 3 {
+			t.Errorf("doctor generate families = %#v, want Anima, SDXL, and FLUX.1", generateFamilies)
 		}
 		if data.UISync["generate"] != "partial" {
 			t.Errorf("doctor UI synchronization = %#v, want partial generation", data.UISync)
@@ -537,7 +551,7 @@ func TestLiveGate(t *testing.T) {
 		}
 
 		image := output.Image
-		assertGeneratedImageReference(t, target, image)
+		assertGeneratedImageReference(t, target, image, 1024, 1024)
 
 		getEnvelope := runJSONCommand(t, binary, target, "images", "get", image.ImageName)
 		assertSuccessEnvelope(t, getEnvelope, "images.get")
@@ -546,6 +560,59 @@ func TestLiveGate(t *testing.T) {
 		if !reflect.DeepEqual(got.Image, image) {
 			t.Fatalf("images get reference differs from execution receipt: receipt=%#v get=%#v", image, got.Image)
 		}
+	}) {
+		return
+	}
+
+	if !t.Run("SDXL direct execution produces a completed receipt and self-cleans", func(t *testing.T) {
+		const testSeed uint32 = 43
+		envelope := runJSONCommand(t, binary, target, "generate", "--model", sdxlMain,
+			"--prompt", "a tiny blue teacup on white background", "--width", "768", "--height", "768",
+			"--steps", "2", "--seed", strconv.FormatUint(uint64(testSeed), 10))
+		registerGeneratedImageCleanup(t, binary, target, envelope.Data)
+		assertSuccessEnvelope(t, envelope, "generate", "ui_sync_partial")
+		var receipt executionReceiptData
+		unmarshalData(t, envelope.Data, &receipt)
+		if receipt.ResolvedSettings.ModelKey != sdxlMain || len(receipt.ResolvedSettings.ComponentKeys) != 0 ||
+			receipt.ResolvedSettings.Scheduler != "dpmpp_3m_k" || receipt.ResolvedSettings.Guidance != 7 ||
+			!slices.Equal(receipt.ResolvedSettings.Seeds, []uint32{testSeed}) || len(receipt.Outputs) != 1 ||
+			receipt.Outputs[0].Seed != testSeed || receipt.Outputs[0].ItemID != receipt.Queue.ItemIDs[0] {
+			t.Fatalf("unexpected SDXL execution receipt: %#v", receipt)
+		}
+		if len(receipt.Warnings) != 1 || !slices.Equal(receipt.Warnings[0].Details.NotRestored, []string{"scheduler", "vae", "output_count", "board_id"}) {
+			t.Fatalf("SDXL Handoff warning = %#v", receipt.Warnings)
+		}
+		assertGeneratedImageReference(t, target, receipt.Outputs[0].Image, 768, 768)
+	}) {
+		return
+	}
+	if !t.Run("FLUX.1 schnell direct execution produces a completed receipt and self-cleans", func(t *testing.T) {
+		const testSeed uint32 = 44
+		envelope := runJSONCommand(t, binary, target, "generate", "--model", fluxSchnell,
+			"--prompt", "a tiny red teacup on white background", "--width", "768", "--height", "768",
+			"--seed", strconv.FormatUint(uint64(testSeed), 10))
+		registerGeneratedImageCleanup(t, binary, target, envelope.Data)
+		assertSuccessEnvelope(t, envelope, "generate", "ui_sync_partial")
+		var receipt executionReceiptData
+		unmarshalData(t, envelope.Data, &receipt)
+		if receipt.ResolvedSettings.ModelKey != fluxSchnell || receipt.ResolvedSettings.Steps != 4 || receipt.ResolvedSettings.Scheduler != "euler" ||
+			len(receipt.ResolvedSettings.ComponentKeys) != 3 || receipt.ResolvedSettings.ComponentKeys["vae"] == "" ||
+			receipt.ResolvedSettings.ComponentKeys["t5_encoder"] == "" || receipt.ResolvedSettings.ComponentKeys["clip_embed"] == "" ||
+			!slices.Equal(receipt.ResolvedSettings.Seeds, []uint32{testSeed}) || len(receipt.Outputs) != 1 ||
+			receipt.Outputs[0].Seed != testSeed || receipt.Outputs[0].ItemID != receipt.Queue.ItemIDs[0] {
+			t.Fatalf("unexpected FLUX.1 receipt: %#v", receipt)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(envelope.Data, &raw); err != nil {
+			t.Fatal(err)
+		}
+		if _, exists := raw["resolved_settings"].(map[string]any)["guidance"]; exists {
+			t.Fatal("schnell receipt contains guidance")
+		}
+		if len(receipt.Warnings) != 1 || !slices.Equal(receipt.Warnings[0].Details.NotRestored, []string{"scheduler", "vae", "t5_encoder", "clip_embed", "output_count", "board_id"}) {
+			t.Fatalf("FLUX.1 Handoff warning = %#v", receipt.Warnings)
+		}
+		assertGeneratedImageReference(t, target, receipt.Outputs[0].Image, 768, 768)
 	}) {
 		return
 	}
@@ -586,10 +653,10 @@ func registerGeneratedImageCleanup(t *testing.T, binary, target string, raw json
 	}
 }
 
-func assertGeneratedImageReference(t *testing.T, target string, image imageReference) {
+func assertGeneratedImageReference(t *testing.T, target string, image imageReference, width, height int) {
 	t.Helper()
 	if image.ImageName == "" || image.ImageOrigin != "internal" || image.ImageCategory != "general" ||
-		image.Width != 1024 || image.Height != 1024 || image.CreatedAt == "" || image.UpdatedAt == "" ||
+		image.Width != width || image.Height != height || image.CreatedAt == "" || image.UpdatedAt == "" ||
 		image.IsIntermediate == nil || *image.IsIntermediate || image.SessionID == nil || *image.SessionID == "" ||
 		image.NodeID == nil || *image.NodeID == "" || image.Starred == nil || *image.Starred ||
 		image.HasWorkflow == nil || image.BoardID != nil {

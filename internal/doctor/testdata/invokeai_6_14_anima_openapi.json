@@ -1,29 +1,115 @@
 {
   "paths": {
-    "/api/v1/app/version": {"get": {}},
-    "/api/v2/models/": {"get": {}},
-    "/api/v2/models/install": {"post": {"parameters": [{"name": "source", "in": "query", "required": true}], "responses": {"201": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ModelInstallJob"}}}}}}, "get": {}},
-    "/api/v2/models/install/{id}": {"get": {}},
-	"/api/v2/models/hf_login": {"get": {}, "post": {"requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/Body_do_hf_login"}}}}}, "delete": {}},
-    "/api/v1/images/": {"get": {}},
-    "/api/v1/images/i/{image_name}": {"get": {}},
-    "/api/v1/images/upload": {"post": {}},
-    "/api/v1/queue/{queue_id}/item_ids": {"get": {}},
-    "/api/v1/queue/{queue_id}/item_summaries_by_ids": {"post": {}},
-    "/api/v1/queue/{queue_id}/i/{item_id}": {"get": {}},
-    "/api/v1/queue/{queue_id}/enqueue_batch": {"post": {}},
-    "/api/v1/recall/{queue_id}": {"post": {"requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/RecallParameter"}}}}}}
+    "/api/v1/app/version": {
+      "get": {}
+    },
+    "/api/v2/models/": {
+      "get": {}
+    },
+    "/api/v2/models/install": {
+      "post": {
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelInstallJob"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {}
+    },
+    "/api/v2/models/install/{id}": {
+      "get": {}
+    },
+    "/api/v2/models/hf_login": {
+      "get": {},
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_do_hf_login"
+              }
+            }
+          }
+        }
+      },
+      "delete": {}
+    },
+    "/api/v1/images/": {
+      "get": {}
+    },
+    "/api/v1/images/i/{image_name}": {
+      "get": {}
+    },
+    "/api/v1/images/upload": {
+      "post": {}
+    },
+    "/api/v1/queue/{queue_id}/item_ids": {
+      "get": {}
+    },
+    "/api/v1/queue/{queue_id}/item_summaries_by_ids": {
+      "post": {}
+    },
+    "/api/v1/queue/{queue_id}/i/{item_id}": {
+      "get": {}
+    },
+    "/api/v1/queue/{queue_id}/enqueue_batch": {
+      "post": {}
+    },
+    "/api/v1/recall/{queue_id}": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecallParameter"
+              }
+            }
+          }
+        }
+      }
+    }
   },
   "components": {
     "schemas": {
-	  "Body_do_hf_login": {"properties": {"token": {"type": "string"}}, "required": ["token"]},
-	  "HFTokenStatus": {"type": "string", "enum": ["valid", "invalid", "unknown"]},
+      "Body_do_hf_login": {
+        "properties": {
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ]
+      },
+      "HFTokenStatus": {
+        "type": "string",
+        "enum": [
+          "valid",
+          "invalid",
+          "unknown"
+        ]
+      },
       "AnimaModelLoaderInvocation": {
         "properties": {
           "id": {},
           "is_intermediate": {},
           "use_cache": {},
-          "type": {"const": "anima_model_loader"},
+          "type": {
+            "const": "anima_model_loader"
+          },
           "model": {},
           "vae_model": {},
           "qwen3_encoder_model": {}
@@ -34,7 +120,9 @@
           "id": {},
           "is_intermediate": {},
           "use_cache": {},
-          "type": {"const": "string"},
+          "type": {
+            "const": "string"
+          },
           "value": {}
         }
       },
@@ -43,7 +131,9 @@
           "id": {},
           "is_intermediate": {},
           "use_cache": {},
-          "type": {"const": "anima_text_encoder"},
+          "type": {
+            "const": "anima_text_encoder"
+          },
           "prompt": {},
           "qwen3_encoder": {}
         }
@@ -53,7 +143,9 @@
           "id": {},
           "is_intermediate": {},
           "use_cache": {},
-          "type": {"const": "collect"},
+          "type": {
+            "const": "collect"
+          },
           "collection": {},
           "item": {}
         }
@@ -63,7 +155,9 @@
           "id": {},
           "is_intermediate": {},
           "use_cache": {},
-          "type": {"const": "integer"},
+          "type": {
+            "const": "integer"
+          },
           "value": {}
         }
       },
@@ -72,7 +166,9 @@
           "id": {},
           "is_intermediate": {},
           "use_cache": {},
-          "type": {"const": "anima_denoise"},
+          "type": {
+            "const": "anima_denoise"
+          },
           "denoising_start": {},
           "denoising_end": {},
           "add_noise": {},
@@ -92,7 +188,9 @@
           "id": {},
           "is_intermediate": {},
           "use_cache": {},
-          "type": {"const": "core_metadata"},
+          "type": {
+            "const": "core_metadata"
+          },
           "generation_mode": {},
           "negative_prompt": {},
           "width": {},
@@ -104,18 +202,93 @@
           "vae": {},
           "qwen3_encoder": {},
           "seed": {},
-          "positive_prompt": {}
+          "positive_prompt": {},
+          "cfg_rescale_multiplier": {},
+          "rand_device": {}
         }
       },
       "RecallParameter": {
         "properties": {
-          "positive_prompt": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-          "negative_prompt": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-          "model": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-          "width": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
-          "height": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
-          "steps": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
-          "seed": {"anyOf": [{"type": "integer"}, {"type": "null"}]}
+          "positive_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "negative_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cfg_scale": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
         }
       },
       "AnimaLatentsToImageInvocation": {
@@ -123,11 +296,253 @@
           "id": {},
           "is_intermediate": {},
           "use_cache": {},
-          "type": {"const": "anima_l2i"},
+          "type": {
+            "const": "anima_l2i"
+          },
           "board": {},
           "latents": {},
           "metadata": {},
           "vae": {}
+        }
+      },
+      "SDXLModelLoaderInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "model": {},
+          "type": {
+            "const": "sdxl_model_loader"
+          }
+        }
+      },
+      "SDXLCompelPromptInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "prompt": {},
+          "style": {},
+          "original_width": {},
+          "original_height": {},
+          "crop_top": {},
+          "crop_left": {},
+          "target_width": {},
+          "target_height": {},
+          "clip": {},
+          "clip2": {},
+          "mask": {},
+          "type": {
+            "const": "sdxl_compel_prompt"
+          }
+        }
+      },
+      "NoiseInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "noise_type": {},
+          "seed": {},
+          "width": {},
+          "height": {},
+          "use_cpu": {},
+          "type": {
+            "const": "noise"
+          }
+        }
+      },
+      "DenoiseLatentsInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "positive_conditioning": {},
+          "negative_conditioning": {},
+          "noise": {},
+          "steps": {},
+          "cfg_scale": {},
+          "denoising_start": {},
+          "denoising_end": {},
+          "scheduler": {},
+          "unet": {},
+          "control": {},
+          "ip_adapter": {},
+          "t2i_adapter": {},
+          "cfg_rescale_multiplier": {},
+          "hidiffusion": {},
+          "hidiffusion_raunet": {},
+          "hidiffusion_window_attn": {},
+          "hidiffusion_t1_ratio": {},
+          "hidiffusion_t2_ratio": {},
+          "latents": {},
+          "denoise_mask": {},
+          "type": {
+            "const": "denoise_latents"
+          }
+        }
+      },
+      "LatentsToImageInvocation": {
+        "properties": {
+          "board": {},
+          "metadata": {},
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "latents": {},
+          "vae": {},
+          "tiled": {},
+          "tile_size": {},
+          "fp32": {},
+          "type": {
+            "const": "l2i"
+          }
+        }
+      },
+      "VAELoaderInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "vae_model": {},
+          "type": {
+            "const": "vae_loader"
+          }
+        }
+      },
+      "FluxModelLoaderInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "model": {},
+          "t5_encoder_model": {},
+          "clip_embed_model": {},
+          "vae_model": {},
+          "type": {
+            "const": "flux_model_loader"
+          }
+        }
+      },
+      "FluxTextEncoderInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "clip": {},
+          "t5_encoder": {},
+          "t5_max_seq_len": {},
+          "prompt": {},
+          "mask": {},
+          "type": {
+            "const": "flux_text_encoder"
+          }
+        }
+      },
+      "FluxDenoiseInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "latents": {},
+          "noise": {},
+          "denoise_mask": {},
+          "denoising_start": {},
+          "denoising_end": {},
+          "add_noise": {},
+          "transformer": {},
+          "control_lora": {},
+          "positive_text_conditioning": {},
+          "negative_text_conditioning": {},
+          "redux_conditioning": {},
+          "fill_conditioning": {},
+          "cfg_scale": {},
+          "cfg_scale_start_step": {},
+          "cfg_scale_end_step": {},
+          "width": {},
+          "height": {},
+          "num_steps": {},
+          "scheduler": {},
+          "guidance": {},
+          "seed": {},
+          "control": {},
+          "controlnet_vae": {},
+          "ip_adapter": {},
+          "kontext_conditioning": {},
+          "dype_preset": {},
+          "dype_scale": {},
+          "dype_exponent": {},
+          "type": {
+            "const": "flux_denoise"
+          }
+        }
+      },
+      "FluxVaeDecodeInvocation": {
+        "properties": {
+          "board": {},
+          "metadata": {},
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "latents": {},
+          "vae": {},
+          "type": {
+            "const": "flux_vae_decode"
+          }
+        }
+      },
+      "FluxModelLoaderOutput": {
+        "properties": {
+          "transformer": {},
+          "clip": {},
+          "t5_encoder": {},
+          "vae": {},
+          "max_seq_len": {},
+          "type": {
+            "const": "flux_model_loader_output"
+          }
+        }
+      },
+      "FluxConditioningOutput": {
+        "properties": {
+          "conditioning": {},
+          "type": {
+            "const": "flux_conditioning_output"
+          }
+        }
+      },
+      "LatentsOutput": {
+        "properties": {
+          "latents": {},
+          "width": {},
+          "height": {},
+          "type": {
+            "const": "latents_output"
+          }
+        }
+      },
+      "MetadataOutput": {
+        "properties": {
+          "metadata": {},
+          "type": {
+            "const": "metadata_output"
+          }
+        }
+      },
+      "IntegerOutput": {
+        "properties": {
+          "value": {},
+          "type": {
+            "const": "integer_output"
+          }
+        }
+      },
+      "StringOutput": {
+        "properties": {
+          "value": {},
+          "type": {
+            "const": "string_output"
+          }
         }
       }
     }

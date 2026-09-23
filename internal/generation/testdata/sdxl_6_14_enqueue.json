@@ -1,0 +1,345 @@
+{
+  "batch": {
+    "origin": "generate",
+    "destination": "generate",
+    "graph": {
+      "id": "bediz_sdxl_v1",
+      "nodes": {
+        "model_loader": {
+          "id": "model_loader",
+          "is_intermediate": true,
+          "use_cache": true,
+          "type": "sdxl_model_loader",
+          "model": {
+            "key": "sdxl-main",
+            "hash": "main-hash",
+            "name": "SDXL Main",
+            "base": "sdxl",
+            "type": "main"
+          }
+        },
+        "positive_prompt": {
+          "id": "positive_prompt",
+          "is_intermediate": true,
+          "use_cache": true,
+          "type": "string",
+          "value": "a lighthouse"
+        },
+        "negative_prompt": {
+          "id": "negative_prompt",
+          "is_intermediate": true,
+          "use_cache": true,
+          "type": "string",
+          "value": "text"
+        },
+        "positive_conditioning": {
+          "id": "positive_conditioning",
+          "is_intermediate": true,
+          "use_cache": true,
+          "type": "sdxl_compel_prompt"
+        },
+        "negative_conditioning": {
+          "id": "negative_conditioning",
+          "is_intermediate": true,
+          "use_cache": true,
+          "type": "sdxl_compel_prompt"
+        },
+        "positive_collection": {
+          "id": "positive_collection",
+          "is_intermediate": true,
+          "use_cache": true,
+          "type": "collect",
+          "collection": []
+        },
+        "negative_collection": {
+          "id": "negative_collection",
+          "is_intermediate": true,
+          "use_cache": true,
+          "type": "collect",
+          "collection": []
+        },
+        "seed": {
+          "id": "seed",
+          "is_intermediate": true,
+          "use_cache": true,
+          "type": "integer",
+          "value": 41
+        },
+        "noise": {
+          "id": "noise",
+          "is_intermediate": true,
+          "use_cache": true,
+          "type": "noise",
+          "width": 768,
+          "height": 512,
+          "use_cpu": true
+        },
+        "denoise": {
+          "id": "denoise",
+          "is_intermediate": true,
+          "use_cache": true,
+          "type": "denoise_latents",
+          "cfg_scale": 6.5,
+          "cfg_rescale_multiplier": 0,
+          "denoising_start": 0,
+          "denoising_end": 1,
+          "steps": 24,
+          "scheduler": "heun"
+        },
+        "metadata": {
+          "id": "metadata",
+          "is_intermediate": true,
+          "use_cache": true,
+          "type": "core_metadata",
+          "generation_mode": "sdxl_txt2img",
+          "negative_prompt": "text",
+          "width": 768,
+          "height": 512,
+          "cfg_scale": 6.5,
+          "cfg_rescale_multiplier": 0,
+          "steps": 24,
+          "scheduler": "heun",
+          "rand_device": "cpu",
+          "model": {
+            "key": "sdxl-main",
+            "hash": "main-hash",
+            "name": "SDXL Main",
+            "base": "sdxl",
+            "type": "main"
+          }
+        },
+        "decode": {
+          "id": "decode",
+          "is_intermediate": false,
+          "use_cache": false,
+          "type": "l2i",
+          "fp32": true
+        }
+      },
+      "edges": [
+        {
+          "source": {
+            "node_id": "model_loader",
+            "field": "unet"
+          },
+          "destination": {
+            "node_id": "denoise",
+            "field": "unet"
+          }
+        },
+        {
+          "source": {
+            "node_id": "model_loader",
+            "field": "clip"
+          },
+          "destination": {
+            "node_id": "positive_conditioning",
+            "field": "clip"
+          }
+        },
+        {
+          "source": {
+            "node_id": "model_loader",
+            "field": "clip"
+          },
+          "destination": {
+            "node_id": "negative_conditioning",
+            "field": "clip"
+          }
+        },
+        {
+          "source": {
+            "node_id": "model_loader",
+            "field": "clip2"
+          },
+          "destination": {
+            "node_id": "positive_conditioning",
+            "field": "clip2"
+          }
+        },
+        {
+          "source": {
+            "node_id": "model_loader",
+            "field": "clip2"
+          },
+          "destination": {
+            "node_id": "negative_conditioning",
+            "field": "clip2"
+          }
+        },
+        {
+          "source": {
+            "node_id": "positive_prompt",
+            "field": "value"
+          },
+          "destination": {
+            "node_id": "positive_conditioning",
+            "field": "prompt"
+          }
+        },
+        {
+          "source": {
+            "node_id": "positive_prompt",
+            "field": "value"
+          },
+          "destination": {
+            "node_id": "positive_conditioning",
+            "field": "style"
+          }
+        },
+        {
+          "source": {
+            "node_id": "negative_prompt",
+            "field": "value"
+          },
+          "destination": {
+            "node_id": "negative_conditioning",
+            "field": "prompt"
+          }
+        },
+        {
+          "source": {
+            "node_id": "negative_prompt",
+            "field": "value"
+          },
+          "destination": {
+            "node_id": "negative_conditioning",
+            "field": "style"
+          }
+        },
+        {
+          "source": {
+            "node_id": "positive_conditioning",
+            "field": "conditioning"
+          },
+          "destination": {
+            "node_id": "positive_collection",
+            "field": "item"
+          }
+        },
+        {
+          "source": {
+            "node_id": "positive_collection",
+            "field": "collection"
+          },
+          "destination": {
+            "node_id": "denoise",
+            "field": "positive_conditioning"
+          }
+        },
+        {
+          "source": {
+            "node_id": "negative_conditioning",
+            "field": "conditioning"
+          },
+          "destination": {
+            "node_id": "negative_collection",
+            "field": "item"
+          }
+        },
+        {
+          "source": {
+            "node_id": "negative_collection",
+            "field": "collection"
+          },
+          "destination": {
+            "node_id": "denoise",
+            "field": "negative_conditioning"
+          }
+        },
+        {
+          "source": {
+            "node_id": "seed",
+            "field": "value"
+          },
+          "destination": {
+            "node_id": "noise",
+            "field": "seed"
+          }
+        },
+        {
+          "source": {
+            "node_id": "noise",
+            "field": "noise"
+          },
+          "destination": {
+            "node_id": "denoise",
+            "field": "noise"
+          }
+        },
+        {
+          "source": {
+            "node_id": "denoise",
+            "field": "latents"
+          },
+          "destination": {
+            "node_id": "decode",
+            "field": "latents"
+          }
+        },
+        {
+          "source": {
+            "node_id": "seed",
+            "field": "value"
+          },
+          "destination": {
+            "node_id": "metadata",
+            "field": "seed"
+          }
+        },
+        {
+          "source": {
+            "node_id": "positive_prompt",
+            "field": "value"
+          },
+          "destination": {
+            "node_id": "metadata",
+            "field": "positive_prompt"
+          }
+        },
+        {
+          "source": {
+            "node_id": "negative_prompt",
+            "field": "value"
+          },
+          "destination": {
+            "node_id": "metadata",
+            "field": "negative_prompt"
+          }
+        },
+        {
+          "source": {
+            "node_id": "metadata",
+            "field": "metadata"
+          },
+          "destination": {
+            "node_id": "decode",
+            "field": "metadata"
+          }
+        },
+        {
+          "source": {
+            "node_id": "model_loader",
+            "field": "vae"
+          },
+          "destination": {
+            "node_id": "decode",
+            "field": "vae"
+          }
+        }
+      ]
+    },
+    "data": [
+      [
+        {
+          "node_path": "seed",
+          "field_name": "value",
+          "items": [
+            41
+          ]
+        }
+      ]
+    ],
+    "runs": 1
+  }
+}

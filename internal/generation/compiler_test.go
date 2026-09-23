@@ -24,8 +24,8 @@ func TestCompileAnimaProducesInvokeAI614Graph(t *testing.T) {
 		OutputCount:    new(1),
 		BoardID:        "board-1",
 		Components: &generation.Components{
-			VAE:          "vae-key",
-			Qwen3Encoder: "encoder-key",
+			VAE:          new("vae-key"),
+			Qwen3Encoder: new("encoder-key"),
 		},
 	}
 	models := generation.ResolvedModels{

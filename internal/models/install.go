@@ -214,6 +214,8 @@ type starterInstallEntry struct {
 	Role            string
 	DependencyIndex *int
 	Repository      bool
+	SubfolderRepo   string
+	SubfolderPath   string
 	// ArtifactRepository is the canonical repository of an exact Hugging Face artifact entry.
 	ArtifactRepository string
 }
@@ -255,6 +257,14 @@ func (installer Installer) installStarter(ctx context.Context, request InstallRe
 		}
 		if *entry.IsInstalled {
 			*result.Skipped = append(*result.Skipped, InstallSkip{Role: role, DependencyIndex: index, Reason: "already_installed"})
+			return nil
+		}
+		if strings.Contains(entry.Source, "::") {
+			repository, subfolder, ok := starterSubfolderSource(entry.Source)
+			if !ok {
+				return operation.UnsupportedCapability("starter catalog entry has an unsupported Hugging Face subfolder source")
+			}
+			toInstall = append(toInstall, starterInstallEntry{Source: entry.Source, Role: role, DependencyIndex: index, SubfolderRepo: repository, SubfolderPath: subfolder})
 			return nil
 		}
 		source, repoErr := normalizeHuggingFaceReference(entry.Source)
@@ -304,6 +314,8 @@ func (installer Installer) installStarter(ctx context.Context, request InstallRe
 	for _, entry := range toInstall {
 		var err error
 		switch {
+		case entry.SubfolderRepo != "":
+			err = installer.preflightStarterSubfolder(ctx, entry.SubfolderRepo, entry.SubfolderPath)
 		case entry.Repository:
 			_, err = installer.preflightRepository(ctx, entry.Source, "", request.SourceToken)
 		case entry.ArtifactRepository != "":
@@ -332,6 +344,163 @@ func (installer Installer) installStarter(ctx context.Context, request InstallRe
 		result.Jobs = append(result.Jobs, InstallJob{JobID: *job.ID, Status: job.Status, SourceType: "starter", Role: entry.Role, DependencyIndex: entry.DependencyIndex})
 	}
 	return result, nil
+}
+
+func starterSubfolderSource(source string) (string, string, bool) {
+	repository, subfolder, found := strings.Cut(source, "::")
+	if !found || !huggingFaceRepoID.MatchString(repository) || strings.Contains(repository, "..") || strings.Contains(repository, "--") || subfolder == "" || strings.HasPrefix(subfolder, "/") || strings.ContainsAny(subfolder, `\:+`) {
+		return "", "", false
+	}
+	for segment := range strings.SplitSeq(subfolder, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return "", "", false
+		}
+	}
+	return repository, subfolder, true
+}
+
+func (installer Installer) preflightStarterSubfolder(ctx context.Context, repository, subfolder string) error {
+	if err := installer.checkStarterSubfolderExists(ctx, repository, subfolder); err != nil {
+		return err
+	}
+	public, err := installer.publicRepository(ctx, repository)
+	if err == nil && public {
+		return nil
+	}
+	if errors.Is(err, context.Canceled) {
+		return err
+	}
+	status, err := huggingface.Status(ctx, installer.Backend)
+	if err != nil || status.Status != "valid" {
+		return operation.UnsupportedCapability("starter catalog entry requires a valid InvokeAI Hugging Face login")
+	}
+	return nil
+}
+
+type huggingFaceTreeEntry struct {
+	Path string `json:"path"`
+	Type string `json:"type"`
+}
+
+func (installer Installer) checkStarterSubfolderExists(ctx context.Context, repository, subfolder string) error {
+	parent, _, found := strings.CutLast(subfolder, "/")
+	if !found {
+		parent = ""
+	}
+	entries, err := installer.huggingFaceTree(ctx, repository, parent, false, subfolder)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return operation.UnsupportedCapability("starter catalog subfolder could not be verified")
+	}
+	for _, entry := range entries {
+		if entry.Path != subfolder {
+			continue
+		}
+		switch entry.Type {
+		case "file":
+			return nil
+		case "directory":
+			files, err := installer.huggingFaceTree(ctx, repository, subfolder, true, "")
+			if err != nil && ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if err == nil && slices.ContainsFunc(files, func(file huggingFaceTreeEntry) bool {
+				return file.Type == "file" && strings.HasPrefix(file.Path, subfolder+"/")
+			}) {
+				return nil
+			}
+		}
+		break
+	}
+	return operation.UnsupportedCapability("starter catalog subfolder could not be verified")
+}
+
+func (installer Installer) huggingFaceTree(ctx context.Context, repository, folder string, recursive bool, wanted string) ([]huggingFaceTreeEntry, error) {
+	client := installer.PublicRepositoryClient
+	if client == nil {
+		client = &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	}
+	base := url.URL{Scheme: "https", Host: "huggingface.co", Path: "/api/models/" + repository + "/tree/main"}
+	if folder != "" {
+		base.Path += "/" + folder
+	}
+	if recursive {
+		base.RawQuery = "recursive=true"
+	}
+	next := base.String()
+	const maxTreePages = 100
+	visited := make(map[string]bool)
+	for next != "" {
+		if visited[next] {
+			return nil, errors.New("Hugging Face tree pagination cycle")
+		}
+		if len(visited) == maxTreePages {
+			return nil, errors.New("Hugging Face tree pagination exceeds the page limit")
+		}
+		visited[next] = true
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, next, nil)
+		if err != nil {
+			return nil, err
+		}
+		response, err := client.Do(request)
+		if err != nil {
+			return nil, err
+		}
+		if response.StatusCode != http.StatusOK {
+			response.Body.Close()
+			return nil, errors.New("Hugging Face tree request was denied or unavailable")
+		}
+		const maxTreePage = 2 << 20
+		body, err := io.ReadAll(io.LimitReader(response.Body, maxTreePage+1))
+		response.Body.Close()
+		if err != nil || len(body) > maxTreePage {
+			return nil, errors.New("Hugging Face tree response is unreadable")
+		}
+		var entries []huggingFaceTreeEntry
+		if err := json.Unmarshal(body, &entries); err != nil || entries == nil {
+			return nil, errors.New("Hugging Face tree response is malformed")
+		}
+		found := false
+		for _, entry := range entries {
+			if entry.Path == "" || entry.Type == "" {
+				return nil, errors.New("Hugging Face tree entry is malformed")
+			}
+			if entry.Path == wanted {
+				found = true
+			}
+		}
+		if recursive || found {
+			return entries, nil
+		}
+		next, err = huggingFaceTreeNext(response.Header, &base)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return []huggingFaceTreeEntry{}, nil
+}
+
+func huggingFaceTreeNext(header http.Header, base *url.URL) (string, error) {
+	for _, link := range header.Values("Link") {
+		for part := range strings.SplitSeq(link, ",") {
+			urlPart, attributes, found := strings.Cut(strings.TrimSpace(part), ";")
+			if !found || !strings.Contains(attributes, `rel="next"`) || !strings.HasPrefix(urlPart, "<") || !strings.HasSuffix(urlPart, ">") {
+				continue
+			}
+			next, err := url.Parse(strings.TrimSuffix(strings.TrimPrefix(urlPart, "<"), ">"))
+			if err != nil {
+				return "", err
+			}
+			next = base.ResolveReference(next)
+			if next.Scheme != "https" || next.Host != "huggingface.co" || next.User != nil || next.Fragment != "" || next.Path != base.Path || next.Query().Get("cursor") == "" {
+				return "", errors.New("Hugging Face tree pagination link is invalid")
+			}
+			return next.String(), nil
+		}
+	}
+	return "", nil
 }
 
 // starterArtifactRepository validates a starter artifact source. For an exact

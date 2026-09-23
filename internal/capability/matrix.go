@@ -40,6 +40,12 @@ type RecallFieldRequirement struct {
 	Type string
 }
 
+// RecallPatchField is an adapter-owned field paired with its tested schema.
+type RecallPatchField struct {
+	Requirement RecallFieldRequirement
+	Value       any
+}
+
 // RecallSchemaAlternative is one type branch in a Recall patch field's anyOf.
 type RecallSchemaAlternative struct {
 	Type string `json:"type"`
@@ -62,6 +68,8 @@ var RecallPatchFields = []RecallFieldRequirement{
 	{Name: "steps", Type: "integer"},
 	{Name: "seed", Type: "integer"},
 }
+
+var SDXLCFGRecallField = RecallFieldRequirement{Name: "cfg_scale", Type: "number"}
 
 type EndpointRequirement struct {
 	Method string
@@ -130,7 +138,19 @@ type ModelRequirement struct {
 	Name         string
 	Types        []string
 	Bases        []string
+	Variants     []string
+	Formats      []string
 	MinimumCount int
+}
+
+// InvokeAI 6.14.1's FLUX model loader accepts these non-SDNQ main config
+// formats for text-to-image. Its ordinary Diffusers config is not supported.
+var fluxMainFormats = []string{"checkpoint", "bnb_quantized_nf4b", "gguf_quantized"}
+
+var fluxMainVariants = []string{"dev", "schnell"}
+
+func SupportsFLUXMain(variant, format string) bool {
+	return slices.Contains(fluxMainVariants, variant) && slices.Contains(fluxMainFormats, format)
 }
 
 type VersionPolicy string
@@ -222,6 +242,8 @@ var Matrix = []Entry{
 		},
 	},
 	AnimaGenerationEntry(),
+	SDXLGenerationEntry(),
+	FLUXGenerationEntry(),
 	{
 		Operation:     result.OperationRecall,
 		VersionPolicy: VersionPolicySupportedRange,
@@ -244,6 +266,50 @@ var Matrix = []Entry{
 		VersionPolicy: VersionPolicySupportedRange,
 		Endpoints:     []EndpointRequirement{{Method: "DELETE", Path: HuggingFaceAuthEndpoint}},
 	},
+}
+
+// FLUXGenerationEntry records the tested stock 6.14.1 FLUX.1 graph.
+func FLUXGenerationEntry() Entry {
+	return Entry{
+		Operation: result.OperationGenerate, Family: "flux", UISync: "partial", VersionPolicy: VersionPolicySupportedRange,
+		Endpoints: slices.Clone(AnimaGenerationEntry().Endpoints),
+		Invocations: []InvocationRequirement{
+			{Schema: "FluxModelLoaderInvocation", Type: "flux_model_loader", Properties: []string{"id", "is_intermediate", "use_cache", "type", "model", "vae_model", "t5_encoder_model", "clip_embed_model"}},
+			{Schema: "FluxTextEncoderInvocation", Type: "flux_text_encoder", Properties: []string{"id", "is_intermediate", "use_cache", "type", "clip", "t5_encoder", "t5_max_seq_len", "prompt"}},
+			{Schema: "FluxDenoiseInvocation", Type: "flux_denoise", Properties: []string{"id", "is_intermediate", "use_cache", "type", "transformer", "positive_text_conditioning", "cfg_scale", "width", "height", "num_steps", "scheduler", "guidance", "seed"}},
+			{Schema: "FluxVaeDecodeInvocation", Type: "flux_vae_decode", Properties: []string{"id", "is_intermediate", "use_cache", "type", "latents", "vae", "metadata", "board"}},
+			{Schema: "CoreMetadataInvocation", Type: "core_metadata", Properties: []string{"id", "is_intermediate", "use_cache", "type", "generation_mode", "positive_prompt", "negative_prompt", "seed", "width", "height", "steps", "scheduler", "cfg_scale", "model", "vae"}},
+			{Schema: "StringInvocation", Type: "string", Properties: []string{"id", "is_intermediate", "use_cache", "type", "value"}},
+			{Schema: "IntegerInvocation", Type: "integer", Properties: []string{"id", "is_intermediate", "use_cache", "type", "value"}},
+		},
+		Models: []ModelRequirement{
+			{Name: "FLUX.1 main model", Types: []string{"main"}, Bases: []string{"flux"}, Variants: slices.Clone(fluxMainVariants), Formats: slices.Clone(fluxMainFormats), MinimumCount: 1},
+			{Name: "FLUX.1 VAE", Types: []string{"vae"}, Bases: []string{"flux"}, MinimumCount: 1},
+			{Name: "FLUX.1 T5 encoder", Types: []string{"t5_encoder"}, Bases: []string{"any"}, MinimumCount: 1},
+			{Name: "FLUX.1 CLIP Embed", Types: []string{"clip_embed"}, Bases: []string{"any"}, MinimumCount: 1},
+		},
+	}
+}
+
+// SDXLGenerationEntry records the tested stock 6.14.1 text-to-image graph.
+func SDXLGenerationEntry() Entry {
+	return Entry{
+		Operation: result.OperationGenerate, Family: "sdxl", UISync: "partial", VersionPolicy: VersionPolicySupportedRange,
+		Endpoints: slices.Clone(AnimaGenerationEntry().Endpoints),
+		Invocations: []InvocationRequirement{
+			{Schema: "SDXLModelLoaderInvocation", Type: "sdxl_model_loader", Properties: []string{"id", "is_intermediate", "use_cache", "type", "model"}},
+			{Schema: "StringInvocation", Type: "string", Properties: []string{"id", "is_intermediate", "use_cache", "type", "value"}},
+			{Schema: "SDXLCompelPromptInvocation", Type: "sdxl_compel_prompt", Properties: []string{"id", "is_intermediate", "use_cache", "type", "prompt", "style", "clip", "clip2"}},
+			{Schema: "CollectInvocation", Type: "collect", Properties: []string{"id", "is_intermediate", "use_cache", "type", "collection", "item"}},
+			{Schema: "IntegerInvocation", Type: "integer", Properties: []string{"id", "is_intermediate", "use_cache", "type", "value"}},
+			{Schema: "NoiseInvocation", Type: "noise", Properties: []string{"id", "is_intermediate", "use_cache", "type", "seed", "width", "height", "use_cpu"}},
+			{Schema: "DenoiseLatentsInvocation", Type: "denoise_latents", Properties: []string{"id", "is_intermediate", "use_cache", "type", "unet", "positive_conditioning", "negative_conditioning", "noise", "steps", "scheduler", "cfg_scale", "cfg_rescale_multiplier", "denoising_start", "denoising_end"}},
+			{Schema: "LatentsToImageInvocation", Type: "l2i", Properties: []string{"id", "is_intermediate", "use_cache", "type", "latents", "vae", "fp32", "metadata", "board"}},
+			{Schema: "VAELoaderInvocation", Type: "vae_loader", Properties: []string{"id", "is_intermediate", "use_cache", "type", "vae_model"}},
+			{Schema: "CoreMetadataInvocation", Type: "core_metadata", Properties: []string{"id", "is_intermediate", "use_cache", "type", "generation_mode", "positive_prompt", "negative_prompt", "seed", "width", "height", "steps", "scheduler", "cfg_scale", "cfg_rescale_multiplier", "rand_device", "model", "vae"}},
+		},
+		Models: []ModelRequirement{{Name: "SDXL main model", Types: []string{"main"}, Bases: []string{"sdxl"}, MinimumCount: 1}},
+	}
 }
 
 // AnimaGenerationEntry returns the tested InvokeAI requirements shared by

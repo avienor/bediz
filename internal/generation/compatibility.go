@@ -22,8 +22,8 @@ type openAPIProperty struct {
 	Const string `json:"const"`
 }
 
-func validateAnimaOpenAPI(document openAPIDocument) error {
-	for _, requirement := range capability.AnimaGenerationEntry().Invocations {
+func validateFamilyOpenAPI(document openAPIDocument, requirements []capability.InvocationRequirement) error {
+	for _, requirement := range requirements {
 		schema, ok := document.Components.Schemas[requirement.Schema]
 		if !ok {
 			return operation.UnsupportedCapability(fmt.Sprintf(
