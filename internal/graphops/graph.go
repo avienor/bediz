@@ -18,6 +18,19 @@ func Reference(model ModelIdentifier) ModelReference {
 	return ModelReference{Key: model.Key, Hash: model.Hash, Name: model.Name, Base: model.Base, Type: model.Type}
 }
 
+var sdxlSchedulers = []string{
+	"ddim", "ddpm", "deis", "deis_k", "lms", "lms_k", "pndm", "heun", "heun_k", "euler", "euler_k", "euler_a",
+	"kdpm_2", "kdpm_2_k", "kdpm_2_a", "kdpm_2_a_k", "dpmpp_2s", "dpmpp_2s_k", "dpmpp_2m", "dpmpp_2m_k",
+	"dpmpp_2m_sde", "dpmpp_2m_sde_k", "dpmpp_3m", "dpmpp_3m_k", "dpmpp_sde", "dpmpp_sde_k", "er_sde",
+	"unipc", "unipc_k", "lcm", "tcd",
+}
+
+// IsSDXLScheduler reports whether name is in the SDXL scheduler list shared by
+// SDXL generation and SD1.5 and SDXL generative upscale.
+func IsSDXLScheduler(name string) bool {
+	return slices.Contains(sdxlSchedulers, name)
+}
+
 type EdgeConnection struct {
 	NodeID string `json:"node_id"`
 	Field  string `json:"field"`

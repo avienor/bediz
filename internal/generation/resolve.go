@@ -80,7 +80,7 @@ func resolveSDXL(request Request, mainModel ModelIdentifier, inventory []ModelId
 	if *resolved.Steps < 1 {
 		return Resolution{}, operation.InvalidRequest("steps must be positive")
 	}
-	if !slices.Contains(sdxlSchedulers, *resolved.Scheduler) {
+	if !graphops.IsSDXLScheduler(*resolved.Scheduler) {
 		return Resolution{}, operation.InvalidRequest("scheduler is not supported for SDXL")
 	}
 	if math.IsNaN(*resolved.Guidance) || math.IsInf(*resolved.Guidance, 0) || *resolved.Guidance < 1 {
@@ -105,13 +105,6 @@ func resolveSDXL(request Request, mainModel ModelIdentifier, inventory []ModelId
 		models.VAE = vae
 	}
 	return Resolution{Request: resolved, Models: models, Seeds: seeds}, nil
-}
-
-var sdxlSchedulers = []string{
-	"ddim", "ddpm", "deis", "deis_k", "lms", "lms_k", "pndm", "heun", "heun_k", "euler", "euler_k", "euler_a",
-	"kdpm_2", "kdpm_2_k", "kdpm_2_a", "kdpm_2_a_k", "dpmpp_2s", "dpmpp_2s_k", "dpmpp_2m", "dpmpp_2m_k",
-	"dpmpp_2m_sde", "dpmpp_2m_sde_k", "dpmpp_3m", "dpmpp_3m_k", "dpmpp_sde", "dpmpp_sde_k", "er_sde",
-	"unipc", "unipc_k", "lcm", "tcd",
 }
 
 // ResolveAnima applies Anima family defaults and resolves the required
