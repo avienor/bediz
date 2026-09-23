@@ -93,6 +93,18 @@ unset. To run the opt-in gate against the local InvokeAI 6.14.1 baseline:
 BEDIZ_E2E_URL=http://127.0.0.1:9090 go test -count=1 -v ./e2e
 ```
 
+To also verify URL model installation and job status against that baseline,
+run the separate opt-in gate:
+
+```text
+BEDIZ_E2E_URL=http://127.0.0.1:9090 BEDIZ_E2E_MODEL_INSTALL=1 go test -count=1 -v ./e2e -run '^TestLiveURLModelInstall$'
+```
+
+This downloads a public, revision-pinned 4.8 MB SD1 LoRA from Hugging Face,
+checks `models install`, `models status`, and `models list` through the real
+binary, then removes only the model it installed. It requires outbound HTTPS
+access from InvokeAI. It skips unless both environment variables are set.
+
 The gate builds the real `bediz` binary and invokes `doctor`, `models list`,
 bounded image and queue listing, a self-cleaning image upload round trip, and a
 self-cleaning Anima generation round trip through the process boundary. The upload case creates a unique 2-by-2 PNG,
