@@ -2,7 +2,8 @@ package generation
 
 import (
 	"fmt"
-	"slices"
+
+	"github.com/avienor/bediz/internal/graphops"
 )
 
 type sdxlModelLoaderNode struct {
@@ -115,7 +116,5 @@ func CompileSDXL(resolved Resolution) (EnqueueRequest, error) {
 	nodes["metadata"] = metadata
 	nodes["decode"] = decode
 	edges = append(edges, edge(vaeSource, "vae", "decode", "vae"))
-	batchSeeds := slices.Clone(resolved.Seeds)
-	slices.Reverse(batchSeeds)
-	return EnqueueRequest{Batch: Batch{Origin: "generate", Destination: "generate", Graph: Graph{ID: "bediz_sdxl_v1", Nodes: nodes, Edges: edges}, Data: [][]BatchDatum{{{NodePath: "seed", FieldName: "value", Items: batchSeeds}}}, Runs: 1}}, nil
+	return EnqueueRequest{Batch: Batch{Origin: "generate", Destination: "generate", Graph: Graph{ID: "bediz_sdxl_v1", Nodes: nodes, Edges: edges}, Data: graphops.SeedBatchData("seed", "value", resolved.Seeds), Runs: 1}}, nil
 }

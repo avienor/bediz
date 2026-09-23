@@ -2,7 +2,8 @@ package generation
 
 import (
 	"fmt"
-	"slices"
+
+	"github.com/avienor/bediz/internal/graphops"
 )
 
 type Components struct {
@@ -28,15 +29,7 @@ type Request struct {
 	Components     *Components `json:"components,omitempty"`
 }
 
-type ModelIdentifier struct {
-	Key     string `json:"key"`
-	Hash    string `json:"hash"`
-	Name    string `json:"name"`
-	Base    string `json:"base"`
-	Type    string `json:"type"`
-	Variant string `json:"variant,omitempty"`
-	Format  string `json:"format,omitempty"`
-}
+type ModelIdentifier = graphops.ModelIdentifier
 
 type ResolvedModels struct {
 	Main         ModelIdentifier
@@ -46,28 +39,10 @@ type ResolvedModels struct {
 	CLIPEmbed    ModelIdentifier
 }
 
-type EdgeConnection struct {
-	NodeID string `json:"node_id"`
-	Field  string `json:"field"`
-}
-
-type Edge struct {
-	Source      EdgeConnection `json:"source"`
-	Destination EdgeConnection `json:"destination"`
-}
-
-type Graph struct {
-	ID    string         `json:"id"`
-	Nodes map[string]any `json:"nodes"`
-	Edges []Edge         `json:"edges"`
-}
-
-type nodeAttributes struct {
-	ID             string `json:"id"`
-	IsIntermediate bool   `json:"is_intermediate"`
-	UseCache       bool   `json:"use_cache"`
-	Type           string `json:"type"`
-}
+type EdgeConnection = graphops.EdgeConnection
+type Edge = graphops.Edge
+type Graph = graphops.Graph
+type nodeAttributes = graphops.NodeAttributes
 
 type animaModelLoaderNode struct {
 	nodeAttributes
@@ -76,10 +51,7 @@ type animaModelLoaderNode struct {
 	Qwen3EncoderModel modelReference `json:"qwen3_encoder_model"`
 }
 
-type stringNode struct {
-	nodeAttributes
-	Value string `json:"value"`
-}
+type stringNode = graphops.StringNode
 
 type connectedAnimaTextEncoderNode struct {
 	nodeAttributes
@@ -95,10 +67,7 @@ type collectNode struct {
 	Collection []any `json:"collection"`
 }
 
-type integerNode struct {
-	nodeAttributes
-	Value uint32 `json:"value"`
-}
+type integerNode = graphops.IntegerNode
 
 type animaDenoiseNode struct {
 	nodeAttributes
@@ -127,32 +96,16 @@ type coreMetadataNode struct {
 	Qwen3Encoder   modelReference `json:"qwen3_encoder"`
 }
 
-type boardField struct {
-	BoardID string `json:"board_id"`
-}
+type boardField = graphops.BoardField
 
 type animaLatentsToImageNode struct {
 	nodeAttributes
 	Board *boardField `json:"board,omitempty"`
 }
 
-type Batch struct {
-	Origin      string         `json:"origin"`
-	Destination string         `json:"destination"`
-	Graph       Graph          `json:"graph"`
-	Data        [][]BatchDatum `json:"data"`
-	Runs        int            `json:"runs"`
-}
-
-type BatchDatum struct {
-	NodePath  string   `json:"node_path"`
-	FieldName string   `json:"field_name"`
-	Items     []uint32 `json:"items"`
-}
-
-type EnqueueRequest struct {
-	Batch Batch `json:"batch"`
-}
+type Batch = graphops.Batch
+type BatchDatum = graphops.BatchDatum
+type EnqueueRequest = graphops.EnqueueRequest
 
 func CompileAnima(resolved AnimaResolution) (EnqueueRequest, error) {
 	request := resolved.Request
@@ -233,22 +186,14 @@ func CompileAnima(resolved AnimaResolution) (EnqueueRequest, error) {
 		edge("metadata", "metadata", "decode", "metadata"),
 	}
 
-	batchSeeds := slices.Clone(resolved.Seeds)
-	// InvokeAI 6.14 returns enqueue item IDs newest-first while expanding batch
-	// values in listed order. Reverse the adapter payload so each returned item
-	// ID has the same-position seed in the resolved receipt.
-	slices.Reverse(batchSeeds)
 	return EnqueueRequest{Batch: Batch{
 		Origin: "generate", Destination: "generate",
 		Graph: Graph{ID: "bediz_anima_v1", Nodes: nodes, Edges: edges},
-		Data:  [][]BatchDatum{{{NodePath: "seed", FieldName: "value", Items: batchSeeds}}},
+		Data:  graphops.SeedBatchData("seed", "value", resolved.Seeds),
 		Runs:  1,
 	}}, nil
 }
 
 func edge(sourceNode, sourceField, destinationNode, destinationField string) Edge {
-	return Edge{
-		Source:      EdgeConnection{NodeID: sourceNode, Field: sourceField},
-		Destination: EdgeConnection{NodeID: destinationNode, Field: destinationField},
-	}
+	return graphops.Connect(sourceNode, sourceField, destinationNode, destinationField)
 }

@@ -3,15 +3,10 @@ package generation
 import (
 	"context"
 	"crypto/rand"
-	"errors"
-	"fmt"
-	"net/http"
 	"slices"
 
-	"github.com/avienor/bediz/internal/capability"
+	"github.com/avienor/bediz/internal/graphops"
 	"github.com/avienor/bediz/internal/httpclient"
-	"github.com/avienor/bediz/internal/images"
-	"github.com/avienor/bediz/internal/operation"
 	"github.com/avienor/bediz/internal/result"
 )
 
@@ -30,17 +25,8 @@ type ResolvedSettings struct {
 	Seeds          []uint32          `json:"seeds"`
 }
 
-type QueueReceipt struct {
-	QueueID string `json:"queue_id"`
-	BatchID string `json:"batch_id"`
-	ItemIDs []int  `json:"item_ids"`
-}
-
-type Output struct {
-	ItemID int              `json:"item_id"`
-	Seed   uint32           `json:"seed"`
-	Image  images.Reference `json:"image"`
-}
+type QueueReceipt = graphops.QueueReceipt
+type Output = graphops.Output
 
 type ExecutionReceipt struct {
 	Family           string           `json:"-"`
@@ -51,44 +37,18 @@ type ExecutionReceipt struct {
 	Warnings         []result.Warning `json:"warnings"`
 }
 
-type modelListResponse struct {
-	Models []ModelIdentifier `json:"models"`
-}
-
-type enqueueResponse struct {
-	QueueID   string `json:"queue_id"`
-	Enqueued  int    `json:"enqueued"`
-	Requested int    `json:"requested"`
-	Batch     struct {
-		BatchID string `json:"batch_id"`
-	} `json:"batch"`
-	ItemIDs []int `json:"item_ids"`
-}
-
 func Submit(ctx context.Context, client *httpclient.Client, request Request) (ExecutionReceipt, error) {
 	if err := validateCommonRequest(request); err != nil {
 		return ExecutionReceipt{}, err
 	}
-	var versionResponse struct {
-		Version string `json:"version"`
-	}
-	if err := client.GetJSON(ctx, "/api/v1/app/version", &versionResponse); err != nil {
+	if err := graphops.CheckVersion(ctx, client); err != nil {
 		return ExecutionReceipt{}, err
 	}
-	supported, err := capability.SupportsInvokeAI(versionResponse.Version)
+	inventory, err := graphops.Inventory(ctx, client)
 	if err != nil {
-		return ExecutionReceipt{}, fmt.Errorf("validate InvokeAI version: %w", err)
-	}
-	if !supported {
-		return ExecutionReceipt{}, operation.UnsupportedCapability(fmt.Sprintf(
-			"InvokeAI %s is outside the supported range %s", versionResponse.Version, capability.SupportedInvokeAIRange,
-		))
-	}
-	var inventory modelListResponse
-	if err := client.GetJSON(ctx, "/api/v2/models/", &inventory); err != nil {
 		return ExecutionReceipt{}, err
 	}
-	main, err := ResolveFamilyMain(inventory.Models, request.Model)
+	main, err := ResolveFamilyMain(inventory, request.Model)
 	if err != nil {
 		return ExecutionReceipt{}, err
 	}
@@ -96,14 +56,10 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	if err != nil {
 		return ExecutionReceipt{}, err
 	}
-	var openAPI openAPIDocument
-	if err := client.GetJSON(ctx, "/openapi.json", &openAPI); err != nil {
+	if err := graphops.CheckInvocations(ctx, client, adapter.invocations()); err != nil {
 		return ExecutionReceipt{}, err
 	}
-	if err := validateFamilyOpenAPI(openAPI, adapter.invocations()); err != nil {
-		return ExecutionReceipt{}, err
-	}
-	resolved, err := adapter.resolve(request, main, inventory.Models, rand.Reader)
+	resolved, err := adapter.resolve(request, main, inventory, rand.Reader)
 	if err != nil {
 		return ExecutionReceipt{}, err
 	}
@@ -111,21 +67,9 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	if err != nil {
 		return ExecutionReceipt{}, err
 	}
-	var response enqueueResponse
-	const enqueuePath = "/api/v1/queue/default/enqueue_batch"
-	if err := client.DoJSON(ctx, http.MethodPost, enqueuePath, enqueueRequest, &response); err != nil {
+	queueReceipt, err := graphops.Enqueue(ctx, client, enqueueRequest, *resolved.Request.OutputCount)
+	if err != nil {
 		return ExecutionReceipt{}, err
-	}
-	if !validEnqueueResponse(response, *resolved.Request.OutputCount) {
-		enqueueURL, err := client.ResolveURL(enqueuePath)
-		if err != nil {
-			return ExecutionReceipt{}, fmt.Errorf("resolve enqueue URL: %w", err)
-		}
-		return ExecutionReceipt{}, &httpclient.OutcomeUnknownError{
-			Method: http.MethodPost,
-			URL:    enqueueURL,
-			Err:    errors.New("InvokeAI returned an incomplete enqueue result"),
-		}
 	}
 
 	return ExecutionReceipt{
@@ -145,26 +89,8 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 			ComponentKeys:  adapter.componentKeys(resolved),
 			Seeds:          slices.Clone(resolved.Seeds),
 		},
-		Queue:    QueueReceipt{QueueID: response.QueueID, BatchID: response.Batch.BatchID, ItemIDs: response.ItemIDs},
+		Queue:    queueReceipt,
 		Outputs:  []Output{},
 		Warnings: []result.Warning{},
 	}, nil
-}
-
-func validEnqueueResponse(response enqueueResponse, outputCount int) bool {
-	if response.QueueID != "default" || response.Enqueued != outputCount || response.Requested != outputCount ||
-		response.Batch.BatchID == "" || len(response.ItemIDs) != outputCount {
-		return false
-	}
-	seen := make(map[int]struct{}, len(response.ItemIDs))
-	for _, itemID := range response.ItemIDs {
-		if itemID < 1 {
-			return false
-		}
-		if _, exists := seen[itemID]; exists {
-			return false
-		}
-		seen[itemID] = struct{}{}
-	}
-	return true
 }

@@ -2,21 +2,13 @@ package generation
 
 import (
 	"fmt"
-	"slices"
+
+	"github.com/avienor/bediz/internal/graphops"
 )
 
-// modelReference includes only the fields accepted by InvokeAI's model identifier input.
-type modelReference struct {
-	Key  string `json:"key"`
-	Hash string `json:"hash"`
-	Name string `json:"name"`
-	Base string `json:"base"`
-	Type string `json:"type"`
-}
+type modelReference = graphops.ModelReference
 
-func reference(model ModelIdentifier) modelReference {
-	return modelReference{Key: model.Key, Hash: model.Hash, Name: model.Name, Base: model.Base, Type: model.Type}
-}
+func reference(model ModelIdentifier) modelReference { return graphops.Reference(model) }
 
 type fluxLoaderNode struct {
 	nodeAttributes
@@ -99,7 +91,5 @@ func CompileFLUX(resolved Resolution) (EnqueueRequest, error) {
 		edge("positive_prompt", "value", "metadata", "positive_prompt"),
 		edge("metadata", "metadata", "decode", "metadata"),
 	}
-	seeds := slices.Clone(resolved.Seeds)
-	slices.Reverse(seeds)
-	return EnqueueRequest{Batch: Batch{Origin: "generate", Destination: "generate", Graph: Graph{ID: "bediz_flux_v1", Nodes: nodes, Edges: edges}, Data: [][]BatchDatum{{{NodePath: "seed", FieldName: "value", Items: seeds}}}, Runs: 1}}, nil
+	return EnqueueRequest{Batch: Batch{Origin: "generate", Destination: "generate", Graph: Graph{ID: "bediz_flux_v1", Nodes: nodes, Edges: edges}, Data: graphops.SeedBatchData("seed", "value", resolved.Seeds), Runs: 1}}, nil
 }
