@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	json "encoding/json/v2"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -168,6 +169,25 @@ func TestUpscaleExplicitSettingsFlagAndDocumentEquivalence(t *testing.T) {
 	settings := fromFlags.Data.ResolvedSettings
 	if settings.Scale != 2 || settings.Creativity != -2 || settings.Structure != 3 || settings.Steps != 5 || settings.Scheduler != "euler" || settings.Guidance != 4.5 || settings.TileSize != 512 || settings.TileOverlap != 16 || settings.OutputWidth != 1024 || settings.OutputHeight != 1024 || settings.ComponentKeys["vae"] != "vae" {
 		t.Fatalf("explicit settings = %#v", settings)
+	}
+}
+
+func TestUpscaleReportsTheSameNullFieldOnEveryRun(t *testing.T) {
+	path := t.TempDir() + "/request.json"
+	document := `{"schema_version":1,"source":{"type":"image","reference":"source.png"},"model":"sdxl-main","scale":null,"steps":null}`
+	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	messages := map[string]bool{}
+	for range 20 {
+		code, envelope := runUpscale(t, "http://127.0.0.1:9", "upscale", "--request", path)
+		if code != result.ExitInvalidRequest || envelope.Error == nil || envelope.Error.Code != result.CodeInvalidRequest {
+			t.Fatalf("code=%d envelope=%#v", code, envelope)
+		}
+		messages[envelope.Error.Message] = true
+	}
+	if len(messages) != 1 {
+		t.Fatalf("null-field messages differ between runs: %v", slices.Collect(maps.Keys(messages)))
 	}
 }
 

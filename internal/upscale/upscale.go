@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"path/filepath"
 	"slices"
@@ -80,8 +81,8 @@ func (request *Request) UnmarshalJSON(data []byte) error {
 }
 
 func rejectNullFields(fields map[string]jsontext.Value) error {
-	for name, raw := range fields {
-		if raw.Kind() == 'n' {
+	for _, name := range slices.Sorted(maps.Keys(fields)) {
+		if fields[name].Kind() == 'n' {
 			return fmt.Errorf("field %q cannot be null", name)
 		}
 	}
