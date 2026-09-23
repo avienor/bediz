@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -17,6 +18,7 @@ import (
 )
 
 const huggingFaceInstallOpenAPI = `{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}},"/api/v2/models/hugging_face":{"get":{}}}}`
+const pathInstallOpenAPI = `{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"inplace","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`
 
 func installTestServer(t *testing.T, posts *atomic.Int32) *httptest.Server {
 	t.Helper()
@@ -361,6 +363,112 @@ func TestModelsStatusFlagsAndDocumentProjectCurrentJob(t *testing.T) {
 	}
 }
 
+func TestModelsInstallPathFlagsAndDocumentUseSameMoveSetting(t *testing.T) {
+	isolateUserConfigDir(t)
+	const source = "/server-only/fixtures/model.safetensors"
+	var posts atomic.Int32
+	var inplaces []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(pathInstallOpenAPI))
+		case "/api/v2/models/install":
+			posts.Add(1)
+			if r.URL.Query().Get("source") != source || r.Method != http.MethodPost {
+				t.Errorf("unexpected path submission: %s %s", r.Method, r.URL)
+			}
+			inplaces = append(inplaces, r.URL.Query().Get("inplace"))
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":9,"status":"waiting"}`))
+		case "/api/v2/models/install/9":
+			_, _ = w.Write([]byte(`{"id":9,"status":"completed","config_out":{"key":"path-model"}}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+		}
+	}))
+	t.Cleanup(server.Close)
+	for _, input := range []struct {
+		stdin string
+		args  []string
+	}{
+		{"", []string{"--source-type", "path", "--source", source}},
+		{`{"schema_version":1,"source":{"type":"path","reference":"` + source + `"}}`, []string{"--request", "-"}},
+		{"", []string{"--source-type", "path", "--source", source, "--yes"}},
+		{`{"schema_version":1,"source":{"type":"path","reference":"` + source + `"},"move":false}`, []string{"--request", "-"}},
+		{"", []string{"--source-type", "path", "--source", source, "--move", "--yes"}},
+		{`{"schema_version":1,"source":{"type":"path","reference":"` + source + `"},"move":true}`, []string{"--request", "-", "--yes"}},
+	} {
+		args := append([]string{"models", "install", "--url", server.URL, "--json"}, input.args...)
+		code, stdout, stderr := runModelCommand(t, input.stdin, args...)
+		if code != result.ExitSuccess || stderr != "" || !strings.Contains(stdout, `"source_type":"path"`) || !strings.Contains(stdout, `"job_id":9`) || strings.Contains(stdout, source) {
+			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", input.args, code, stdout, stderr)
+		}
+	}
+	if posts.Load() != 6 || !slices.Equal(inplaces, []string{"true", "true", "true", "true", "false", "false"}) {
+		t.Fatalf("posts=%d inplace=%v", posts.Load(), inplaces)
+	}
+	code, stdout, stderr := runModelCommand(t, "", "models", "status", "--job-id", "9", "--url", server.URL, "--json")
+	if code != result.ExitSuccess || stderr != "" || !strings.Contains(stdout, `"model_key":"path-model"`) {
+		t.Fatalf("status code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
+func TestModelsInstallPathMoveWithoutYesDoesNotContactServer(t *testing.T) {
+	isolateUserConfigDir(t)
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	for _, input := range []struct {
+		stdin string
+		args  []string
+	}{
+		{"", []string{"--source-type", "path", "--source", "/server/model.safetensors", "--move"}},
+		{`{"schema_version":1,"source":{"type":"path","reference":"/server/model.safetensors"},"move":true}`, []string{"--request", "-"}},
+	} {
+		args := append([]string{"models", "install", "--url", server.URL, "--json"}, input.args...)
+		code, stdout, stderr := runModelCommand(t, input.stdin, args...)
+		if code != result.ExitInvalidRequest || stderr != "" || !strings.Contains(stdout, `"code":"invalid_request"`) || !strings.Contains(stdout, "--yes") || requests.Load() != 0 {
+			t.Fatalf("args=%v code=%d stdout=%q stderr=%q requests=%d", input.args, code, stdout, stderr, requests.Load())
+		}
+	}
+}
+
+func TestModelsInstallInconclusivePathMoveReportsUnknownOnce(t *testing.T) {
+	isolateUserConfigDir(t)
+	var posts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(pathInstallOpenAPI))
+		case "/api/v2/models/install":
+			posts.Add(1)
+			if r.URL.Query().Get("inplace") != "false" {
+				t.Error("move was not submitted")
+			}
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			_ = conn.Close()
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+		}
+	}))
+	t.Cleanup(server.Close)
+	code, stdout, stderr := runModelCommand(t, "", "models", "install", "--source-type", "path", "--source", "/server/model.safetensors", "--move", "--yes", "--url", server.URL, "--json")
+	if code != result.ExitInvokeAIFailure || stderr != "" || !strings.Contains(stdout, `"code":"outcome_unknown"`) || posts.Load() != 1 {
+		t.Fatalf("code=%d stdout=%q stderr=%q posts=%d", code, stdout, stderr, posts.Load())
+	}
+}
+
 func TestModelsInstallRejectsInvalidDocumentsAndMixedFlagsBeforeMutation(t *testing.T) {
 	isolateUserConfigDir(t)
 	var posts atomic.Int32
@@ -373,8 +481,11 @@ func TestModelsInstallRejectsInvalidDocumentsAndMixedFlagsBeforeMutation(t *test
 		{`{"schema_version":1,"source":{"type":"url","reference":"https://example.org/model","file_id":1}}`, nil},
 		{`{"schema_version":1,"source":{"type":"url","reference":"https://example.org/model","access_token":"source-token-sentinel-742"}}`, nil},
 		{`{"schema_version":1,"source":{"type":"url","reference":"https://example.org/model"},"source_token":"source-token-sentinel-742"}`, nil},
-		{`{"schema_version":1,"source":{"type":"path","reference":"/tmp/model"}}`, nil},
+		{`{"schema_version":1,"source":{"type":"path","reference":"org/repo"}}`, nil},
+		{`{"schema_version":1,"source":{"type":"url","reference":"https://example.org/model"},"move":false}`, nil},
+		{`{"schema_version":1,"source":{"type":"path","reference":"/tmp/model"},"yes":true}`, nil},
 		{`{"schema_version":1,"source":{"type":"url","reference":"https://example.org/model"}}`, []string{"--source-type", "url"}},
+		{`{"schema_version":1,"source":{"type":"path","reference":"/tmp/model"}}`, []string{"--move"}},
 	} {
 		args := append([]string{"models", "install", "--request", "-", "--url", server.URL, "--json"}, input.flags...)
 		code, stdout, _ := runModelCommand(t, input.document, args...)

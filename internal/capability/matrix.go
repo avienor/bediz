@@ -103,6 +103,15 @@ func (endpoint InstallEndpoint) HasAccessTokenQuery() bool {
 	return false
 }
 
+func (endpoint InstallEndpoint) HasInplaceQuery() bool {
+	for _, parameter := range endpoint.Parameters {
+		if parameter.Name == "inplace" && parameter.In == "query" {
+			return true
+		}
+	}
+	return false
+}
+
 func (endpoint InstallEndpoint) HasJobResponse() bool {
 	return endpoint.Responses["201"].Content["application/json"].Schema.Ref == "#/components/schemas/ModelInstallJob"
 }

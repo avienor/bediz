@@ -19,6 +19,7 @@ import (
 )
 
 const huggingFaceInstallOpenAPI = `{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}},"/api/v2/models/hugging_face":{"get":{}}}}`
+const pathInstallOpenAPI = `{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"inplace","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`
 
 func installClient(t *testing.T, handler http.HandlerFunc) *httpclient.Client {
 	t.Helper()
@@ -67,6 +68,95 @@ func TestInstallURLSubmitsOneGenericPOSTAndProjectsJob(t *testing.T) {
 	encoded, _ := json.Marshal(got)
 	if strings.Contains(string(encoded), "example.org") || strings.Contains(string(encoded), "secret") || strings.Contains(string(encoded), "private") {
 		t.Fatalf("leaked result %s", encoded)
+	}
+}
+
+func TestInstallPathRegistersInPlaceThroughServerNamespace(t *testing.T) {
+	const source = "/invokeai-server/fixtures/model.safetensors"
+	var posts atomic.Int32
+	client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(pathInstallOpenAPI))
+		case "/api/v2/models/install":
+			posts.Add(1)
+			if r.Method != http.MethodPost || r.URL.Query().Get("source") != source || r.URL.Query().Get("inplace") != "true" {
+				t.Errorf("unexpected path installation: %s %s", r.Method, r.URL)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":17,"status":"waiting"}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+		}
+	})
+	got, err := models.Install(t.Context(), client, models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "path", Reference: source}})
+	if err != nil || posts.Load() != 1 || len(got.Jobs) != 1 || got.Jobs[0].JobID != 17 || got.Jobs[0].SourceType != "path" {
+		t.Fatalf("result=%#v err=%v posts=%d", got, err, posts.Load())
+	}
+}
+
+func TestInstallPathMoveNeedsApprovalBeforeNetworkAndSubmitsOnce(t *testing.T) {
+	const source = "/invokeai-server/fixtures/move-me.safetensors"
+	var requests, posts atomic.Int32
+	client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(pathInstallOpenAPI))
+		case "/api/v2/models/install":
+			posts.Add(1)
+			if r.URL.Query().Get("source") != source || r.URL.Query().Get("inplace") != "false" {
+				t.Errorf("unexpected move: %s", r.URL)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":18,"status":"waiting"}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+		}
+	})
+	request := models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "path", Reference: source}, Move: new(true)}
+	_, err := models.Install(t.Context(), client, request)
+	if _, ok := errors.AsType[*operation.InvalidRequestError](err); !ok || requests.Load() != 0 {
+		t.Fatalf("unapproved move: err=%v requests=%d", err, requests.Load())
+	}
+	request.Approved = true
+	got, err := models.Install(t.Context(), client, request)
+	if err != nil || posts.Load() != 1 || len(got.Jobs) != 1 || got.Jobs[0].JobID != 18 {
+		t.Fatalf("approved move: result=%#v err=%v posts=%d", got, err, posts.Load())
+	}
+}
+
+func TestInstallPathRejectsAmbiguousRelativeReferenceBeforeNetwork(t *testing.T) {
+	var requests atomic.Int32
+	client := installClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	})
+	_, err := models.Install(t.Context(), client, models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "path", Reference: "org/repo"}})
+	if _, ok := errors.AsType[*operation.InvalidRequestError](err); !ok || requests.Load() != 0 {
+		t.Fatalf("err=%v requests=%d", err, requests.Load())
+	}
+}
+
+func TestInstallPathRequiresTestedInplaceParameterBeforeMutation(t *testing.T) {
+	var posts atomic.Int32
+	client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
+		case "/api/v2/models/install":
+			posts.Add(1)
+		}
+	})
+	_, err := models.Install(t.Context(), client, models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "path", Reference: "/server/model.safetensors"}})
+	if _, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); !ok || posts.Load() != 0 {
+		t.Fatalf("err=%v posts=%d", err, posts.Load())
 	}
 }
 

@@ -32,6 +32,8 @@ go build -o bediz ./cmd/bediz
 ./bediz models list --json
 ./bediz models install --source-type url --source https://example.org/model.safetensors --json
 ./bediz models install --source-type huggingface --source org/repo --json
+./bediz models install --source-type path --source /server/models/model.safetensors --json
+./bediz models install --source-type path --source /server/models/model.safetensors --move --yes --json
 ./bediz models status --job-id 0 --json
 ./bediz images list --json
 ./bediz images get IMAGE_NAME --json

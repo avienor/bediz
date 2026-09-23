@@ -18,13 +18,15 @@ type modelInstallOptions struct {
 	requestPath string
 	sourceType  string
 	source      string
+	move        bool
+	yes         bool
 	tokenStdin  bool
 }
 
 func (c *CLI) newModelsInstallCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
 	options := modelInstallOptions{remoteOptions: defaultRemoteOptions()}
 	command := &cobra.Command{
-		Use: "install", Short: "Install a model from a starter, exact URL, or Hugging Face repository", Args: cobra.NoArgs,
+		Use: "install", Short: "Install a model from a starter, exact URL, Hugging Face repository, or server path", Args: cobra.NoArgs,
 		Annotations: map[string]string{operationAnnotation: result.OperationModelsInstall},
 		Run: func(cmd *cobra.Command, _ []string) {
 			if options.requestPath == "-" && options.tokenStdin {
@@ -33,11 +35,15 @@ func (c *CLI) newModelsInstallCommand(exitCode *int, jsonOutput *bool) *cobra.Co
 			}
 			options.captureRemoteFlags(cmd)
 			request := models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: options.sourceType, Reference: options.source}}
+			if cmd.Flags().Changed("move") {
+				request.Move = new(options.move)
+			}
 			execution := remoteExecution[models.InstallRequest, models.InstallResult]{
 				operation: result.OperationModelsInstall, connection: options.remoteOptions, request: request,
 				requestPath:       options.requestPath,
-				operationFlagsSet: cmd.Flags().Changed("source-type") || cmd.Flags().Changed("source"),
+				operationFlagsSet: cmd.Flags().Changed("source-type") || cmd.Flags().Changed("source") || cmd.Flags().Changed("move"),
 				invoke: func(ctx context.Context, client *httpclient.Client, request models.InstallRequest) (models.InstallResult, error) {
+					request.Approved = options.yes
 					if options.tokenStdin {
 						data, err := io.ReadAll(c.stdin)
 						if err != nil {
@@ -56,8 +62,10 @@ func (c *CLI) newModelsInstallCommand(exitCode *int, jsonOutput *bool) *cobra.Co
 	}
 	addRemoteFlags(command, &options.remoteOptions, requestTimeoutUsage)
 	command.Flags().StringVar(&options.requestPath, "request", "", "read a request document from a file or standard input with -")
-	command.Flags().StringVar(&options.sourceType, "source-type", "", "model source type (starter, url, or huggingface)")
-	command.Flags().StringVar(&options.source, "source", "", "exact source identifier, artifact URL, or Hugging Face org/repo reference")
+	command.Flags().StringVar(&options.sourceType, "source-type", "", "model source type (starter, url, huggingface, or path)")
+	command.Flags().StringVar(&options.source, "source", "", "exact source identifier, artifact URL, Hugging Face org/repo reference, or server path")
+	command.Flags().BoolVar(&options.move, "move", false, "move a server path model into InvokeAI-managed storage")
+	command.Flags().BoolVar(&options.yes, "yes", false, "approve moving a server path model")
 	command.Flags().BoolVar(&options.tokenStdin, "token-stdin", false, "read a temporary source access token from standard input")
 	return command
 }

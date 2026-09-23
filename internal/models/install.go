@@ -31,6 +31,8 @@ type InstallSource struct {
 type InstallRequest struct {
 	SchemaVersion int           `json:"schema_version"`
 	Source        InstallSource `json:"source"`
+	Move          *bool         `json:"move,omitempty"`
+	Approved      bool          `json:"-"`
 	SourceToken   string        `json:"-"`
 }
 
@@ -100,6 +102,7 @@ type installBackendJob struct {
 }
 
 var huggingFaceRepoID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$`)
+var windowsServerPath = regexp.MustCompile(`^(?:[A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+)`)
 
 func Install(ctx context.Context, client *httpclient.Client, request InstallRequest) (InstallResult, error) {
 	return (Installer{Backend: client}).Install(ctx, request)
@@ -109,6 +112,17 @@ func (installer Installer) Install(ctx context.Context, request InstallRequest) 
 	client := installer.Backend
 	if request.SchemaVersion != 1 {
 		return InstallResult{}, operation.InvalidRequest("unsupported request schema version")
+	}
+	if request.Move != nil && request.Source.Type != "path" {
+		return InstallResult{}, operation.InvalidRequest("move applies only to a server path source")
+	}
+	if request.Source.Type == "path" {
+		if request.SourceToken != "" {
+			return InstallResult{}, operation.InvalidRequest("source token does not apply to a server path source")
+		}
+		if request.Move != nil && *request.Move && !request.Approved {
+			return InstallResult{}, operation.InvalidRequest("moving a server model path requires --yes")
+		}
 	}
 	if request.Source.Type == "starter" {
 		return installer.installStarter(ctx, request)
@@ -125,8 +139,12 @@ func (installer Installer) Install(ctx context.Context, request InstallRequest) 
 		if err != nil {
 			return InstallResult{}, err
 		}
+	case "path":
+		if !strings.HasPrefix(source, "/") && !windowsServerPath.MatchString(source) {
+			return InstallResult{}, operation.InvalidRequest("server path source must be absolute in the InvokeAI filesystem namespace")
+		}
 	default:
-		return InstallResult{}, operation.InvalidRequest("source type must be starter, url, or huggingface")
+		return InstallResult{}, operation.InvalidRequest("source type must be starter, url, huggingface, or path")
 	}
 	if request.SourceToken != "" && !client.AllowsSourceToken() {
 		return InstallResult{}, operation.InvalidRequest("source token requires HTTPS or a loopback InvokeAI target")
@@ -139,15 +157,22 @@ func (installer Installer) Install(ctx context.Context, request InstallRequest) 
 			return InstallResult{}, err
 		}
 	}
-	job, err := installer.submitJob(ctx, source, request.SourceToken)
+	var inplace *bool
+	if request.Source.Type == "path" {
+		inplace = new(request.Move == nil || !*request.Move)
+	}
+	job, err := installer.submitJob(ctx, source, request.SourceToken, inplace)
 	if err != nil {
 		return InstallResult{}, err
 	}
 	return InstallResult{Jobs: []InstallJob{{JobID: *job.ID, Status: job.Status, SourceType: request.Source.Type, Role: "requested"}}}, nil
 }
 
-func (installer Installer) submitJob(ctx context.Context, source, sourceToken string) (installBackendJob, error) {
+func (installer Installer) submitJob(ctx context.Context, source, sourceToken string, inplace *bool) (installBackendJob, error) {
 	query := url.Values{"source": {source}}
+	if inplace != nil {
+		query.Set("inplace", strconv.FormatBool(*inplace))
+	}
 	if sourceToken != "" {
 		query.Set("access_token", sourceToken)
 	}
@@ -270,7 +295,7 @@ func (installer Installer) installStarter(ctx context.Context, request InstallRe
 		}
 	}
 	for _, entry := range toInstall {
-		job, err := installer.submitJob(ctx, entry.Source, request.SourceToken)
+		job, err := installer.submitJob(ctx, entry.Source, request.SourceToken, nil)
 		if err != nil {
 			return InstallResult{}, &StarterSubmissionError{Progress: result, Role: entry.Role, DependencyIndex: entry.DependencyIndex, Cause: err}
 		}
@@ -493,6 +518,9 @@ func checkInstallCompatibility(ctx context.Context, client *httpclient.Client, h
 	}
 	if hasSourceToken && !post.HasAccessTokenQuery() {
 		return operation.UnsupportedCapability("InvokeAI generic model installation access token parameter is unavailable")
+	}
+	if sourceType == "path" && !post.HasInplaceQuery() {
+		return operation.UnsupportedCapability("InvokeAI generic model installation in-place parameter is unavailable")
 	}
 	return nil
 }
