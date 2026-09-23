@@ -21,6 +21,8 @@ func TestOperationNamesMatchThePublishedValues(t *testing.T) {
 		{name: "config set", value: OperationConfigSet, wire: "config.set"},
 		{name: "models", value: OperationModels, wire: "models"},
 		{name: "models list", value: OperationModelsList, wire: "models.list"},
+		{name: "models install", value: OperationModelsInstall, wire: "models.install"},
+		{name: "models status", value: OperationModelsStatus, wire: "models.status"},
 		{name: "images", value: OperationImages, wire: "images"},
 		{name: "images list", value: OperationImagesList, wire: "images.list"},
 		{name: "images get", value: OperationImagesGet, wire: "images.get"},
@@ -28,6 +30,11 @@ func TestOperationNamesMatchThePublishedValues(t *testing.T) {
 		{name: "queue", value: OperationQueue, wire: "queue"},
 		{name: "queue list", value: OperationQueueList, wire: "queue.list"},
 		{name: "queue get", value: OperationQueueGet, wire: "queue.get"},
+		{name: "auth", value: OperationAuth, wire: "auth"},
+		{name: "auth huggingface", value: OperationAuthHuggingFace, wire: "auth.huggingface"},
+		{name: "auth huggingface status", value: OperationAuthHFStatus, wire: "auth.huggingface.status"},
+		{name: "auth huggingface login", value: OperationAuthHFLogin, wire: "auth.huggingface.login"},
+		{name: "auth huggingface logout", value: OperationAuthHFLogout, wire: "auth.huggingface.logout"},
 	}
 	for _, test := range tests {
 		if test.value != test.wire {

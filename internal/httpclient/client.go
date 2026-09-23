@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -142,6 +143,14 @@ func (c *Client) BaseURL() string { return c.baseURL.String() }
 
 func (c *Client) HasToken() bool { return c.token != "" }
 
+func (c *Client) AllowsSourceToken() bool {
+	if c.baseURL.Scheme == "https" {
+		return true
+	}
+	host := c.baseURL.Hostname()
+	return strings.EqualFold(host, "localhost") || net.ParseIP(host).IsLoopback()
+}
+
 func (c *Client) ResolveURL(path string) (string, error) { return c.resolve(path) }
 
 func (c *Client) GetJSON(ctx context.Context, path string, target any) error {
@@ -151,6 +160,27 @@ func (c *Client) GetJSON(ctx context.Context, path string, target any) error {
 func (c *Client) DoJSON(ctx context.Context, method, path string, requestBody, target any) error {
 	safeRead := method == http.MethodGet || method == http.MethodHead
 	return c.doJSON(ctx, method, path, requestBody, target, safeRead)
+}
+
+// DoJSONPrivate sends a mutation without exposing its URL, backend response
+// body, or transport error through any returned error. It refuses redirects so
+// a credential cannot be forwarded and the mutation cannot be replayed.
+func (c *Client) DoJSONPrivate(ctx context.Context, method, path string, requestBody, target any) error {
+	privateClient := *c
+	privateHTTP := *c.http
+	privateHTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	privateClient.http = &privateHTTP
+	err := privateClient.doJSON(ctx, method, path, requestBody, target, false)
+	if err == nil {
+		return nil
+	}
+	if httpErr, ok := errors.AsType[*HTTPError](err); ok {
+		return &HTTPError{StatusCode: httpErr.StatusCode, Status: fmt.Sprintf("%d %s", httpErr.StatusCode, http.StatusText(httpErr.StatusCode))}
+	}
+	if _, ok := errors.AsType[*OutcomeUnknownError](err); ok {
+		return &OutcomeUnknownError{Method: method, Err: errors.New("private request response was inconclusive")}
+	}
+	return &InvalidResponseError{Err: errors.New("private request could not be prepared")}
 }
 
 // QueryJSON performs a semantically read-only POST request. Unlike a mutation,

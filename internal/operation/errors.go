@@ -17,6 +17,12 @@ func InvalidRequest(message string) error {
 	return &InvalidRequestError{Message: message}
 }
 
+type AuthenticationRequiredError struct {
+	Message string
+}
+
+func (e *AuthenticationRequiredError) Error() string { return e.Message }
+
 type UnsupportedCapabilityError struct {
 	Message string
 }
@@ -38,6 +44,35 @@ type SelectionRequiredError struct {
 	Kind       string
 	Selector   string
 	Candidates []SelectionCandidate
+}
+
+type CivitaiFileCandidate struct {
+	ID      int    `json:"id"`
+	Name    string `json:"name"`
+	Primary bool   `json:"primary"`
+}
+
+type CivitaiFileSelectionError struct {
+	VersionID  int
+	Candidates []CivitaiFileCandidate
+}
+
+func (*CivitaiFileSelectionError) Error() string {
+	return "Civitai version requires one exact file selection"
+}
+
+type CivitaiVersionCandidate struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+type CivitaiVersionSelectionError struct {
+	ModelID    int
+	Candidates []CivitaiVersionCandidate
+}
+
+func (*CivitaiVersionSelectionError) Error() string {
+	return "Civitai model page requires one exact version selection"
 }
 
 func (e *SelectionRequiredError) Error() string {

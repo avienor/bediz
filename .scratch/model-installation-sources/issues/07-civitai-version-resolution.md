@@ -1,0 +1,25 @@
+# 07: Resolve an exact Civitai version to one artifact
+
+**What to build:** `models install` accepts `source.type: civitai` and a `source.reference` containing either a positive decimal Civitai version ID or a Civitai model page URL with an explicit positive `modelVersionId` query value. It resolves version metadata into one artifact before invoking the shared generic POST installer. If the version has one file, select it; with multiple files, select only when exactly one is marked primary. Otherwise return `selection_required` (exit 3) with `kind: civitai_file`, a numeric version-ID selector, and candidates sorted by numeric file ID; each candidate has integer `id`, `name`, and `primary`. No install mutation occurs. The caller may resubmit the same version reference with a positive integer `source.file_id` or matching `--file-id`; the resolver verifies that the selected file belongs to that version before installation. `file_id` is invalid for other source types. Construct the resolved artifact URL solely as `https://civitai.com/api/download/models/{version_id}?fileId={file_id}` from the verified positive decimal version ID and the selected file ID belonging to that version. Reject metadata URL forms that require another origin, path, query key, userinfo, or fragment before mutation; never pass them through. A user-supplied Civitai direct-download URL is an exact `source.type: url` source and follows that path's userinfo/query/fragment rejection. Protected Civitai access uses the temporary token input and accepted InvokeAI marker lifecycle established in ticket 02. No search, ranking, latest-version selection, or inferred dependency installation is included.
+
+**Blocked by:** 01: Install a model from an exact URL and inspect its job; 02: Install a protected URL with a temporary token.
+
+**Execution route:** `frontier-owned` — external metadata interpretation and the one-primary rule determine which artifact is downloaded.
+
+**Verification gate:** Fixtures cover exact version URLs and IDs, invalid/duplicate version query values, one file, exactly one primary among several, no primary, multiple primaries, numeric candidate ordering, resubmission with a selected `file_id`, a file ID outside the version, an inapplicable `file_id`, malformed metadata, a foreign or credential-bearing artifact URL, the exact canonical `fileId` query shape, rejection of extra or secret query keys, direct-download generic URL validation, and protected access. Ambiguous or invalid cases must make zero install mutations and return structured, deterministic candidates or errors. Transport tests prove an accepted install is sent once, tokens and untrusted raw metadata are absent from output, and an inconclusive response is `outcome_unknown`. Run `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify`; validate metadata resolution against a current known exact version and perform a live local InvokeAI 6.14.1 install only with a safe authorized artifact, recording any unavailable live check.
+
+**Review gate:** Not required by this route.
+
+**Escalate when:** Civitai metadata lacks reliable version/file/primary identifiers, actual metadata contradicts the accepted selection rule or ADR 0018, token handling leaks, live installation differs, scope expands into discovery, or repeated repairs fail.
+
+**Permanent records:** V1 spec, ADR 0018, and tests — pin exact Civitai inputs, one-primary selection, structured candidates, and token/error behavior. If the accepted source-resolution decision changes, supersede ADR 0018 with a new ADR.
+
+**Status:** done
+
+- [x] An exact version with one unambiguous artifact produces one inspectable installation job.
+- [x] Ambiguous file sets return deterministic choices without downloading any artifact; a chosen file ID can be resubmitted and is verified against the exact version.
+- [x] A Civitai artifact uses only the canonical download URL constructed from verified IDs; generic direct URLs follow their own validation. Bediz neither persists nor prints source tokens, and InvokeAI's accepted temporary marker lifecycle remains documented.
+
+Fixture verification passed: `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify`. A current Civitai metadata response for exact version 2514310 exposed model ID 827184 and primary file ID 2402203 with the canonical file download URL. The CLI resolved that live version against local InvokeAI 6.14.1 and rejected an out-of-version `file_id` before submitting an installation. A live Civitai installation was not attempted because no safe, authorized disposable Civitai artifact was available; accepted-install behavior was exercised with transport fixtures.
+
+Fixed-diff standards and spec reviews both found that Civitai metadata outages were reported as `invalid_request`. The implementation now reports transport and upstream availability failures as safe `connection_failed` results and a missing exact version as `not_found`; focused tests cover those mappings without echoing source tokens or upstream bodies.

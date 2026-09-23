@@ -44,7 +44,15 @@ func (c *CLI) Run(ctx context.Context, args []string) int {
 	root.SetArgs(args)
 	executed, err := root.ExecuteContextC(ctx)
 	if err != nil {
-		return c.fail(commandOperation(executed), containsJSONFlag(args), result.CodeInvalidRequest, err.Error(), nil)
+		operationName := commandOperation(executed)
+		message := err.Error()
+		switch {
+		case operationName == result.OperationAuth || strings.HasPrefix(operationName, result.OperationAuthHuggingFace):
+			message = "invalid authentication command arguments"
+		case operationName == result.OperationModelsInstall:
+			message = "invalid model installation command arguments"
+		}
+		return c.fail(operationName, containsJSONFlag(args), result.CodeInvalidRequest, message, nil)
 	}
 	return exitCode
 }
@@ -86,6 +94,7 @@ func (c *CLI) newRootCommand(exitCode *int) *cobra.Command {
 	root.AddCommand(c.newModelsCommand(exitCode, &jsonOutput))
 	root.AddCommand(c.newImagesCommand(exitCode, &jsonOutput))
 	root.AddCommand(c.newQueueCommand(exitCode, &jsonOutput))
+	root.AddCommand(c.newAuthCommand(exitCode, &jsonOutput))
 	root.AddCommand(&cobra.Command{
 		Use:         "version",
 		Short:       "Print the Bediz version",

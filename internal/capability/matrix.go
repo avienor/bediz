@@ -1,8 +1,10 @@
 package capability
 
 import (
+	"encoding/json/v2"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -13,6 +15,25 @@ const SupportedInvokeAIRange = ">= 6.14.1, < 6.15.0"
 
 const RecallEndpoint = "/api/v1/recall/{queue_id}"
 const RecallSchemaRef = "#/components/schemas/RecallParameter"
+const HuggingFaceAuthEndpoint = "/api/v2/models/hf_login"
+
+// HasHuggingFaceTokenBody checks the tested login request contract shared by
+// mutation preflight and doctor capability reporting.
+func HasHuggingFaceTokenBody(post []byte, tokenType string, required []string) bool {
+	var endpoint struct {
+		RequestBody struct {
+			Content map[string]struct {
+				Schema struct {
+					Ref string `json:"$ref"`
+				} `json:"schema"`
+			} `json:"content"`
+		} `json:"requestBody"`
+	}
+	if err := json.Unmarshal(post, &endpoint); err != nil {
+		return false
+	}
+	return endpoint.RequestBody.Content["application/json"].Schema.Ref == "#/components/schemas/Body_do_hf_login" && tokenType == "string" && slices.Contains(required, "token")
+}
 
 type RecallFieldRequirement struct {
 	Name string
@@ -45,6 +66,58 @@ var RecallPatchFields = []RecallFieldRequirement{
 type EndpointRequirement struct {
 	Method string
 	Path   string
+}
+
+// InstallEndpoint describes the OpenAPI parameters required by the tested
+// generic model installation route.
+type InstallEndpoint struct {
+	Parameters []struct {
+		Name     string `json:"name"`
+		In       string `json:"in"`
+		Required bool   `json:"required"`
+	} `json:"parameters"`
+	Responses map[string]struct {
+		Content map[string]struct {
+			Schema struct {
+				Ref string `json:"$ref"`
+			} `json:"schema"`
+		} `json:"content"`
+	} `json:"responses"`
+}
+
+func (endpoint InstallEndpoint) HasRequiredSource() bool {
+	for _, parameter := range endpoint.Parameters {
+		if parameter.Name == "source" && parameter.In == "query" && parameter.Required {
+			return true
+		}
+	}
+	return false
+}
+
+func (endpoint InstallEndpoint) HasAccessTokenQuery() bool {
+	for _, parameter := range endpoint.Parameters {
+		if parameter.Name == "access_token" && parameter.In == "query" {
+			return true
+		}
+	}
+	return false
+}
+
+func (endpoint InstallEndpoint) HasInplaceQuery() bool {
+	for _, parameter := range endpoint.Parameters {
+		if parameter.Name == "inplace" && parameter.In == "query" {
+			return true
+		}
+	}
+	return false
+}
+
+func (endpoint InstallEndpoint) HasJobResponse() bool {
+	return endpoint.Responses["201"].Content["application/json"].Schema.Ref == "#/components/schemas/ModelInstallJob"
+}
+
+func (endpoint InstallEndpoint) HasStarterCatalogResponse() bool {
+	return endpoint.Responses["200"].Content["application/json"].Schema.Ref == "#/components/schemas/StarterModelResponse"
 }
 
 type InvocationRequirement struct {
@@ -83,6 +156,31 @@ var Matrix = []Entry{
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v2/models/"},
+		},
+	},
+	{
+		Operation:     result.OperationModelsInstall,
+		VersionPolicy: VersionPolicySupportedRange,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/app/version"},
+			{Method: "POST", Path: "/api/v2/models/install"},
+		},
+	},
+	{
+		Operation:     result.OperationModelsInstall,
+		Family:        "starter",
+		VersionPolicy: VersionPolicySupportedRange,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/app/version"},
+			{Method: "GET", Path: "/api/v2/models/starter_models"},
+			{Method: "POST", Path: "/api/v2/models/install"},
+		},
+	},
+	{
+		Operation:     result.OperationModelsStatus,
+		VersionPolicy: VersionPolicyCompatibleEndpoint,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v2/models/install/{id}"},
 		},
 	},
 	{
@@ -130,6 +228,21 @@ var Matrix = []Entry{
 		Endpoints: []EndpointRequirement{
 			{Method: "POST", Path: RecallEndpoint},
 		},
+	},
+	{
+		Operation:     result.OperationAuthHFStatus,
+		VersionPolicy: VersionPolicyCompatibleEndpoint,
+		Endpoints:     []EndpointRequirement{{Method: "GET", Path: HuggingFaceAuthEndpoint}},
+	},
+	{
+		Operation:     result.OperationAuthHFLogin,
+		VersionPolicy: VersionPolicySupportedRange,
+		Endpoints:     []EndpointRequirement{{Method: "POST", Path: HuggingFaceAuthEndpoint}},
+	},
+	{
+		Operation:     result.OperationAuthHFLogout,
+		VersionPolicy: VersionPolicySupportedRange,
+		Endpoints:     []EndpointRequirement{{Method: "DELETE", Path: HuggingFaceAuthEndpoint}},
 	},
 }
 

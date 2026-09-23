@@ -40,7 +40,7 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 	for i, entry := range report.Capabilities {
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "recall"}
+	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if !slices.Equal(operations, wantOperations) {
 		t.Fatalf("reported operations = %q, want implemented operations %q", operations, wantOperations)
 	}
@@ -65,6 +65,103 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 	}
 }
 
+func TestDoctorStarterCapabilityRequiresCatalogResponseContract(t *testing.T) {
+	document := openAPIFixture(t)
+	paths := document["paths"].(map[string]any)
+	paths["/api/v2/models/starter_models"].(map[string]any)["get"] = map[string]any{}
+	server := newCustomInvokeAIServer(t, "6.14.1", document, baselineModels)
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := Run(t.Context(), client, version.Info{Version: "test"})
+	var generic, starter *CapabilityReport
+	for i := range report.Capabilities {
+		entry := &report.Capabilities[i]
+		if entry.Operation == result.OperationModelsInstall && entry.Family == "starter" {
+			starter = entry
+		} else if entry.Operation == result.OperationModelsInstall && entry.Family == "" {
+			generic = entry
+		}
+	}
+	if generic == nil || !generic.Compatible || starter == nil || starter.Compatible || !slices.Contains(starter.Failures, "incompatible_starter_catalog_response") {
+		t.Fatalf("generic=%#v starter=%#v", generic, starter)
+	}
+}
+
+func TestDoctorDoesNotAdvertiseInstallWithoutGenericSourceParameter(t *testing.T) {
+	document := openAPIFixture(t)
+	paths := document["paths"].(map[string]any)
+	paths["/api/v2/models/install"].(map[string]any)["post"] = map[string]any{}
+	server := newCustomInvokeAIServer(t, "6.14.1", document, baselineModels)
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := Run(t.Context(), client, version.Info{Version: "test"})
+	for _, entry := range report.Capabilities {
+		if entry.Operation == result.OperationModelsInstall {
+			if entry.Compatible || !slices.Contains(entry.Failures, "incompatible_install_schema:source") {
+				t.Fatalf("install capability = %#v", entry)
+			}
+			return
+		}
+	}
+	t.Fatal("install capability absent")
+}
+
+func TestDoctorDoesNotAdvertiseInstallWithoutInspectableJobResponse(t *testing.T) {
+	document := openAPIFixture(t)
+	post := document["paths"].(map[string]any)["/api/v2/models/install"].(map[string]any)["post"].(map[string]any)
+	delete(post, "responses")
+	server := newCustomInvokeAIServer(t, "6.14.1", document, baselineModels)
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := Run(t.Context(), client, version.Info{Version: "test"})
+	for _, entry := range report.Capabilities {
+		if entry.Operation == result.OperationModelsInstall {
+			if entry.Compatible || !slices.Contains(entry.Failures, "incompatible_install_schema:job_response") {
+				t.Fatalf("install capability = %#v", entry)
+			}
+			return
+		}
+	}
+	t.Fatal("install capability absent")
+}
+
+func TestDoctorChecksHuggingFaceAuthMethodsAndLoginBody(t *testing.T) {
+	document := openAPIFixture(t)
+	paths := document["paths"].(map[string]any)
+	authPath := paths["/api/v2/models/hf_login"].(map[string]any)
+	delete(authPath, "delete")
+	authPath["post"] = map[string]any{"requestBody": map[string]any{}}
+	server := newCustomInvokeAIServer(t, "6.15.0", document, baselineModels)
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := Run(t.Context(), client, version.Info{Version: "test"})
+	got := make(map[string]CapabilityReport)
+	for _, entry := range report.Capabilities {
+		got[entry.Operation] = entry
+	}
+	if !got[result.OperationAuthHFStatus].Compatible {
+		t.Fatalf("read-only status unavailable: %#v", got[result.OperationAuthHFStatus])
+	}
+	if got[result.OperationAuthHFLogin].Compatible || !slices.Contains(got[result.OperationAuthHFLogin].Failures, "unsupported_version") || !slices.Contains(got[result.OperationAuthHFLogin].Failures, "incompatible_hf_login_schema:token") {
+		t.Fatalf("login capability: %#v", got[result.OperationAuthHFLogin])
+	}
+	if got[result.OperationAuthHFLogout].Compatible || !slices.Contains(got[result.OperationAuthHFLogout].Failures, "missing_endpoint:DELETE /api/v2/models/hf_login") {
+		t.Fatalf("logout capability: %#v", got[result.OperationAuthHFLogout])
+	}
+}
+
 func TestRunReportsInspectionAndUploadCapabilities(t *testing.T) {
 	server := newInvokeAIServer(t)
 	defer server.Close()
@@ -79,7 +176,7 @@ func TestRunReportsInspectionAndUploadCapabilities(t *testing.T) {
 	for _, entry := range report.Capabilities {
 		got[entry.Operation] = entry.Compatible
 	}
-	for _, operation := range []string{"models.list", "images.list", "images.get", "images.upload", "queue.list", "queue.get"} {
+	for _, operation := range []string{"models.list", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get"} {
 		if !got[operation] {
 			t.Errorf("capability %q missing or incompatible: %#v", operation, report.Capabilities)
 		}
@@ -196,12 +293,12 @@ func TestRunAllowsReadOnlyInspectionOnEndpointCompatibleUntestedVersion(t *testi
 	for _, entry := range report.Capabilities {
 		compatibility[entry.Operation] = entry.Compatible
 	}
-	for _, operation := range []string{"models.list", "images.list", "images.get", "queue.list", "queue.get"} {
+	for _, operation := range []string{"models.list", "models.status", "images.list", "images.get", "queue.list", "queue.get"} {
 		if !compatibility[operation] {
 			t.Errorf("read-only capability %q should remain compatible: %#v", operation, report.Capabilities)
 		}
 	}
-	if compatibility["images.upload"] || compatibility["generate"] {
+	if compatibility["models.install"] || compatibility["images.upload"] || compatibility["generate"] {
 		t.Fatalf("mutating and graph-producing capabilities should require the supported range: %#v", report.Capabilities)
 	}
 }
@@ -552,7 +649,7 @@ func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 		components := baseline["components"].(map[string]any)
 		schemas := components["schemas"].(map[string]any)
 		for _, schemaName := range slices.Sorted(maps.Keys(schemas)) {
-			if schemaName == "RecallParameter" {
+			if schemaName == "RecallParameter" || schemaName == "Body_do_hf_login" || schemaName == "HFTokenStatus" {
 				continue
 			}
 			schema := schemas[schemaName].(map[string]any)
@@ -591,7 +688,7 @@ func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 		components := baseline["components"].(map[string]any)
 		schemas := components["schemas"].(map[string]any)
 		for _, schemaName := range slices.Sorted(maps.Keys(schemas)) {
-			if schemaName == "RecallParameter" {
+			if schemaName == "RecallParameter" || schemaName == "Body_do_hf_login" || schemaName == "HFTokenStatus" {
 				continue
 			}
 			schema := schemas[schemaName].(map[string]any)
@@ -893,5 +990,6 @@ func openAPIFixture(t *testing.T) map[string]any {
 	if err := jsonv2.Unmarshal(encoded, &document); err != nil {
 		t.Fatal(err)
 	}
+	document["paths"].(map[string]any)["/api/v2/models/starter_models"] = map[string]any{"get": map[string]any{"responses": map[string]any{"200": map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/StarterModelResponse"}}}}}}}
 	return document
 }

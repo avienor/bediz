@@ -12,6 +12,7 @@ import (
 
 	"github.com/avienor/bediz/internal/config"
 	"github.com/avienor/bediz/internal/httpclient"
+	"github.com/avienor/bediz/internal/huggingface"
 	"github.com/avienor/bediz/internal/images"
 	"github.com/avienor/bediz/internal/models"
 	"github.com/avienor/bediz/internal/operation"
@@ -149,11 +150,57 @@ func (e remoteExecution[Request, Result]) run(ctx context.Context, c *CLI, jsonO
 // the single place command failures become structured error codes; doctor
 // classifies its own diagnostic issues before it reports one.
 func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
+	if submission, ok := errors.AsType[*models.StarterSubmissionError](err); ok {
+		details := map[string]any{"jobs": submission.Progress.Jobs, "skipped": submission.Progress.Skipped}
+		if _, uncertain := errors.AsType[*httpclient.OutcomeUnknownError](submission.Cause); uncertain {
+			details["uncertain_role"] = submission.Role
+			if submission.DependencyIndex != nil {
+				details["uncertain_dependency_index"] = *submission.DependencyIndex
+			}
+			return c.fail(operationName, jsonOutput, result.CodeOutcomeUnknown, "InvokeAI may have accepted the installation; inspect the current model inventory and install job list before submitting again", details)
+		}
+		details["rejected_role"] = submission.Role
+		if submission.DependencyIndex != nil {
+			details["rejected_dependency_index"] = *submission.DependencyIndex
+		}
+		if rejection, ok := errors.AsType[*httpclient.HTTPError](submission.Cause); ok {
+			details["status"] = rejection.StatusCode
+		}
+		return c.fail(operationName, jsonOutput, result.CodeInvokeAIOperationFailed, "InvokeAI rejected a starter installation job; reinspect the catalog before retrying", details)
+	}
+	if _, ok := errors.AsType[*models.RepositoryAccessError](err); ok {
+		return c.fail(operationName, jsonOutput, result.CodeConnectionFailed, "could not verify public Hugging Face repository access", nil)
+	}
+	if access, ok := errors.AsType[*models.CivitaiMetadataAccessError](err); ok {
+		if access.StatusCode == http.StatusNotFound {
+			return c.fail(operationName, jsonOutput, result.CodeNotFound, "Civitai metadata was not found", nil)
+		}
+		return c.fail(operationName, jsonOutput, result.CodeConnectionFailed, "could not verify Civitai metadata", nil)
+	}
+	if auth, ok := errors.AsType[*operation.AuthenticationRequiredError](err); ok {
+		return c.fail(operationName, jsonOutput, result.CodeAuthenticationFailed, auth.Error(), nil)
+	}
+	if _, ok := errors.AsType[*huggingface.RejectedTokenError](err); ok {
+		return c.fail(operationName, jsonOutput, result.CodeAuthenticationFailed, "Hugging Face rejected the token", nil)
+	}
+	if _, ok := errors.AsType[*huggingface.UnchangedStateError](err); ok {
+		return c.fail(operationName, jsonOutput, result.CodeInvokeAIOperationFailed, "InvokeAI did not clear the Hugging Face token", nil)
+	}
 	if invalid, ok := errors.AsType[*operation.InvalidRequestError](err); ok {
 		return c.fail(operationName, jsonOutput, result.CodeInvalidRequest, invalid.Error(), nil)
 	}
 	if unsupported, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); ok {
 		return c.fail(operationName, jsonOutput, result.CodeUnsupportedCapability, unsupported.Error(), nil)
+	}
+	if selection, ok := errors.AsType[*operation.CivitaiFileSelectionError](err); ok {
+		return c.fail(operationName, jsonOutput, result.CodeSelectionRequired, selection.Error(), map[string]any{
+			"kind": "civitai_file", "selector": selection.VersionID, "candidates": selection.Candidates,
+		})
+	}
+	if selection, ok := errors.AsType[*operation.CivitaiVersionSelectionError](err); ok {
+		return c.fail(operationName, jsonOutput, result.CodeSelectionRequired, selection.Error(), map[string]any{
+			"kind": "civitai_version", "selector": selection.ModelID, "candidates": selection.Candidates,
+		})
 	}
 	if selection, ok := errors.AsType[*operation.SelectionRequiredError](err); ok {
 		return c.fail(operationName, jsonOutput, result.CodeSelectionRequired, selection.Error(), map[string]any{
@@ -181,6 +228,9 @@ func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
 		return c.fail(operationName, jsonOutput, result.CodeInvalidInvokeAIResponse, invalid.Error(), acceptedItemDetails(invalid.Position, invalid.ItemID, invalid.Status))
 	}
 	if _, ok := errors.AsType[*httpclient.OutcomeUnknownError](err); ok {
+		if operationName == result.OperationModelsInstall {
+			return c.fail(operationName, jsonOutput, result.CodeOutcomeUnknown, "InvokeAI may have accepted the installation; inspect the current model inventory and install job list before submitting again", nil)
+		}
 		return c.fail(operationName, jsonOutput, result.CodeOutcomeUnknown, "InvokeAI may have accepted the operation; inspect remote state before retrying", nil)
 	}
 	if errors.Is(err, context.Canceled) {
@@ -546,7 +596,7 @@ func (c *CLI) newModelsCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
 	listCommand.Flags().StringVar(&options.modelType, "type", "", "include one exact model type")
 	listCommand.Flags().StringVar(&options.modelFormat, "format", "", "include one exact model format")
 	listCommand.Flags().StringVar(&options.modelName, "name", "", "include one exact model name")
-	command.AddCommand(listCommand)
+	command.AddCommand(listCommand, c.newModelsInstallCommand(exitCode, jsonOutput), c.newModelsStatusCommand(exitCode, jsonOutput))
 	return command
 }
 

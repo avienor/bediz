@@ -3178,8 +3178,14 @@ func TestGlobalJSONFlagBeforeVersionReturnsStableContract(t *testing.T) {
 func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 	isolateUserConfigDir(t)
 	paths := map[string]any{
-		"/api/v1/app/version":                            map[string]any{"get": map[string]any{}},
-		"/api/v2/models/":                                map[string]any{"get": map[string]any{}},
+		"/api/v1/app/version": map[string]any{"get": map[string]any{}},
+		"/api/v2/models/":     map[string]any{"get": map[string]any{}},
+		"/api/v2/models/install": map[string]any{"post": map[string]any{
+			"parameters": []any{map[string]any{"name": "source", "in": "query", "required": true}},
+			"responses":  map[string]any{"201": map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/ModelInstallJob"}}}}},
+		}},
+		"/api/v2/models/install/{id}":                    map[string]any{"get": map[string]any{}},
+		"/api/v2/models/starter_models":                  map[string]any{"get": map[string]any{"responses": map[string]any{"200": map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/StarterModelResponse"}}}}}}},
 		"/api/v1/images/":                                map[string]any{"get": map[string]any{}},
 		"/api/v1/images/i/{image_name}":                  map[string]any{"get": map[string]any{}},
 		"/api/v1/images/upload":                          map[string]any{"post": map[string]any{}},
@@ -3190,6 +3196,8 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 	}
 	openAPIDocument := animaOpenAPIFixture("", "")
 	paths["/api/v1/recall/{queue_id}"] = openAPIDocument["paths"].(map[string]any)["/api/v1/recall/{queue_id}"]
+	paths["/api/v2/models/hf_login"] = map[string]any{"get": map[string]any{}, "post": map[string]any{"requestBody": map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/Body_do_hf_login"}}}}}, "delete": map[string]any{}}
+	openAPIDocument["components"].(map[string]any)["schemas"].(map[string]any)["Body_do_hf_login"] = map[string]any{"properties": map[string]any{"token": map[string]any{"type": "string"}}, "required": []any{"token"}}
 	openAPIDocument["paths"] = paths
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -3247,7 +3255,7 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 		}
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "recall"}
+	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if envelope.SchemaVersion != 1 || !envelope.OK || envelope.Operation != "doctor" || !envelope.Data.Ready ||
 		!slices.Equal(operations, wantOperations) || envelope.Data.UISync["generate"] != "partial" ||
 		len(envelope.Data.OpenAPI.Invocations) != 8 || len(envelope.Data.Models.Relevant) != 3 || len(envelope.Data.Models.Requirements) != 3 {

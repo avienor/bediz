@@ -2,7 +2,7 @@
 
 Bediz is a deterministic Go CLI for controlling a local InvokeAI installation. The V1 contract is defined in [`docs/spec/v1.md`](docs/spec/v1.md).
 
-The current implementation includes the first four V1 delivery slices:
+The current implementation includes these V1 capabilities:
 
 - per-user connection configuration with flag, environment, file, and default precedence;
 - a bounded HTTP client with bearer authentication, safe-read retries, and unknown-outcome classification for mutations;
@@ -10,6 +10,9 @@ The current implementation includes the first four V1 delivery slices:
 - `version`, with concise human output and a stable V1 JSON result envelope;
 - `doctor`, which checks InvokeAI version compatibility (`>= 6.14.1, < 6.15.0`), the OpenAPI endpoints and schemas required by implemented capabilities, and separate readiness for Anima Direct Execution and Parameter Recall;
 - safe installed-model, gallery-image, and queue inspection;
+- model installation through InvokeAI jobs from exact URLs, Hugging Face repositories with explicit artifact choices, Civitai versions with explicit version and file choices, server paths (in-place registration, or `--move --yes`), and starter models whose catalog dependencies are submitted as separate jobs and skipped when already installed, plus current install-job status inspection;
+- protected URL, Civitai, and Hugging Face installs with a temporary `--token-stdin` source token that Bediz never stores or prints;
+- Hugging Face authentication through InvokeAI with `auth huggingface status`, `login --token-stdin`, and `logout`;
 - single-file image upload with supported-version validation, no automatic mutation retry, and `outcome_unknown` reporting when the transport result is inconclusive;
 - Anima text-to-image Direct Execution with deterministic model and component resolution, ordered multi-output seed resolution, graph compilation targeting the tested InvokeAI 6.14.x baseline, safe queue-polling to an Execution Receipt, and `--no-wait` support;
 - manual Anima Parameter Recall and automatic generation UI Synchronization after enqueue, with the verified `partial` level on stock InvokeAI 6.14.x.
@@ -18,7 +21,7 @@ On a compatible 6.14.x installation, `doctor --json` reports `generate` as compa
 
 The partial Handoff restores positive and negative prompts, the exact Anima main model, dimensions, steps, and the first output seed in an open InvokeAI browser after Recall is accepted. It does not restore scheduler, guidance, VAE, Qwen3 encoder, output count, or Output Board controls. The visible queue item, result image, metadata, and complete Execution Receipt retain the resolved settings and every output seed. A successful generation carries `ui_sync_partial`; if the Recall patch fails, generation still succeeds with `ui_sync_failed`. Recall API acceptance does not prove that a browser was open to receive the event. V1 does not support `recall --replace` or claim `full` UI Synchronization.
 
-The remaining management commands will be added in later V1 slices described by the specification.
+Additional management commands will be added in later V1 slices described by the specification.
 
 ## Build and run
 
@@ -29,6 +32,19 @@ go build -o bediz ./cmd/bediz
 ./bediz doctor
 ./bediz doctor --json
 ./bediz models list --json
+./bediz models install --source-type url --source https://example.org/model.safetensors --json
+./bediz models install --source-type huggingface --source org/repo --json
+./bediz models install --source-type huggingface --source org/repo --artifact https://huggingface.co/org/repo/resolve/main/model.safetensors --json
+./bediz models install --source-type starter --source STARTER_SOURCE --json
+./bediz models install --source-type civitai --source 'https://civitai.com/models/MODEL_ID?modelVersionId=VERSION_ID' --json
+./bediz models install --source-type civitai --source 'https://civitai.com/models/MODEL_ID' --json
+./bediz models install --source-type civitai --source VERSION_ID --file-id FILE_ID --json
+./bediz models install --source-type path --source /server/models/model.safetensors --json
+./bediz models install --source-type path --source /server/models/model.safetensors --move --yes --json
+./bediz models status --job-id 0 --json
+./bediz auth huggingface status --json
+printf '%s' "$HF_TOKEN" | ./bediz auth huggingface login --token-stdin --json
+./bediz auth huggingface logout --json
 ./bediz images list --json
 ./bediz images get IMAGE_NAME --json
 ./bediz images upload /absolute/path/to/image.png --json
@@ -39,6 +55,10 @@ go build -o bediz ./cmd/bediz
 ```
 
 Inspection commands return normalized Bediz records rather than raw InvokeAI response documents. List output is page-bounded, image selectors use stable InvokeAI image names, and queue listing hydrates only the requested page of lightweight summaries. On supported InvokeAI 6.14.x versions, preserving queue order and total count requires reading the complete lightweight item-ID index; the configured HTTP response-size limit bounds that response, and Bediz never fetches execution graphs while listing.
+
+Model installation accepts an exact HTTP(S) artifact URL without userinfo, query, or fragment. Its job ID identifies only a job in the current InvokeAI registry; after a restart, use `models list` and the InvokeAI install job list before deciding whether to resubmit an uncertain installation. `models status` returns a safe projection of the job currently under that ID.
+
+Civitai installation requires an exact version ID or a model page URL with `modelVersionId`. One file is selected directly; among multiple files, exactly one primary is selected. Otherwise the JSON result returns numeric file choices; resubmit the same version with `--file-id` or `source.file_id`. A model page URL without `modelVersionId` never picks a version, even when only one exists: the JSON result returns numeric version choices to resubmit as the exact version reference. A direct Civitai download URL is a `url` source and follows the direct URL validation rules.
 
 Each operation also accepts a schema-versioned request document from a file or standard input. Operation arguments and flags cannot be mixed with `--request`:
 
@@ -87,6 +107,18 @@ unset. To run the opt-in gate against the local InvokeAI 6.14.1 baseline:
 ```text
 BEDIZ_E2E_URL=http://127.0.0.1:9090 go test -count=1 -v ./e2e
 ```
+
+To also verify URL model installation and job status against that baseline,
+run the separate opt-in gate:
+
+```text
+BEDIZ_E2E_URL=http://127.0.0.1:9090 BEDIZ_E2E_MODEL_INSTALL=1 go test -count=1 -v ./e2e -run '^TestLiveURLModelInstall$'
+```
+
+This downloads a public, revision-pinned 4.8 MB SD1 LoRA from Hugging Face,
+checks `models install`, `models status`, and `models list` through the real
+binary, then removes only the model it installed. It requires outbound HTTPS
+access from InvokeAI. It skips unless both environment variables are set.
 
 The gate builds the real `bediz` binary and invokes `doctor`, `models list`,
 bounded image and queue listing, a self-cleaning image upload round trip, and a

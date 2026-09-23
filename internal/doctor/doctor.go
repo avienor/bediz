@@ -119,10 +119,12 @@ type openAPIDocument struct {
 
 type openAPISchema struct {
 	Properties map[string]openAPIProperty `json:"properties"`
+	Required   []string                   `json:"required"`
 }
 
 type openAPIProperty struct {
 	Const string                               `json:"const"`
+	Type  string                               `json:"type"`
 	AnyOf []capability.RecallSchemaAlternative `json:"anyOf"`
 }
 
@@ -356,6 +358,26 @@ func buildCapabilities(report Report, document openAPIDocument) []CapabilityRepo
 			endpointAvailable(report.OpenAPI.Endpoints, capability.EndpointRequirement{Method: "POST", Path: capability.RecallEndpoint}) {
 			failures = append(failures, recallSchemaFailures(document)...)
 		}
+		if entry.Operation == result.OperationModelsInstall && report.OpenAPI.Available &&
+			endpointAvailable(report.OpenAPI.Endpoints, capability.EndpointRequirement{Method: "POST", Path: "/api/v2/models/install"}) {
+			endpoint := installEndpoint(document.Paths["/api/v2/models/install"]["post"])
+			if !endpoint.HasRequiredSource() {
+				failures = append(failures, "incompatible_install_schema:source")
+			}
+			if !endpoint.HasJobResponse() {
+				failures = append(failures, "incompatible_install_schema:job_response")
+			}
+		}
+		if entry.Operation == result.OperationModelsInstall && entry.Family == "starter" && report.OpenAPI.Available &&
+			endpointAvailable(report.OpenAPI.Endpoints, capability.EndpointRequirement{Method: "GET", Path: "/api/v2/models/starter_models"}) &&
+			!installEndpoint(document.Paths["/api/v2/models/starter_models"]["get"]).HasStarterCatalogResponse() {
+			failures = append(failures, "incompatible_starter_catalog_response")
+		}
+		if entry.Operation == result.OperationAuthHFLogin && report.OpenAPI.Available &&
+			endpointAvailable(report.OpenAPI.Endpoints, capability.EndpointRequirement{Method: "POST", Path: capability.HuggingFaceAuthEndpoint}) &&
+			!hasHuggingFaceTokenBody(document) {
+			failures = append(failures, "incompatible_hf_login_schema:token")
+		}
 		capabilities = append(capabilities, CapabilityReport{
 			Operation:  entry.Operation,
 			Family:     entry.Family,
@@ -377,6 +399,19 @@ func buildCapabilities(report Report, document openAPIDocument) []CapabilityRepo
 		}
 	}
 	return capabilities
+}
+
+func hasHuggingFaceTokenBody(document openAPIDocument) bool {
+	schema := document.Components.Schemas["Body_do_hf_login"]
+	return capability.HasHuggingFaceTokenBody(document.Paths[capability.HuggingFaceAuthEndpoint]["post"], schema.Properties["token"].Type, schema.Required)
+}
+
+func installEndpoint(post json.RawMessage) capability.InstallEndpoint {
+	var endpoint capability.InstallEndpoint
+	if err := jsonv2.Unmarshal(post, &endpoint); err != nil {
+		return capability.InstallEndpoint{}
+	}
+	return endpoint
 }
 
 func recallSchemaFailures(document openAPIDocument) []string {
