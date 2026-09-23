@@ -1,6 +1,6 @@
 # Model installation, authentication, and source resolution
 
-**Status:** Approved ticket plan; tickets 01–05 are done and tickets 06–08 remain ready for implementation.
+**Status:** Approved ticket plan; tickets 01–06 are done and tickets 07–08 remain ready for implementation.
 
 The accepted product boundary is Bediz V1 specification sections 5-10, 14, 17-18, and 20-23, together with ADR 0018 (source resolution and credential boundaries), ADR 0006 (Request Documents), ADR 0007 (Result Envelope), and ADR 0008 (unsafe retries). ADR 0018 supersedes historical ADR 0005. This file records decisions needed to execute delivery step 5; the V1 specification now contains these accepted public behaviors. An implementing ticket must keep it aligned with any newly accepted discovery. A contradiction with the V1 specification or an ADR is an escalation, not permission to silently change the contract.
 
@@ -40,4 +40,4 @@ Inspection of the installed InvokeAI 6.14.1 implementation found three behaviors
 6. Installed starter catalog entries are skipped before source normalization; unsupported source forms block only entries that would be installed. V1 section 14 and ticket 05 require this order, including an all-installed fixture.
 7. The Civitai download exception is pinned to one canonical URL shape constructed from verified IDs; Hugging Face login receives the same non-loopback plain-HTTP credential guard as protected installation. V1 section 14, ADR 0018, and tickets 03 and 07 record those boundaries.
 
-Tickets 01–05 are marked done and tickets 06–08 remain `ready-for-agent` subject to their blocking edges. The evidence requirements in each ticket, including live limitations, still govern acceptance.
+Tickets 01–06 are marked done and tickets 07–08 remain `ready-for-agent` subject to their blocking edges. The evidence requirements in each ticket, including live limitations, still govern acceptance.
