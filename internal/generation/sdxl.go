@@ -77,13 +77,11 @@ func CompileSDXL(resolved Resolution) (EnqueueRequest, error) {
 		"seed":                  integerNode{ID: "seed", IsIntermediate: true, UseCache: true, Type: "integer", Value: *request.Seed},
 		"noise":                 sdxlNoiseNode{ID: "noise", IsIntermediate: true, UseCache: true, Type: "noise", Width: *request.Width, Height: *request.Height, UseCPU: true},
 		"denoise":               sdxlDenoiseNode{ID: "denoise", IsIntermediate: true, UseCache: true, Type: "denoise_latents", CFGScale: *request.Guidance, CFGRescaleMultiplier: 0, DenoisingStart: 0, DenoisingEnd: 1, Steps: *request.Steps, Scheduler: *request.Scheduler},
-		"metadata":              sdxlMetadataNode{ID: "metadata", IsIntermediate: true, UseCache: true, Type: "core_metadata", GenerationMode: "sdxl_txt2img", NegativePrompt: request.NegativePrompt, Width: *request.Width, Height: *request.Height, CFGScale: *request.Guidance, CFGRescaleMultiplier: 0, Steps: *request.Steps, Scheduler: *request.Scheduler, RandDevice: "cpu", Model: reference(resolved.Models.Main)},
-		"decode":                sdxlDecodeNode{ID: "decode", IsIntermediate: false, UseCache: false, Type: "l2i", FP32: true},
 	}
-	decode := nodes["decode"].(sdxlDecodeNode)
+	metadata := sdxlMetadataNode{ID: "metadata", IsIntermediate: true, UseCache: true, Type: "core_metadata", GenerationMode: "sdxl_txt2img", NegativePrompt: request.NegativePrompt, Width: *request.Width, Height: *request.Height, CFGScale: *request.Guidance, CFGRescaleMultiplier: 0, Steps: *request.Steps, Scheduler: *request.Scheduler, RandDevice: "cpu", Model: reference(resolved.Models.Main)}
+	decode := sdxlDecodeNode{ID: "decode", IsIntermediate: false, UseCache: false, Type: "l2i", FP32: true}
 	if request.BoardID != "" {
 		decode.Board = new(boardField{BoardID: request.BoardID})
-		nodes["decode"] = decode
 	}
 	edges := []Edge{
 		edge("model_loader", "unet", "denoise", "unet"),
@@ -110,12 +108,12 @@ func CompileSDXL(resolved Resolution) (EnqueueRequest, error) {
 	vaeSource := "model_loader"
 	if resolved.Models.VAE.Key != "" {
 		vae := resolved.Models.VAE
-		metadata := nodes["metadata"].(sdxlMetadataNode)
 		metadata.VAE = new(reference(vae))
-		nodes["metadata"] = metadata
 		nodes["vae_loader"] = sdxlVAELoaderNode{ID: "vae_loader", IsIntermediate: true, UseCache: true, Type: "vae_loader", VAEModel: reference(vae)}
 		vaeSource = "vae_loader"
 	}
+	nodes["metadata"] = metadata
+	nodes["decode"] = decode
 	edges = append(edges, edge(vaeSource, "vae", "decode", "vae"))
 	batchSeeds := slices.Clone(resolved.Seeds)
 	slices.Reverse(batchSeeds)

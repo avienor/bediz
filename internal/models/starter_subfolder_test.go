@@ -1,7 +1,9 @@
 package models_test
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"slices"
@@ -272,6 +274,76 @@ func TestStarterSubfolderFollowsParentTreePagination(t *testing.T) {
 	_, err := installer.Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "starter", Reference: source}})
 	if err != nil || posts.Load() != 1 || pages.Load() != 2 {
 		t.Fatalf("error=%v posts=%d pages=%d", err, posts.Load(), pages.Load())
+	}
+}
+
+func TestStarterSubfolderRejectsInvalidTreePaginationLinks(t *testing.T) {
+	const source = "sample/model::file.safetensors"
+	const first = "https://huggingface.co/api/models/sample/model/tree/main"
+	for _, test := range []struct{ name, next string }{
+		{"http", "http://huggingface.co/api/models/sample/model/tree/main?cursor=x"},
+		{"other host", "https://evil.example/api/models/sample/model/tree/main?cursor=x"},
+		{"userinfo", "https://user@huggingface.co/api/models/sample/model/tree/main?cursor=x"},
+		{"fragment", "https://huggingface.co/api/models/sample/model/tree/main?cursor=x#f"},
+		{"other path", "https://huggingface.co/api/models/sample/other/tree/main?cursor=x"},
+		{"no cursor", "https://huggingface.co/api/models/sample/model/tree/main?page=2"},
+		{"cycle", first + "?cursor=x"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			catalog := `{"starter_models":[{"source":"` + source + `","is_installed":false}]}`
+			installer, posts := subfolderTestInstaller(t, catalog, func(r *http.Request) (*http.Response, error) {
+				if test.name == "cycle" && r.URL.String() == test.next {
+					return treeResponse(http.StatusOK, `[{"path":"other.txt","type":"file"}]`, `<`+test.next+`>; rel="next"`)
+				}
+				if r.URL.String() != first {
+					t.Errorf("request to rejected pagination link: %s", r.URL)
+					return treeResponse(http.StatusOK, `[{"path":"file.safetensors","type":"file"}]`, "")
+				}
+				return treeResponse(http.StatusOK, `[{"path":"other.txt","type":"file"}]`, `<`+test.next+`>; rel="next"`)
+			}, nil)
+			_, err := installer.Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "starter", Reference: source}})
+			if _, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); !ok || posts.Load() != 0 {
+				t.Fatalf("error=%v posts=%d", err, posts.Load())
+			}
+		})
+	}
+}
+
+func TestStarterSubfolderBoundsParentTreePagination(t *testing.T) {
+	const source = "sample/model::file.safetensors"
+	catalog := `{"starter_models":[{"source":"` + source + `","is_installed":false}]}`
+	var pages atomic.Int32
+	installer, posts := subfolderTestInstaller(t, catalog, func(r *http.Request) (*http.Response, error) {
+		page := pages.Add(1)
+		if page > 1000 {
+			t.Fatalf("pagination is unbounded")
+		}
+		return treeResponse(http.StatusOK, `[{"path":"other.txt","type":"file"}]`, fmt.Sprintf(`<https://huggingface.co/api/models/sample/model/tree/main?cursor=page%d>; rel="next"`, page))
+	}, nil)
+	_, err := installer.Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "starter", Reference: source}})
+	if _, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); !ok || posts.Load() != 0 {
+		t.Fatalf("error=%v posts=%d pages=%d", err, posts.Load(), pages.Load())
+	}
+}
+
+func TestStarterSubfolderTreeCancellationIsNotUnsupported(t *testing.T) {
+	for _, source := range []string{"sample/model::folder/file.safetensors", "sample/model::folder"} {
+		t.Run(source, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			catalog := `{"starter_models":[{"source":"` + source + `","is_installed":false}]}`
+			installer, posts := subfolderTestInstaller(t, catalog, func(r *http.Request) (*http.Response, error) {
+				if r.URL.Query().Get("recursive") == "" && source == "sample/model::folder" {
+					return treeResponse(http.StatusOK, `[{"path":"folder","type":"directory"}]`, "")
+				}
+				cancel()
+				return nil, r.Context().Err()
+			}, nil)
+			_, err := installer.Install(ctx, models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "starter", Reference: source}})
+			if !errors.Is(err, context.Canceled) || posts.Load() != 0 {
+				t.Fatalf("error=%v posts=%d", err, posts.Load())
+			}
+		})
 	}
 }
 

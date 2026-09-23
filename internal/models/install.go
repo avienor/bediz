@@ -389,6 +389,9 @@ func (installer Installer) checkStarterSubfolderExists(ctx context.Context, repo
 	}
 	entries, err := installer.huggingFaceTree(ctx, repository, parent, false, subfolder)
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return operation.UnsupportedCapability("starter catalog subfolder could not be verified")
 	}
 	for _, entry := range entries {
@@ -400,6 +403,9 @@ func (installer Installer) checkStarterSubfolderExists(ctx context.Context, repo
 			return nil
 		case "directory":
 			files, err := installer.huggingFaceTree(ctx, repository, subfolder, true, "")
+			if err != nil && ctx.Err() != nil {
+				return ctx.Err()
+			}
 			if err == nil && slices.ContainsFunc(files, func(file huggingFaceTreeEntry) bool {
 				return file.Type == "file" && strings.HasPrefix(file.Path, subfolder+"/")
 			}) {
@@ -424,10 +430,14 @@ func (installer Installer) huggingFaceTree(ctx context.Context, repository, fold
 		base.RawQuery = "recursive=true"
 	}
 	next := base.String()
+	const maxTreePages = 100
 	visited := make(map[string]bool)
 	for next != "" {
 		if visited[next] {
 			return nil, errors.New("Hugging Face tree pagination cycle")
+		}
+		if len(visited) == maxTreePages {
+			return nil, errors.New("Hugging Face tree pagination exceeds the page limit")
 		}
 		visited[next] = true
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, next, nil)
