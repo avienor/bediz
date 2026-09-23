@@ -2,9 +2,9 @@
 package upscale
 
 import (
-	"bytes"
 	"encoding/binary"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -47,10 +47,10 @@ type Request struct {
 }
 
 // UnmarshalJSON rejects explicit nulls, which otherwise become absent optional
-// fields and silently acquire defaults. The inner decoder retains strict
-// unknown-field checking for nested source and component objects.
+// fields and silently acquire defaults. Member names are matched exactly, and
+// duplicate or unknown members are rejected at every level.
 func (request *Request) UnmarshalJSON(data []byte) error {
-	var fields map[string]json.RawMessage
+	var fields map[string]jsontext.Value
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
@@ -62,7 +62,7 @@ func (request *Request) UnmarshalJSON(data []byte) error {
 		if !ok {
 			continue
 		}
-		var children map[string]json.RawMessage
+		var children map[string]jsontext.Value
 		if err := json.Unmarshal(raw, &children); err != nil {
 			return fmt.Errorf("%s: %w", nested, err)
 		}
@@ -71,19 +71,17 @@ func (request *Request) UnmarshalJSON(data []byte) error {
 		}
 	}
 	type plainRequest Request
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
 	var decoded plainRequest
-	if err := decoder.Decode(&decoded); err != nil {
+	if err := json.Unmarshal(data, &decoded, json.RejectUnknownMembers(true)); err != nil {
 		return err
 	}
 	*request = Request(decoded)
 	return nil
 }
 
-func rejectNullFields(fields map[string]json.RawMessage) error {
+func rejectNullFields(fields map[string]jsontext.Value) error {
 	for name, raw := range fields {
-		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		if raw.Kind() == 'n' {
 			return fmt.Errorf("field %q cannot be null", name)
 		}
 	}
@@ -101,13 +99,6 @@ type Resolution struct {
 	Request Request
 	Models  Models
 	Seed    uint32
-}
-
-var schedulers = []string{
-	"ddim", "ddpm", "deis", "deis_k", "lms", "lms_k", "pndm", "heun", "heun_k", "euler", "euler_k", "euler_a",
-	"kdpm_2", "kdpm_2_k", "kdpm_2_a", "kdpm_2_a_k", "dpmpp_2s", "dpmpp_2s_k", "dpmpp_2m", "dpmpp_2m_k",
-	"dpmpp_2m_sde", "dpmpp_2m_sde_k", "dpmpp_3m", "dpmpp_3m_k", "dpmpp_sde", "dpmpp_sde_k", "er_sde",
-	"unipc", "unipc_k", "lcm", "tcd",
 }
 
 // ValidateRequest performs all checks that must complete without network access.
@@ -142,7 +133,7 @@ func ValidateRequest(request Request) error {
 	if request.Steps != nil && *request.Steps < 1 {
 		return operation.InvalidRequest("steps must be positive")
 	}
-	if request.Scheduler != nil && !slices.Contains(schedulers, *request.Scheduler) {
+	if request.Scheduler != nil && !graphops.IsSDXLScheduler(*request.Scheduler) {
 		return operation.InvalidRequest("scheduler is not supported for upscale")
 	}
 	if request.Guidance != nil && (math.IsNaN(*request.Guidance) || math.IsInf(*request.Guidance, 0) || *request.Guidance < 1) {

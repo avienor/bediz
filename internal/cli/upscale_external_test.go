@@ -182,6 +182,8 @@ func TestUpscaleRejectsInvalidLocalValuesBeforeNetwork(t *testing.T) {
 		{"overlap at tile", `,"tile_size":512,"tile_overlap":512`}, {"unknown", `,"surprise":true`},
 		{"null scale", `,"scale":null`}, {"null seed", `,"seed":null`}, {"null prompt", `,"positive_prompt":null`},
 		{"null tile selector", `,"components":{"tile_controlnet":null}`},
+		{"case-folded components with null", `,"Components":{"tile_controlnet":"tile","vae":null}`},
+		{"case-folded model", `,"MODEL":"sdxl-main"`}, {"duplicate model", `,"model":"other"`},
 	}
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
