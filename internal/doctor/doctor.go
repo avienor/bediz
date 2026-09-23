@@ -368,6 +368,11 @@ func buildCapabilities(report Report, document openAPIDocument) []CapabilityRepo
 				failures = append(failures, "incompatible_install_schema:job_response")
 			}
 		}
+		if entry.Operation == result.OperationModelsInstall && entry.Family == "starter" && report.OpenAPI.Available &&
+			endpointAvailable(report.OpenAPI.Endpoints, capability.EndpointRequirement{Method: "GET", Path: "/api/v2/models/starter_models"}) &&
+			!installEndpoint(document.Paths["/api/v2/models/starter_models"]["get"]).HasStarterCatalogResponse() {
+			failures = append(failures, "incompatible_starter_catalog_response")
+		}
 		if entry.Operation == result.OperationAuthHFLogin && report.OpenAPI.Available &&
 			endpointAvailable(report.OpenAPI.Endpoints, capability.EndpointRequirement{Method: "POST", Path: capability.HuggingFaceAuthEndpoint}) &&
 			!hasHuggingFaceTokenBody(document) {

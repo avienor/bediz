@@ -107,6 +107,10 @@ func (endpoint InstallEndpoint) HasJobResponse() bool {
 	return endpoint.Responses["201"].Content["application/json"].Schema.Ref == "#/components/schemas/ModelInstallJob"
 }
 
+func (endpoint InstallEndpoint) HasStarterCatalogResponse() bool {
+	return endpoint.Responses["200"].Content["application/json"].Schema.Ref == "#/components/schemas/StarterModelResponse"
+}
+
 type InvocationRequirement struct {
 	Schema     string
 	Type       string
@@ -150,6 +154,16 @@ var Matrix = []Entry{
 		VersionPolicy: VersionPolicySupportedRange,
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v1/app/version"},
+			{Method: "POST", Path: "/api/v2/models/install"},
+		},
+	},
+	{
+		Operation:     result.OperationModelsInstall,
+		Family:        "starter",
+		VersionPolicy: VersionPolicySupportedRange,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/app/version"},
+			{Method: "GET", Path: "/api/v2/models/starter_models"},
 			{Method: "POST", Path: "/api/v2/models/install"},
 		},
 	},

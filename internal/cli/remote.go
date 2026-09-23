@@ -150,6 +150,24 @@ func (e remoteExecution[Request, Result]) run(ctx context.Context, c *CLI, jsonO
 // the single place command failures become structured error codes; doctor
 // classifies its own diagnostic issues before it reports one.
 func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
+	if submission, ok := errors.AsType[*models.StarterSubmissionError](err); ok {
+		details := map[string]any{"jobs": submission.Progress.Jobs, "skipped": submission.Progress.Skipped}
+		if _, uncertain := errors.AsType[*httpclient.OutcomeUnknownError](submission.Cause); uncertain {
+			details["uncertain_role"] = submission.Role
+			if submission.DependencyIndex != nil {
+				details["uncertain_dependency_index"] = *submission.DependencyIndex
+			}
+			return c.fail(operationName, jsonOutput, result.CodeOutcomeUnknown, "InvokeAI may have accepted the installation; inspect the current model inventory and install job list before submitting again", details)
+		}
+		details["rejected_role"] = submission.Role
+		if submission.DependencyIndex != nil {
+			details["rejected_dependency_index"] = *submission.DependencyIndex
+		}
+		if rejection, ok := errors.AsType[*httpclient.HTTPError](submission.Cause); ok {
+			details["status"] = rejection.StatusCode
+		}
+		return c.fail(operationName, jsonOutput, result.CodeInvokeAIOperationFailed, "InvokeAI rejected a starter installation job; reinspect the catalog before retrying", details)
+	}
 	if _, ok := errors.AsType[*models.RepositoryAccessError](err); ok {
 		return c.fail(operationName, jsonOutput, result.CodeConnectionFailed, "could not verify public Hugging Face repository access", nil)
 	}

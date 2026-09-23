@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -110,6 +111,111 @@ func TestInstallHuggingFaceIDUsesCanonicalRepositoryURLAndInspectableJob(t *test
 	}
 	if posts.Load() != 1 || len(got.Jobs) != 1 || got.Jobs[0].JobID != 7 || got.Jobs[0].SourceType != "huggingface" {
 		t.Fatalf("result=%#v posts=%d", got, posts.Load())
+	}
+}
+
+func TestStarterRepositoryDependencyUsesCanonicalURLDespiteLocalPathCollision(t *testing.T) {
+	workingDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workingDir, "sample", "dep"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(workingDir)
+	var submitted []string
+	client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}},"/api/v2/models/starter_models":{"get":{"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/StarterModelResponse"}}}}}}},"/api/v2/models/hugging_face":{"get":{}}}}`))
+		case "/api/v2/models/starter_models":
+			_, _ = w.Write([]byte(`{"starter_models":[{"source":"https://example.org/main.safetensors","is_installed":false,"dependencies":[{"source":"sample/dep","is_installed":false}]}],"starter_bundles":{}}`))
+		case "/api/v2/models/hugging_face":
+			_, _ = w.Write([]byte(`{"urls":["https://huggingface.co/sample/dep/resolve/main/dep.safetensors"],"is_diffusers":false}`))
+		case "/api/v2/models/install":
+			submitted = append(submitted, r.URL.Query().Get("source"))
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":7,"status":"waiting"}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+		}
+	})
+	installer := models.Installer{Backend: client, PublicRepositoryClient: &http.Client{Transport: installTransportFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() != "https://huggingface.co/api/models/sample/dep" {
+			t.Errorf("unexpected public repository check: %s", r.URL)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"gated":false,"private":false}`)), Header: make(http.Header)}, nil
+	})}}
+	got, err := installer.Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "starter", Reference: "https://example.org/main.safetensors"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(submitted, []string{"https://huggingface.co/sample/dep", "https://example.org/main.safetensors"}) || len(got.Jobs) != 2 {
+		t.Fatalf("submitted=%q jobs=%#v", submitted, got.Jobs)
+	}
+}
+
+func TestProtectedStarterDependencyNeedsBothAuthenticationInputsBeforeMutation(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		token string
+		login string
+	}{
+		{name: "missing download token"},
+		{name: "invalid InvokeAI login", token: "download-secret", login: "invalid"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var posts atomic.Int32
+			client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/app/version":
+					_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+				case "/openapi.json":
+					_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}},"/api/v2/models/starter_models":{"get":{"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/StarterModelResponse"}}}}}}},"/api/v2/models/hugging_face":{"get":{}}}}`))
+				case "/api/v2/models/starter_models":
+					_, _ = w.Write([]byte(`{"starter_models":[{"source":"https://example.org/main","is_installed":false,"dependencies":[{"source":"sample/private","is_installed":false}]}],"starter_bundles":{}}`))
+				case "/api/v2/models/hf_login":
+					_, _ = w.Write([]byte(`"` + test.login + `"`))
+				case "/api/v2/models/install":
+					posts.Add(1)
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+				}
+			})
+			installer := models.Installer{Backend: client, PublicRepositoryClient: &http.Client{Transport: installTransportFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusNotFound, Body: http.NoBody, Header: make(http.Header)}, nil
+			})}}
+			_, err := installer.Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "starter", Reference: "https://example.org/main"}, SourceToken: test.token})
+			if _, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); !ok || posts.Load() != 0 || strings.Contains(err.Error(), test.token) && test.token != "" {
+				t.Fatalf("error=%v posts=%d", err, posts.Load())
+			}
+		})
+	}
+}
+
+func TestStarterRepositoryWithoutOneSupportedArtifactFailsBeforeMutation(t *testing.T) {
+	var posts atomic.Int32
+	client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}},"/api/v2/models/starter_models":{"get":{"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/StarterModelResponse"}}}}}}},"/api/v2/models/hugging_face":{"get":{}}}}`))
+		case "/api/v2/models/starter_models":
+			_, _ = w.Write([]byte(`{"starter_models":[{"source":"sample/empty","is_installed":false}],"starter_bundles":{}}`))
+		case "/api/v2/models/hugging_face":
+			_, _ = w.Write([]byte(`{"urls":[],"is_diffusers":false}`))
+		case "/api/v2/models/install":
+			posts.Add(1)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+		}
+	})
+	installer := models.Installer{Backend: client, PublicRepositoryClient: &http.Client{Transport: installTransportFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"gated":false,"private":false}`)), Header: make(http.Header)}, nil
+	})}}
+	_, err := installer.Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "starter", Reference: "sample/empty"}})
+	if _, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); !ok || posts.Load() != 0 {
+		t.Fatalf("error=%v posts=%d", err, posts.Load())
 	}
 }
 

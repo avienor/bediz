@@ -40,7 +40,7 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 	for i, entry := range report.Capabilities {
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
+	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if !slices.Equal(operations, wantOperations) {
 		t.Fatalf("reported operations = %q, want implemented operations %q", operations, wantOperations)
 	}
@@ -62,6 +62,31 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 	}
 	if report.UISync["generate"] != "partial" {
 		t.Fatalf("doctor UI synchronization = %#v, want partial generation", report.UISync)
+	}
+}
+
+func TestDoctorStarterCapabilityRequiresCatalogResponseContract(t *testing.T) {
+	document := openAPIFixture(t)
+	paths := document["paths"].(map[string]any)
+	paths["/api/v2/models/starter_models"].(map[string]any)["get"] = map[string]any{}
+	server := newCustomInvokeAIServer(t, "6.14.1", document, baselineModels)
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := Run(t.Context(), client, version.Info{Version: "test"})
+	var generic, starter *CapabilityReport
+	for i := range report.Capabilities {
+		entry := &report.Capabilities[i]
+		if entry.Operation == result.OperationModelsInstall && entry.Family == "starter" {
+			starter = entry
+		} else if entry.Operation == result.OperationModelsInstall && entry.Family == "" {
+			generic = entry
+		}
+	}
+	if generic == nil || !generic.Compatible || starter == nil || starter.Compatible || !slices.Contains(starter.Failures, "incompatible_starter_catalog_response") {
+		t.Fatalf("generic=%#v starter=%#v", generic, starter)
 	}
 }
 
@@ -965,5 +990,6 @@ func openAPIFixture(t *testing.T) map[string]any {
 	if err := jsonv2.Unmarshal(encoded, &document); err != nil {
 		t.Fatal(err)
 	}
+	document["paths"].(map[string]any)["/api/v2/models/starter_models"] = map[string]any{"get": map[string]any{"responses": map[string]any{"200": map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/StarterModelResponse"}}}}}}}
 	return document
 }
