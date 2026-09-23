@@ -7,16 +7,21 @@ import (
 	"github.com/avienor/bediz/internal/images"
 )
 
-// CompileSDXL creates the tested InvokeAI 6.14.1 tiled SDXL upscale graph.
-func CompileSDXL(resolved Resolution, source images.Reference) (graphops.EnqueueRequest, error) {
+// Compile creates the tested InvokeAI 6.14.1 tiled upscale graph for the
+// resolved main model's family.
+func Compile(resolved Resolution, source images.Reference) (graphops.EnqueueRequest, error) {
 	r := resolved.Request
+	family, ok := familyFor(resolved.Models.Main.Base)
+	if !ok {
+		return graphops.EnqueueRequest{}, fmt.Errorf("compile upscale graph: no tested family for base %q", resolved.Models.Main.Base)
+	}
 	if r.Scale == nil || r.Creativity == nil || r.Structure == nil || r.Steps == nil || r.Scheduler == nil ||
 		r.Guidance == nil || r.Seed == nil || r.TileSize == nil || r.TileOverlap == nil ||
 		resolved.Models.Main.Key == "" || resolved.Models.UpscaleModel.Key == "" || resolved.Models.TileControlNet.Key == "" || source.ImageName == "" {
-		return graphops.EnqueueRequest{}, fmt.Errorf("compile SDXL upscale graph: request, models, and source must be resolved")
+		return graphops.EnqueueRequest{}, fmt.Errorf("compile upscale graph: request, models, and source must be resolved")
 	}
 	if *r.Seed != resolved.Seed {
-		return graphops.EnqueueRequest{}, fmt.Errorf("compile SDXL upscale graph: seed does not match resolution")
+		return graphops.EnqueueRequest{}, fmt.Errorf("compile upscale graph: seed does not match resolution")
 	}
 	model := graphops.Reference(resolved.Models.Main)
 	upscaleModel := graphops.Reference(resolved.Models.UpscaleModel)
@@ -44,9 +49,6 @@ func CompileSDXL(resolved Resolution, source images.Reference) (graphops.Enqueue
 			"steps": *r.Steps, "cfg_scale": *r.Guidance, "scheduler": *r.Scheduler,
 			"denoising_start": denoisingStart, "denoising_end": 1,
 		}),
-		"model_loader":          node("model_loader", "sdxl_model_loader", map[string]any{"model": model}),
-		"positive_conditioning": node("positive_conditioning", "sdxl_compel_prompt", nil),
-		"negative_conditioning": node("negative_conditioning", "sdxl_compel_prompt", nil),
 		"controlnet_1": node("controlnet_1", "controlnet", map[string]any{
 			"control_model": controlModel, "control_weight": firstWeight, "begin_step_percent": 0,
 			"end_step_percent": firstEnd, "control_mode": "balanced", "resize_mode": "just_resize",
@@ -79,15 +81,9 @@ func CompileSDXL(resolved Resolution, source images.Reference) (graphops.Enqueue
 		graphops.Connect("unsharp_mask", "image", "encode", "image"),
 		graphops.Connect("unsharp_mask", "image", "controlnet_1", "image"),
 		graphops.Connect("unsharp_mask", "image", "controlnet_2", "image"),
-		graphops.Connect("model_loader", "clip", "positive_conditioning", "clip"),
-		graphops.Connect("model_loader", "clip2", "positive_conditioning", "clip2"),
-		graphops.Connect("model_loader", "clip", "negative_conditioning", "clip"),
-		graphops.Connect("model_loader", "clip2", "negative_conditioning", "clip2"),
-		graphops.Connect("model_loader", "unet", "denoise", "unet"),
-		graphops.Connect("positive_prompt", "value", "positive_conditioning", "prompt"),
-		graphops.Connect("positive_prompt", "value", "positive_conditioning", "style"),
-		graphops.Connect("negative_prompt", "value", "negative_conditioning", "prompt"),
-		graphops.Connect("negative_prompt", "value", "negative_conditioning", "style"),
+	}
+	edges = append(edges, family.conditioning(model, nodes)...)
+	edges = append(edges,
 		graphops.Connect("noise", "noise", "denoise", "noise"),
 		graphops.Connect("encode", "latents", "denoise", "latents"),
 		graphops.Connect("positive_conditioning", "conditioning", "denoise", "positive_conditioning"),
@@ -102,7 +98,7 @@ func CompileSDXL(resolved Resolution, source images.Reference) (graphops.Enqueue
 		graphops.Connect("autoscale", "width", "metadata", "width"),
 		graphops.Connect("autoscale", "height", "metadata", "height"),
 		graphops.Connect("metadata", "metadata", "decode", "metadata"),
-	}
+	)
 	vaeSource := "model_loader"
 	if resolved.Models.VAE.Key != "" {
 		vae := graphops.Reference(resolved.Models.VAE)
@@ -116,7 +112,7 @@ func CompileSDXL(resolved Resolution, source images.Reference) (graphops.Enqueue
 	)
 	return graphops.EnqueueRequest{Batch: graphops.Batch{
 		Origin: "upscaling", Destination: "gallery",
-		Graph: graphops.Graph{ID: "bediz_sdxl_upscale_v1", Nodes: nodes, Edges: edges},
+		Graph: graphops.Graph{ID: family.graphID, Nodes: nodes, Edges: edges},
 		Data: [][]graphops.BatchDatum{
 			{{NodePath: "seed", FieldName: "value", Items: []uint32{resolved.Seed}}},
 			{

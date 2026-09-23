@@ -635,6 +635,42 @@
             "const": "controlnet"
           }
         }
+      },
+      "MainModelLoaderInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "model": {},
+          "type": {
+            "const": "main_model_loader"
+          }
+        }
+      },
+      "CLIPSkipInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "clip": {},
+          "skipped_layers": {},
+          "type": {
+            "const": "clip_skip"
+          }
+        }
+      },
+      "CompelInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "prompt": {},
+          "clip": {},
+          "mask": {},
+          "type": {
+            "const": "compel"
+          }
+        }
       }
     }
   }

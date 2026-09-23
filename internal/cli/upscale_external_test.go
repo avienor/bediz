@@ -324,7 +324,7 @@ func TestUpscaleResolutionErrorsNeverEnqueue(t *testing.T) {
 		wantKind       string
 		wantCandidates int
 	}{
-		{"non SDXL main", func() []map[string]any { m := upscaleInventory(); m[0]["base"] = "sd-1"; return m }(), "sdxl-main", true, true, result.CodeUnsupportedCapability, "", 0},
+		{"unregistered main family", func() []map[string]any { m := upscaleInventory(); m[0]["base"] = "sd-2"; return m }(), "sdxl-main", true, true, result.CodeUnsupportedCapability, "", 0},
 		{"non normal main", func() []map[string]any { m := upscaleInventory(); m[0]["variant"] = "inpaint"; return m }(), "sdxl-main", true, true, result.CodeUnsupportedCapability, "", 0},
 		{"shared main name", append(upscaleInventory(), map[string]any{"key": "another-main", "hash": "another-hash", "name": "SDXL Main", "base": "sdxl", "type": "main", "variant": "normal"}), "SDXL Main", true, true, result.CodeSelectionRequired, "main_model", 2},
 		{"missing Spandrel", func() []map[string]any {

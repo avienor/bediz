@@ -1,0 +1,542 @@
+{
+  "batch": {
+    "origin": "upscaling",
+    "destination": "gallery",
+    "graph": {
+      "id": "bediz_sd1_upscale_v1",
+      "nodes": {
+        "autoscale": {
+          "fit_to_multiple_of_8": true,
+          "id": "autoscale",
+          "image": {
+            "height": 513,
+            "image_name": "source.png",
+            "width": 513
+          },
+          "image_to_image_model": {
+            "key": "spandrel",
+            "hash": "spandrel-hash",
+            "name": "RealESRGAN",
+            "base": "any",
+            "type": "spandrel_image_to_image"
+          },
+          "is_intermediate": true,
+          "scale": 2,
+          "type": "spandrel_image_to_image_autoscale",
+          "use_cache": true
+        },
+        "control_collection": {
+          "id": "control_collection",
+          "is_intermediate": true,
+          "type": "collect",
+          "use_cache": true
+        },
+        "controlnet_1": {
+          "begin_step_percent": 0,
+          "control_mode": "balanced",
+          "control_model": {
+            "key": "controlnet",
+            "hash": "controlnet-hash",
+            "name": "Tile",
+            "base": "sd-1",
+            "type": "controlnet"
+          },
+          "control_weight": 0.625,
+          "end_step_percent": 0.55,
+          "id": "controlnet_1",
+          "is_intermediate": true,
+          "resize_mode": "just_resize",
+          "type": "controlnet",
+          "use_cache": true
+        },
+        "controlnet_2": {
+          "begin_step_percent": 0.55,
+          "control_mode": "balanced",
+          "control_model": {
+            "key": "controlnet",
+            "hash": "controlnet-hash",
+            "name": "Tile",
+            "base": "sd-1",
+            "type": "controlnet"
+          },
+          "control_weight": 0.21375,
+          "end_step_percent": 0.85,
+          "id": "controlnet_2",
+          "is_intermediate": true,
+          "resize_mode": "just_resize",
+          "type": "controlnet",
+          "use_cache": true
+        },
+        "decode": {
+          "fp32": true,
+          "id": "decode",
+          "is_intermediate": false,
+          "tile_size": 1024,
+          "tiled": true,
+          "type": "l2i",
+          "use_cache": true
+        },
+        "denoise": {
+          "cfg_scale": 2,
+          "denoising_end": 1,
+          "denoising_start": 0.49900000000000005,
+          "id": "denoise",
+          "is_intermediate": true,
+          "scheduler": "kdpm_2",
+          "steps": 30,
+          "tile_height": 1024,
+          "tile_overlap": 128,
+          "tile_width": 1024,
+          "type": "tiled_multi_diffusion_denoise_latents",
+          "use_cache": true
+        },
+        "encode": {
+          "fp32": true,
+          "id": "encode",
+          "is_intermediate": true,
+          "tile_size": 1024,
+          "tiled": true,
+          "type": "i2l",
+          "use_cache": true
+        },
+        "metadata": {
+          "cfg_scale": 2,
+          "creativity": 0,
+          "id": "metadata",
+          "is_intermediate": true,
+          "model": {
+            "key": "main",
+            "hash": "main-hash",
+            "name": "SD1.5",
+            "base": "sd-1",
+            "type": "main"
+          },
+          "scheduler": "kdpm_2",
+          "steps": 30,
+          "structure": 0,
+          "tile_overlap": 128,
+          "tile_size": 1024,
+          "type": "core_metadata",
+          "upscale_initial_image": {
+            "height": 513,
+            "image_name": "source.png",
+            "width": 513
+          },
+          "upscale_model": {
+            "key": "spandrel",
+            "hash": "spandrel-hash",
+            "name": "RealESRGAN",
+            "base": "any",
+            "type": "spandrel_image_to_image"
+          },
+          "upscale_scale": 2,
+          "use_cache": true,
+          "vae": {
+            "key": "vae",
+            "hash": "vae-hash",
+            "name": "Override",
+            "base": "sd-1",
+            "type": "vae"
+          }
+        },
+        "model_loader": {
+          "id": "model_loader",
+          "is_intermediate": true,
+          "model": {
+            "key": "main",
+            "hash": "main-hash",
+            "name": "SD1.5",
+            "base": "sd-1",
+            "type": "main"
+          },
+          "type": "main_model_loader",
+          "use_cache": true
+        },
+        "negative_conditioning": {
+          "id": "negative_conditioning",
+          "is_intermediate": true,
+          "type": "compel",
+          "use_cache": true
+        },
+        "negative_prompt": {
+          "id": "negative_prompt",
+          "is_intermediate": true,
+          "type": "string",
+          "use_cache": true
+        },
+        "noise": {
+          "id": "noise",
+          "is_intermediate": true,
+          "type": "noise",
+          "use_cache": true
+        },
+        "positive_conditioning": {
+          "id": "positive_conditioning",
+          "is_intermediate": true,
+          "type": "compel",
+          "use_cache": true
+        },
+        "positive_prompt": {
+          "id": "positive_prompt",
+          "is_intermediate": true,
+          "type": "string",
+          "use_cache": true
+        },
+        "seed": {
+          "id": "seed",
+          "is_intermediate": true,
+          "type": "integer",
+          "use_cache": true
+        },
+        "unsharp_mask": {
+          "id": "unsharp_mask",
+          "is_intermediate": true,
+          "radius": 2,
+          "strength": 60,
+          "type": "unsharp_mask",
+          "use_cache": true
+        },
+        "vae_loader": {
+          "id": "vae_loader",
+          "is_intermediate": true,
+          "type": "vae_loader",
+          "use_cache": true,
+          "vae_model": {
+            "key": "vae",
+            "hash": "vae-hash",
+            "name": "Override",
+            "base": "sd-1",
+            "type": "vae"
+          }
+        },
+        "clip_skip": {
+          "id": "clip_skip",
+          "is_intermediate": true,
+          "skipped_layers": 0,
+          "type": "clip_skip",
+          "use_cache": true
+        }
+      },
+      "edges": [
+        {
+          "source": {
+            "node_id": "autoscale",
+            "field": "image"
+          },
+          "destination": {
+            "node_id": "unsharp_mask",
+            "field": "image"
+          }
+        },
+        {
+          "source": {
+            "node_id": "unsharp_mask",
+            "field": "width"
+          },
+          "destination": {
+            "node_id": "noise",
+            "field": "width"
+          }
+        },
+        {
+          "source": {
+            "node_id": "unsharp_mask",
+            "field": "height"
+          },
+          "destination": {
+            "node_id": "noise",
+            "field": "height"
+          }
+        },
+        {
+          "source": {
+            "node_id": "seed",
+            "field": "value"
+          },
+          "destination": {
+            "node_id": "noise",
+            "field": "seed"
+          }
+        },
+        {
+          "source": {
+            "node_id": "unsharp_mask",
+            "field": "image"
+          },
+          "destination": {
+            "node_id": "encode",
+            "field": "image"
+          }
+        },
+        {
+          "source": {
+            "node_id": "unsharp_mask",
+            "field": "image"
+          },
+          "destination": {
+            "node_id": "controlnet_1",
+            "field": "image"
+          }
+        },
+        {
+          "source": {
+            "node_id": "unsharp_mask",
+            "field": "image"
+          },
+          "destination": {
+            "node_id": "controlnet_2",
+            "field": "image"
+          }
+        },
+        {
+          "source": {
+            "node_id": "model_loader",
+            "field": "clip"
+          },
+          "destination": {
+            "node_id": "clip_skip",
+            "field": "clip"
+          }
+        },
+        {
+          "source": {
+            "node_id": "clip_skip",
+            "field": "clip"
+          },
+          "destination": {
+            "node_id": "positive_conditioning",
+            "field": "clip"
+          }
+        },
+        {
+          "source": {
+            "node_id": "clip_skip",
+            "field": "clip"
+          },
+          "destination": {
+            "node_id": "negative_conditioning",
+            "field": "clip"
+          }
+        },
+        {
+          "source": {
+            "node_id": "model_loader",
+            "field": "unet"
+          },
+          "destination": {
+            "node_id": "denoise",
+            "field": "unet"
+          }
+        },
+        {
+          "source": {
+            "node_id": "positive_prompt",
+            "field": "value"
+          },
+          "destination": {
+            "node_id": "positive_conditioning",
+            "field": "prompt"
+          }
+        },
+        {
+          "source": {
+            "node_id": "negative_prompt",
+            "field": "value"
+          },
+          "destination": {
+            "node_id": "negative_conditioning",
+            "field": "prompt"
+          }
+        },
+        {
+          "source": {
+            "node_id": "noise",
+            "field": "noise"
+          },
+          "destination": {
+            "node_id": "denoise",
+            "field": "noise"
+          }
+        },
+        {
+          "source": {
+            "node_id": "encode",
+            "field": "latents"
+          },
+          "destination": {
+            "node_id": "denoise",
+            "field": "latents"
+          }
+        },
+        {
+          "source": {
+            "node_id": "positive_conditioning",
+            "field": "conditioning"
+          },
+          "destination": {
+            "node_id": "denoise",
+            "field": "positive_conditioning"
+          }
+        },
+        {
+          "source": {
+            "node_id": "negative_conditioning",
+            "field": "conditioning"
+          },
+          "destination": {
+            "node_id": "denoise",
+            "field": "negative_conditioning"
+          }
+        },
+        {
+          "source": {
+            "node_id": "denoise",
+            "field": "latents"
+          },
+          "destination": {
+            "node_id": "decode",
+            "field": "latents"
+          }
+        },
+        {
+          "source": {
+            "node_id": "controlnet_1",
+            "field": "control"
+          },
+          "destination": {
+            "node_id": "control_collection",
+            "field": "item"
+          }
+        },
+        {
+          "source": {
+            "node_id": "controlnet_2",
+            "field": "control"
+          },
+          "destination": {
+            "node_id": "control_collection",
+            "field": "item"
+          }
+        },
+        {
+          "source": {
+            "node_id": "control_collection",
+            "field": "collection"
+          },
+          "destination": {
+            "node_id": "denoise",
+            "field": "control"
+          }
+        },
+        {
+          "source": {
+            "node_id": "positive_prompt",
+            "field": "value"
+          },
+          "destination": {
+            "node_id": "metadata",
+            "field": "positive_prompt"
+          }
+        },
+        {
+          "source": {
+            "node_id": "negative_prompt",
+            "field": "value"
+          },
+          "destination": {
+            "node_id": "metadata",
+            "field": "negative_prompt"
+          }
+        },
+        {
+          "source": {
+            "node_id": "seed",
+            "field": "value"
+          },
+          "destination": {
+            "node_id": "metadata",
+            "field": "seed"
+          }
+        },
+        {
+          "source": {
+            "node_id": "autoscale",
+            "field": "width"
+          },
+          "destination": {
+            "node_id": "metadata",
+            "field": "width"
+          }
+        },
+        {
+          "source": {
+            "node_id": "autoscale",
+            "field": "height"
+          },
+          "destination": {
+            "node_id": "metadata",
+            "field": "height"
+          }
+        },
+        {
+          "source": {
+            "node_id": "metadata",
+            "field": "metadata"
+          },
+          "destination": {
+            "node_id": "decode",
+            "field": "metadata"
+          }
+        },
+        {
+          "source": {
+            "node_id": "vae_loader",
+            "field": "vae"
+          },
+          "destination": {
+            "node_id": "encode",
+            "field": "vae"
+          }
+        },
+        {
+          "source": {
+            "node_id": "vae_loader",
+            "field": "vae"
+          },
+          "destination": {
+            "node_id": "decode",
+            "field": "vae"
+          }
+        }
+      ]
+    },
+    "data": [
+      [
+        {
+          "node_path": "seed",
+          "field_name": "value",
+          "items": [
+            42
+          ]
+        }
+      ],
+      [
+        {
+          "node_path": "positive_prompt",
+          "field_name": "value",
+          "items": [
+            "mountain landscape"
+          ]
+        },
+        {
+          "node_path": "negative_prompt",
+          "field_name": "value",
+          "items": [
+            "text"
+          ]
+        }
+      ]
+    ],
+    "runs": 1
+  }
+}

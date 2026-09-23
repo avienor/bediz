@@ -40,7 +40,7 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 	for i, entry := range report.Capabilities {
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "generate", "generate", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
+	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if !slices.Equal(operations, wantOperations) {
 		t.Fatalf("reported operations = %q, want implemented operations %q", operations, wantOperations)
 	}
@@ -52,8 +52,8 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 			t.Fatalf("invocation check failed: %#v", invocation)
 		}
 	}
-	if len(report.Models.Requirements) != 11 {
-		t.Fatalf("model requirements count = %d, want 11", len(report.Models.Requirements))
+	if len(report.Models.Requirements) != 13 {
+		t.Fatalf("model requirements count = %d, want 13", len(report.Models.Requirements))
 	}
 	for _, requirement := range report.Models.Requirements {
 		if !requirement.Satisfied {
@@ -920,6 +920,65 @@ func TestDoctorReportsSDXLUpscaleOnlyWithTestedRequirements(t *testing.T) {
 	}
 }
 
+func TestDoctorReportsSD1UpscaleOnlyWithTestedRequirements(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		edit    func(map[string]any, *[]map[string]string)
+		failure string
+	}{
+		{"ready", func(map[string]any, *[]map[string]string) {}, ""},
+		{"non-normal main", func(_ map[string]any, models *[]map[string]string) {
+			index := slices.IndexFunc(*models, func(model map[string]string) bool { return model["key"] == "sd1" })
+			(*models)[index] = maps.Clone((*models)[index])
+			(*models)[index]["variant"] = "inpaint"
+		}, "missing_component:SD1.5 normal main model"},
+		{"missing Spandrel", func(_ map[string]any, models *[]map[string]string) {
+			*models = slices.DeleteFunc(*models, func(model map[string]string) bool { return model["key"] == "upscale" })
+		}, "missing_component:Spandrel upscale model"},
+		{"only SDXL ControlNet", func(_ map[string]any, models *[]map[string]string) {
+			*models = slices.DeleteFunc(*models, func(model map[string]string) bool { return model["key"] == "sd1-tile" })
+		}, "missing_component:SD1.5 ControlNet"},
+		{"missing clip skip", func(document map[string]any, _ *[]map[string]string) {
+			delete(document["components"].(map[string]any)["schemas"].(map[string]any), "CLIPSkipInvocation")
+		}, "incompatible_invocation:clip_skip"},
+		{"missing compel", func(document map[string]any, _ *[]map[string]string) {
+			delete(document["components"].(map[string]any)["schemas"].(map[string]any), "CompelInvocation")
+		}, "incompatible_invocation:compel"},
+		{"missing main loader", func(document map[string]any, _ *[]map[string]string) {
+			delete(document["components"].(map[string]any)["schemas"].(map[string]any), "MainModelLoaderInvocation")
+		}, "incompatible_invocation:main_model_loader"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			document := openAPIFixture(t)
+			models := slices.Clone(baselineModels)
+			test.edit(document, &models)
+			server := newCustomInvokeAIServer(t, "6.14.1", document, models)
+			defer server.Close()
+			client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			report := Run(t.Context(), client, version.Info{Version: "test"})
+			var sd1, sdxl *CapabilityReport
+			for index, entry := range report.Capabilities {
+				if entry.Operation == result.OperationUpscale && entry.Family == "sd-1" {
+					sd1 = &report.Capabilities[index]
+				}
+				if entry.Operation == result.OperationUpscale && entry.Family == "sdxl" {
+					sdxl = &report.Capabilities[index]
+				}
+			}
+			if sd1 == nil || sd1.Compatible != (test.failure == "") || sd1.UISync != "" || (test.failure != "" && !slices.Contains(sd1.Failures, test.failure)) {
+				t.Fatalf("upscale/sd-1 capability = %#v", sd1)
+			}
+			sdxlAffected := test.name == "missing Spandrel"
+			if sdxl == nil || sdxl.Compatible == sdxlAffected {
+				t.Fatalf("upscale/sdxl capability = %#v", sdxl)
+			}
+		})
+	}
+}
+
 func TestDoctorReportsMissingRecallRequirementsSeparatelyFromDirectExecution(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -1061,6 +1120,8 @@ var baselineModels = []map[string]string{
 	{"key": "sdxl", "hash": "blake3:sdxl", "name": "SDXL", "base": "sdxl", "type": "main", "format": "diffusers", "variant": "normal"},
 	{"key": "upscale", "hash": "blake3:upscale", "name": "RealESRGAN x4plus", "base": "any", "type": "spandrel_image_to_image", "format": "checkpoint"},
 	{"key": "tile", "hash": "blake3:tile", "name": "Tile", "base": "sdxl", "type": "controlnet", "format": "diffusers"},
+	{"key": "sd1", "hash": "blake3:sd1", "name": "Dreamshaper 8", "base": "sd-1", "type": "main", "format": "diffusers", "variant": "normal"},
+	{"key": "sd1-tile", "hash": "blake3:sd1-tile", "name": "Tile", "base": "sd-1", "type": "controlnet", "format": "diffusers"},
 }
 
 func TestDoctorFLUXMainRequirementUsesVariantAndFormat(t *testing.T) {

@@ -43,33 +43,72 @@ func TestSDXLGraphMatchesVersionedEnqueueFixtures(t *testing.T) {
 			}
 			resolvedRequest := request
 			resolvedRequest.BoardID = test.board
-			actual, err := upscale.CompileSDXL(upscale.Resolution{Request: resolvedRequest, Models: resolvedModels, Seed: 42}, images.Reference{ImageName: "source.png", Width: 513, Height: 513})
+			actual, err := upscale.Compile(upscale.Resolution{Request: resolvedRequest, Models: resolvedModels, Seed: 42}, images.Reference{ImageName: "source.png", Width: 513, Height: 513})
 			if err != nil {
 				t.Fatal(err)
 			}
-			encoded, err := json.Marshal(actual)
-			if err != nil {
-				t.Fatal(err)
-			}
-			golden, err := os.ReadFile("testdata/" + test.name)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var got, want any
-			if err := json.Unmarshal(encoded, &got); err != nil {
-				t.Fatal(err)
-			}
-			if err := json.Unmarshal(golden, &want); err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(got, want) {
-				t.Fatalf("compiled enqueue differs from %s", test.name)
-			}
+			assertMatchesFixture(t, actual, test.name)
 		})
 	}
 }
 
-func TestSDXLInvocationVocabularyMatchesInvokeAI614Fixture(t *testing.T) {
+// These payloads record the no-LoRA SD1.5 branch of the installed stock
+// InvokeAI 6.14.1 Upscale builder with the bundled VAE and a VAE override.
+func TestSD1GraphMatchesVersionedEnqueueFixtures(t *testing.T) {
+	models := upscale.Models{
+		Main:           graphops.ModelIdentifier{Key: "main", Hash: "main-hash", Name: "SD1.5", Base: "sd-1", Type: "main", Variant: "normal"},
+		UpscaleModel:   graphops.ModelIdentifier{Key: "spandrel", Hash: "spandrel-hash", Name: "RealESRGAN", Base: "any", Type: "spandrel_image_to_image"},
+		TileControlNet: graphops.ModelIdentifier{Key: "controlnet", Hash: "controlnet-hash", Name: "Tile", Base: "sd-1", Type: "controlnet"},
+	}
+	request := upscale.Request{
+		SchemaVersion: 1, Source: upscale.Source{Type: "image", Reference: "source.png"}, Model: "main",
+		PositivePrompt: "mountain landscape", NegativePrompt: "text", Scale: new(2), Creativity: new(0), Structure: new(0),
+		Steps: new(30), Scheduler: new("kdpm_2"), Guidance: new(2.0), Seed: new(uint32(42)), TileSize: new(1024), TileOverlap: new(128),
+	}
+	for _, test := range []struct {
+		name string
+		vae  bool
+	}{
+		{name: "sd1_6_14_enqueue.json"},
+		{name: "sd1_6_14_vae_enqueue.json", vae: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			resolvedModels := models
+			if test.vae {
+				resolvedModels.VAE = graphops.ModelIdentifier{Key: "vae", Hash: "vae-hash", Name: "Override", Base: "sd-1", Type: "vae"}
+			}
+			actual, err := upscale.Compile(upscale.Resolution{Request: request, Models: resolvedModels, Seed: 42}, images.Reference{ImageName: "source.png", Width: 513, Height: 513})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertMatchesFixture(t, actual, test.name)
+		})
+	}
+}
+
+func assertMatchesFixture(t *testing.T, actual graphops.EnqueueRequest, name string) {
+	t.Helper()
+	encoded, err := json.Marshal(actual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden, err := os.ReadFile("testdata/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got, want any
+	if err := json.Unmarshal(encoded, &got); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(golden, &want); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("compiled enqueue differs from %s", name)
+	}
+}
+
+func TestUpscaleInvocationVocabulariesMatchInvokeAI614Fixture(t *testing.T) {
 	document, err := os.ReadFile("../doctor/testdata/invokeai_6_14_anima_openapi.json")
 	if err != nil {
 		t.Fatal(err)
@@ -86,8 +125,10 @@ func TestSDXLInvocationVocabularyMatchesInvokeAI614Fixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := graphops.CheckInvocations(t.Context(), client, capability.SDXLUpscaleEntry().Invocations); err != nil {
-		t.Fatal(err)
+	for _, entry := range []capability.Entry{capability.SDXLUpscaleEntry(), capability.SD1UpscaleEntry()} {
+		if err := graphops.CheckInvocations(t.Context(), client, entry.Invocations); err != nil {
+			t.Fatalf("%s: %v", entry.Family, err)
+		}
 	}
 	var vocabulary struct {
 		Components struct {

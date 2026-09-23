@@ -55,14 +55,14 @@ func (c *CLI) newUpscaleCommand(exitCode *int, jsonOutput *bool) *cobra.Command 
 	command.Flags().BoolVar(&options.noWait, "no-wait", false, "return after InvokeAI accepts the request")
 	command.Flags().StringVar(&options.image, "image", "", "existing InvokeAI image name")
 	command.Flags().StringVar(&options.imagePath, "image-path", "", "local source image path (not supported yet)")
-	command.Flags().StringVar(&options.model, "model", "", "SDXL main model key or unique name")
+	command.Flags().StringVar(&options.model, "model", "", "SD1.5 or SDXL main model key or unique name")
 	command.Flags().StringVar(&options.prompt, "prompt", "", "positive prompt")
 	command.Flags().StringVar(&options.negativePrompt, "negative-prompt", "", "negative prompt")
 	command.Flags().IntVar(&options.scale, "scale", 0, "upscale factor: 2, 4, or 8")
 	command.Flags().IntVar(&options.creativity, "creativity", 0, "creativity from -10 to 10")
 	command.Flags().IntVar(&options.structure, "structure", 0, "structure from -10 to 10")
 	command.Flags().IntVar(&options.steps, "steps", 0, "denoising steps")
-	command.Flags().StringVar(&options.scheduler, "scheduler", "", "SDXL scheduler")
+	command.Flags().StringVar(&options.scheduler, "scheduler", "", "scheduler")
 	command.Flags().Float64Var(&options.guidance, "guidance", 0, "CFG scale")
 	command.Flags().Uint32Var(&options.seed, "seed", 0, "upscale seed")
 	command.Flags().IntVar(&options.tileSize, "tile-size", 0, "tile size")
@@ -70,7 +70,7 @@ func (c *CLI) newUpscaleCommand(exitCode *int, jsonOutput *bool) *cobra.Command 
 	command.Flags().StringVar(&options.boardID, "board", "", "exact output board id")
 	command.Flags().StringVar(&options.upscaleModel, "upscale-model", "", "Spandrel upscale model key or unique name")
 	command.Flags().StringVar(&options.tileControlNet, "tile-controlnet", "", "Tile ControlNet key or unique name")
-	command.Flags().StringVar(&options.vae, "vae", "", "SDXL VAE key or unique name")
+	command.Flags().StringVar(&options.vae, "vae", "", "VAE key or unique name matching the main model base")
 	return command
 }
 

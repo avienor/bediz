@@ -256,11 +256,11 @@ func TestCompileSDXLUsesStockTiledGraphAndFormulas(t *testing.T) {
 		{Key: "spandrel", Name: "RealESRGAN", Hash: "spandrel-hash", Base: "any", Type: "spandrel_image_to_image"},
 		{Key: "controlnet", Name: "Tile", Hash: "controlnet-hash", Base: "sdxl", Type: "controlnet"},
 	}
-	resolved, err := upscale.ResolveSDXL(request, inventory, bytes.NewReader(nil))
+	resolved, err := upscale.Resolve(request, inventory, bytes.NewReader(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	graphRequest, err := upscale.CompileSDXL(resolved, images.Reference{ImageName: "source.png", Width: 513, Height: 513})
+	graphRequest, err := upscale.Compile(resolved, images.Reference{ImageName: "source.png", Width: 513, Height: 513})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ func TestCompileSDXLUsesStockTiledGraphAndFormulas(t *testing.T) {
 	}
 	resolved.Request.BoardID = "board-7"
 	resolved.Models.VAE = graphops.ModelIdentifier{Key: "vae", Name: "Override", Hash: "vae-hash", Base: "sdxl", Type: "vae"}
-	withVAE, err := upscale.CompileSDXL(resolved, images.Reference{ImageName: "source.png", Width: 513, Height: 513})
+	withVAE, err := upscale.Compile(resolved, images.Reference{ImageName: "source.png", Width: 513, Height: 513})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,13 +353,13 @@ func TestResolveSDXLRequiresCallerToChooseTileControlNet(t *testing.T) {
 		{Key: "spandrel", Name: "RealESRGAN", Hash: "spandrel-hash", Base: "any", Type: "spandrel_image_to_image"},
 		{Key: "controlnet", Name: "Tile", Hash: "controlnet-hash", Base: "sdxl", Type: "controlnet"},
 	}
-	_, err := upscale.ResolveSDXL(request, inventory, bytes.NewReader(nil))
+	_, err := upscale.Resolve(request, inventory, bytes.NewReader(nil))
 	selection, ok := errors.AsType[*operation.SelectionRequiredError](err)
 	if !ok || selection.Kind != "tile_controlnet" || selection.Selector != "" || len(selection.Candidates) != 1 || selection.Candidates[0].Key != "controlnet" {
 		t.Fatalf("selection = %#v, error = %v", selection, err)
 	}
 	request.Components = &upscale.Components{TileControlNet: new("controlnet")}
-	resolved, err := upscale.ResolveSDXL(request, inventory, bytes.NewReader(nil))
+	resolved, err := upscale.Resolve(request, inventory, bytes.NewReader(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,26 +374,26 @@ func TestResolveSDXLReportsComponentChoicesAndUnsupportedMain(t *testing.T) {
 	spandrelB := graphops.ModelIdentifier{Key: "spandrel-b", Name: "Upscaler B", Hash: "b", Base: "any", Type: "spandrel_image_to_image"}
 	tile := graphops.ModelIdentifier{Key: "tile", Name: "Tile", Hash: "tile-hash", Base: "sdxl", Type: "controlnet"}
 	request := upscale.Request{SchemaVersion: 1, Source: upscale.Source{Type: "image", Reference: "source.png"}, Model: "main", Seed: new(uint32(7)), Components: &upscale.Components{TileControlNet: new("tile")}}
-	_, err := upscale.ResolveSDXL(request, []graphops.ModelIdentifier{main, spandrelB, tile, spandrelA}, bytes.NewReader(nil))
+	_, err := upscale.Resolve(request, []graphops.ModelIdentifier{main, spandrelB, tile, spandrelA}, bytes.NewReader(nil))
 	choice, ok := errors.AsType[*operation.SelectionRequiredError](err)
 	if !ok || choice.Kind != "upscale_model" || len(choice.Candidates) != 2 || choice.Candidates[0].Key != "spandrel-a" || choice.Candidates[1].Key != "spandrel-b" {
 		t.Fatalf("ambiguous Spandrel choice = %#v, error = %v", choice, err)
 	}
-	_, err = upscale.ResolveSDXL(request, []graphops.ModelIdentifier{main, tile}, bytes.NewReader(nil))
+	_, err = upscale.Resolve(request, []graphops.ModelIdentifier{main, tile}, bytes.NewReader(nil))
 	missing, ok := errors.AsType[*operation.MissingComponentError](err)
 	if !ok || missing.ComponentType != "upscale_model" || missing.InstallationGuidance != "install the RealESRGAN_x4plus starter" {
 		t.Fatalf("missing Spandrel = %#v, error = %v", missing, err)
 	}
 	request.Components.UpscaleModel = new("spandrel-a")
 	wrongBase := main
-	wrongBase.Base = "sd-1"
-	_, err = upscale.ResolveSDXL(request, []graphops.ModelIdentifier{wrongBase, spandrelA, tile}, bytes.NewReader(nil))
+	wrongBase.Base = "sd-2"
+	_, err = upscale.Resolve(request, []graphops.ModelIdentifier{wrongBase, spandrelA, tile}, bytes.NewReader(nil))
 	if _, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); !ok {
 		t.Fatalf("wrong main base error = %v", err)
 	}
 	wrongVariant := main
 	wrongVariant.Variant = "inpaint"
-	_, err = upscale.ResolveSDXL(request, []graphops.ModelIdentifier{wrongVariant, spandrelA, tile}, bytes.NewReader(nil))
+	_, err = upscale.Resolve(request, []graphops.ModelIdentifier{wrongVariant, spandrelA, tile}, bytes.NewReader(nil))
 	if _, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); !ok {
 		t.Fatalf("wrong main variant error = %v", err)
 	}
@@ -401,7 +401,7 @@ func TestResolveSDXLReportsComponentChoicesAndUnsupportedMain(t *testing.T) {
 	wrongTile := tile
 	wrongTile.Key = "other-base"
 	wrongTile.Base = "sd-1"
-	_, err = upscale.ResolveSDXL(request, []graphops.ModelIdentifier{main, spandrelA, wrongTile}, bytes.NewReader(nil))
+	_, err = upscale.Resolve(request, []graphops.ModelIdentifier{main, spandrelA, wrongTile}, bytes.NewReader(nil))
 	if _, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); !ok {
 		t.Fatalf("wrong tile base error = %v", err)
 	}

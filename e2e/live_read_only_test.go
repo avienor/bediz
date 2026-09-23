@@ -291,6 +291,8 @@ func TestLiveGate(t *testing.T) {
 	var sdxlMain string
 	var upscaleModel string
 	var tileControlNet string
+	var sd1Main string
+	var sd1TileControlNet string
 	var fluxSchnell string
 
 	if !t.Run("doctor verifies the supported baseline", func(t *testing.T) {
@@ -340,6 +342,10 @@ func TestLiveGate(t *testing.T) {
 				upscaleModel = firstKey(upscaleModel, model.Key)
 			case model.Base == "sdxl" && model.Type == "controlnet":
 				tileControlNet = firstKey(tileControlNet, model.Key)
+			case model.Base == "sd-1" && model.Type == "main" && model.Variant == "normal":
+				sd1Main = firstKey(sd1Main, model.Key)
+			case model.Base == "sd-1" && model.Type == "controlnet":
+				sd1TileControlNet = firstKey(sd1TileControlNet, model.Key)
 			case model.Base == "flux" && model.Type == "main" && model.Variant == "schnell" && capability.SupportsFLUXMain(model.Variant, model.Format):
 				fluxSchnell = firstKey(fluxSchnell, model.Key)
 			}
@@ -350,6 +356,9 @@ func TestLiveGate(t *testing.T) {
 		if sdxlMain == "" || upscaleModel == "" || tileControlNet == "" {
 			t.Fatalf("doctor did not report exact SDXL upscale model keys: main=%q spandrel=%q controlnet=%q", sdxlMain, upscaleModel, tileControlNet)
 		}
+		if sd1Main == "" || sd1TileControlNet == "" {
+			t.Fatalf("doctor did not report exact SD1.5 upscale model keys: main=%q controlnet=%q", sd1Main, sd1TileControlNet)
+		}
 		if fluxSchnell == "" {
 			t.Fatal("doctor did not report an exact FLUX.1 schnell main model key")
 		}
@@ -358,9 +367,10 @@ func TestLiveGate(t *testing.T) {
 				t.Errorf("doctor returned an unsatisfied or incomplete model requirement: %#v", requirement)
 			}
 		}
-		wantOperations := []string{"auth.huggingface.login", "auth.huggingface.logout", "auth.huggingface.status", "generate", "generate", "generate", "images.get", "images.list", "images.upload", "models.install", "models.install", "models.list", "models.status", "queue.get", "queue.list", "recall", "upscale"}
+		wantOperations := []string{"auth.huggingface.login", "auth.huggingface.logout", "auth.huggingface.status", "generate", "generate", "generate", "images.get", "images.list", "images.upload", "models.install", "models.install", "models.list", "models.status", "queue.get", "queue.list", "recall", "upscale", "upscale"}
 		operations := make([]string, 0, len(data.Capabilities))
 		generateFamilies := map[string]bool{}
+		upscaleFamilies := map[string]bool{}
 		for _, capability := range data.Capabilities {
 			if capability.Compatible == nil || !*capability.Compatible || capability.Failures == nil || len(capability.Failures) != 0 {
 				t.Errorf("doctor reported an incompatible capability: %#v", capability)
@@ -372,9 +382,15 @@ func TestLiveGate(t *testing.T) {
 					t.Errorf("generate ui_sync = %q, want partial", capability.UISync)
 				}
 			}
-			if capability.Operation == "upscale" && (capability.Family != "sdxl" || capability.UISync != "") {
-				t.Errorf("upscale capability = %#v, want SDXL without UI synchronization", capability)
+			if capability.Operation == "upscale" {
+				upscaleFamilies[capability.Family] = true
+				if capability.UISync != "" {
+					t.Errorf("upscale capability = %#v, want no UI synchronization", capability)
+				}
 			}
+		}
+		if !upscaleFamilies["sdxl"] || !upscaleFamilies["sd-1"] || len(upscaleFamilies) != 2 {
+			t.Errorf("doctor upscale families = %#v, want SDXL and SD1.5", upscaleFamilies)
 		}
 		if !generateFamilies["anima"] || !generateFamilies["sdxl"] || !generateFamilies["flux"] || len(generateFamilies) != 3 {
 			t.Errorf("doctor generate families = %#v, want Anima, SDXL, and FLUX.1", generateFamilies)
@@ -631,35 +647,12 @@ func TestLiveGate(t *testing.T) {
 		return
 	}
 	if !t.Run("SDXL upscale produces a verified receipt and self-cleans", func(t *testing.T) {
-		const testSeed uint32 = 45
-		fixture := writeUniquePNGSize(t, 512)
-		upload := runJSONCommand(t, binary, target, "images", "upload", fixture.Path)
-		assertSuccessEnvelope(t, upload, "images.upload")
-		var source imageResultData
-		unmarshalData(t, upload.Data, &source)
-		if source.Image.ImageName == "" || source.Image.Width != 512 || source.Image.Height != 512 {
-			t.Fatalf("upscale source upload = %#v", source)
-		}
-		t.Logf("upscale source cleanup evidence: image_name=%q", source.Image.ImageName)
-		t.Cleanup(func() {
-			deleteBackendImage(t, target, source.Image.ImageName)
-			assertImageRemoved(t, binary, target, source.Image.ImageName)
-		})
-		envelope := runJSONCommand(t, binary, target, "upscale", "--image", source.Image.ImageName,
-			"--model", sdxlMain, "--upscale-model", upscaleModel, "--tile-controlnet", tileControlNet,
-			"--scale", "2", "--steps", "4", "--tile-size", "512", "--seed", strconv.FormatUint(uint64(testSeed), 10), "--timeout", "10m")
-		registerGeneratedImageCleanup(t, binary, target, envelope.Data)
-		assertSuccessEnvelope(t, envelope, "upscale")
-		var receipt upscaleExecutionReceiptData
-		unmarshalData(t, envelope.Data, &receipt)
-		if receipt.SourceUploaded || receipt.SourceImage.ImageName != source.Image.ImageName ||
-			receipt.ResolvedSettings.Scale != 2 || receipt.ResolvedSettings.OutputWidth != 1024 || receipt.ResolvedSettings.OutputHeight != 1024 ||
-			receipt.ResolvedSettings.ModelKey != sdxlMain || !reflect.DeepEqual(receipt.ResolvedSettings.ComponentKeys, map[string]string{"upscale_model": upscaleModel, "tile_controlnet": tileControlNet}) ||
-			!slices.Equal(receipt.ResolvedSettings.Seeds, []uint32{testSeed}) || receipt.Queue.QueueID != "default" || receipt.Queue.BatchID == "" || len(receipt.Queue.ItemIDs) != 1 ||
-			len(receipt.Outputs) != 1 || receipt.Outputs[0].ItemID != receipt.Queue.ItemIDs[0] || receipt.Outputs[0].Seed != testSeed || len(receipt.Warnings) != 0 {
-			t.Fatalf("upscale receipt = %#v", receipt)
-		}
-		assertGeneratedImageReference(t, target, receipt.Outputs[0].Image, 1024, 1024)
+		runLiveUpscale(t, binary, target, sdxlMain, upscaleModel, tileControlNet, 45)
+	}) {
+		return
+	}
+	if !t.Run("SD1.5 upscale produces a verified receipt and self-cleans", func(t *testing.T) {
+		runLiveUpscale(t, binary, target, sd1Main, upscaleModel, sd1TileControlNet, 46)
 	}) {
 		return
 	}
@@ -780,6 +773,40 @@ func assertAccessibleImageURL(t *testing.T, target, field, rawURL string) {
 	if len(content) == 0 {
 		t.Fatalf("generated image %s returned an empty body", field)
 	}
+}
+
+// runLiveUpscale upscales a unique uploaded 512 × 512 source at scale 2 and
+// verifies the receipt and output before removing both images.
+func runLiveUpscale(t *testing.T, binary, target, mainModel, upscaleModel, tileControlNet string, testSeed uint32) {
+	t.Helper()
+	fixture := writeUniquePNGSize(t, 512)
+	upload := runJSONCommand(t, binary, target, "images", "upload", fixture.Path)
+	assertSuccessEnvelope(t, upload, "images.upload")
+	var source imageResultData
+	unmarshalData(t, upload.Data, &source)
+	if source.Image.ImageName == "" || source.Image.Width != 512 || source.Image.Height != 512 {
+		t.Fatalf("upscale source upload = %#v", source)
+	}
+	t.Logf("upscale source cleanup evidence: image_name=%q", source.Image.ImageName)
+	t.Cleanup(func() {
+		deleteBackendImage(t, target, source.Image.ImageName)
+		assertImageRemoved(t, binary, target, source.Image.ImageName)
+	})
+	envelope := runJSONCommand(t, binary, target, "upscale", "--image", source.Image.ImageName,
+		"--model", mainModel, "--upscale-model", upscaleModel, "--tile-controlnet", tileControlNet,
+		"--scale", "2", "--steps", "4", "--tile-size", "512", "--seed", strconv.FormatUint(uint64(testSeed), 10), "--timeout", "10m")
+	registerGeneratedImageCleanup(t, binary, target, envelope.Data)
+	assertSuccessEnvelope(t, envelope, "upscale")
+	var receipt upscaleExecutionReceiptData
+	unmarshalData(t, envelope.Data, &receipt)
+	if receipt.SourceUploaded || receipt.SourceImage.ImageName != source.Image.ImageName ||
+		receipt.ResolvedSettings.Scale != 2 || receipt.ResolvedSettings.OutputWidth != 1024 || receipt.ResolvedSettings.OutputHeight != 1024 ||
+		receipt.ResolvedSettings.ModelKey != mainModel || !reflect.DeepEqual(receipt.ResolvedSettings.ComponentKeys, map[string]string{"upscale_model": upscaleModel, "tile_controlnet": tileControlNet}) ||
+		!slices.Equal(receipt.ResolvedSettings.Seeds, []uint32{testSeed}) || receipt.Queue.QueueID != "default" || receipt.Queue.BatchID == "" || len(receipt.Queue.ItemIDs) != 1 ||
+		len(receipt.Outputs) != 1 || receipt.Outputs[0].ItemID != receipt.Queue.ItemIDs[0] || receipt.Outputs[0].Seed != testSeed || len(receipt.Warnings) != 0 {
+		t.Fatalf("upscale receipt = %#v", receipt)
+	}
+	assertGeneratedImageReference(t, target, receipt.Outputs[0].Image, 1024, 1024)
 }
 
 func writeUniquePNG(t *testing.T) uploadFixture {

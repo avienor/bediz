@@ -246,6 +246,7 @@ var Matrix = []Entry{
 	SDXLGenerationEntry(),
 	FLUXGenerationEntry(),
 	SDXLUpscaleEntry(),
+	SD1UpscaleEntry(),
 	{
 		Operation:     result.OperationRecall,
 		VersionPolicy: VersionPolicySupportedRange,
@@ -274,29 +275,48 @@ var Matrix = []Entry{
 // Model requirements establish presence, not that a ControlNet is a Tile model
 // or that a Spandrel model enlarges its input.
 func SDXLUpscaleEntry() Entry {
+	return upscaleEntry("sdxl", "SDXL", []InvocationRequirement{
+		{Schema: "SDXLModelLoaderInvocation", Type: "sdxl_model_loader", Properties: []string{"id", "is_intermediate", "use_cache", "type", "model"}},
+		{Schema: "SDXLCompelPromptInvocation", Type: "sdxl_compel_prompt", Properties: []string{"id", "is_intermediate", "use_cache", "type", "prompt", "style", "clip", "clip2"}},
+	})
+}
+
+// SD1UpscaleEntry records the stock 6.14.1 SD1.5 branch of the tiled upscale
+// graph. Any main format InvokeAI's SD1.5 loader accepts is supported.
+func SD1UpscaleEntry() Entry {
+	return upscaleEntry("sd-1", "SD1.5", []InvocationRequirement{
+		{Schema: "MainModelLoaderInvocation", Type: "main_model_loader", Properties: []string{"id", "is_intermediate", "use_cache", "type", "model"}},
+		{Schema: "CLIPSkipInvocation", Type: "clip_skip", Properties: []string{"id", "is_intermediate", "use_cache", "type", "clip", "skipped_layers"}},
+		{Schema: "CompelInvocation", Type: "compel", Properties: []string{"id", "is_intermediate", "use_cache", "type", "prompt", "clip"}},
+	})
+}
+
+func upscaleEntry(base, label string, conditioning []InvocationRequirement) Entry {
+	invocations := []InvocationRequirement{
+		{Schema: "StringInvocation", Type: "string", Properties: []string{"id", "is_intermediate", "use_cache", "type", "value"}},
+		{Schema: "IntegerInvocation", Type: "integer", Properties: []string{"id", "is_intermediate", "use_cache", "type", "value"}},
+		{Schema: "SpandrelImageToImageAutoscaleInvocation", Type: "spandrel_image_to_image_autoscale", Properties: []string{"id", "is_intermediate", "use_cache", "type", "image", "image_to_image_model", "scale", "fit_to_multiple_of_8"}},
+		{Schema: "UnsharpMaskInvocation", Type: "unsharp_mask", Properties: []string{"id", "is_intermediate", "use_cache", "type", "image", "radius", "strength"}},
+		{Schema: "NoiseInvocation", Type: "noise", Properties: []string{"id", "is_intermediate", "use_cache", "type", "seed", "width", "height", "use_cpu"}},
+		{Schema: "ImageToLatentsInvocation", Type: "i2l", Properties: []string{"id", "is_intermediate", "use_cache", "type", "image", "vae", "tiled", "tile_size", "fp32"}},
+		{Schema: "LatentsToImageInvocation", Type: "l2i", Properties: []string{"id", "is_intermediate", "use_cache", "type", "latents", "vae", "tiled", "tile_size", "fp32", "board", "metadata"}},
+		{Schema: "TiledMultiDiffusionDenoiseLatents", Type: "tiled_multi_diffusion_denoise_latents", Properties: []string{"id", "is_intermediate", "use_cache", "type", "tile_width", "tile_height", "tile_overlap", "steps", "cfg_scale", "scheduler", "denoising_start", "denoising_end", "control"}},
+		{Schema: "ControlNetInvocation", Type: "controlnet", Properties: []string{"id", "is_intermediate", "use_cache", "type", "image", "control_model", "control_weight", "begin_step_percent", "end_step_percent", "control_mode", "resize_mode"}},
+		{Schema: "CollectInvocation", Type: "collect", Properties: []string{"id", "is_intermediate", "use_cache", "type", "collection", "item"}},
+	}
+	invocations = append(invocations, conditioning...)
+	invocations = append(invocations,
+		InvocationRequirement{Schema: "VAELoaderInvocation", Type: "vae_loader", Properties: []string{"id", "is_intermediate", "use_cache", "type", "vae_model"}},
+		InvocationRequirement{Schema: "CoreMetadataInvocation", Type: "core_metadata", Properties: []string{"id", "is_intermediate", "use_cache", "type", "positive_prompt", "negative_prompt", "seed", "width", "height", "steps", "scheduler", "cfg_scale", "model", "vae"}, RequiresAdditionalProperties: true},
+	)
 	return Entry{
-		Operation: result.OperationUpscale, Family: "sdxl", VersionPolicy: VersionPolicySupportedRange,
-		Endpoints: slices.Clone(AnimaGenerationEntry().Endpoints),
-		Invocations: []InvocationRequirement{
-			{Schema: "StringInvocation", Type: "string", Properties: []string{"id", "is_intermediate", "use_cache", "type", "value"}},
-			{Schema: "IntegerInvocation", Type: "integer", Properties: []string{"id", "is_intermediate", "use_cache", "type", "value"}},
-			{Schema: "SpandrelImageToImageAutoscaleInvocation", Type: "spandrel_image_to_image_autoscale", Properties: []string{"id", "is_intermediate", "use_cache", "type", "image", "image_to_image_model", "scale", "fit_to_multiple_of_8"}},
-			{Schema: "UnsharpMaskInvocation", Type: "unsharp_mask", Properties: []string{"id", "is_intermediate", "use_cache", "type", "image", "radius", "strength"}},
-			{Schema: "NoiseInvocation", Type: "noise", Properties: []string{"id", "is_intermediate", "use_cache", "type", "seed", "width", "height", "use_cpu"}},
-			{Schema: "ImageToLatentsInvocation", Type: "i2l", Properties: []string{"id", "is_intermediate", "use_cache", "type", "image", "vae", "tiled", "tile_size", "fp32"}},
-			{Schema: "LatentsToImageInvocation", Type: "l2i", Properties: []string{"id", "is_intermediate", "use_cache", "type", "latents", "vae", "tiled", "tile_size", "fp32", "board", "metadata"}},
-			{Schema: "TiledMultiDiffusionDenoiseLatents", Type: "tiled_multi_diffusion_denoise_latents", Properties: []string{"id", "is_intermediate", "use_cache", "type", "tile_width", "tile_height", "tile_overlap", "steps", "cfg_scale", "scheduler", "denoising_start", "denoising_end", "control"}},
-			{Schema: "ControlNetInvocation", Type: "controlnet", Properties: []string{"id", "is_intermediate", "use_cache", "type", "image", "control_model", "control_weight", "begin_step_percent", "end_step_percent", "control_mode", "resize_mode"}},
-			{Schema: "CollectInvocation", Type: "collect", Properties: []string{"id", "is_intermediate", "use_cache", "type", "collection", "item"}},
-			{Schema: "SDXLModelLoaderInvocation", Type: "sdxl_model_loader", Properties: []string{"id", "is_intermediate", "use_cache", "type", "model"}},
-			{Schema: "SDXLCompelPromptInvocation", Type: "sdxl_compel_prompt", Properties: []string{"id", "is_intermediate", "use_cache", "type", "prompt", "style", "clip", "clip2"}},
-			{Schema: "VAELoaderInvocation", Type: "vae_loader", Properties: []string{"id", "is_intermediate", "use_cache", "type", "vae_model"}},
-			{Schema: "CoreMetadataInvocation", Type: "core_metadata", Properties: []string{"id", "is_intermediate", "use_cache", "type", "positive_prompt", "negative_prompt", "seed", "width", "height", "steps", "scheduler", "cfg_scale", "model", "vae"}, RequiresAdditionalProperties: true},
-		},
+		Operation: result.OperationUpscale, Family: base, VersionPolicy: VersionPolicySupportedRange,
+		Endpoints:   slices.Clone(AnimaGenerationEntry().Endpoints),
+		Invocations: invocations,
 		Models: []ModelRequirement{
-			{Name: "SDXL normal main model", Types: []string{"main"}, Bases: []string{"sdxl"}, Variants: []string{"normal"}, MinimumCount: 1},
+			{Name: label + " normal main model", Types: []string{"main"}, Bases: []string{base}, Variants: []string{"normal"}, MinimumCount: 1},
 			{Name: "Spandrel upscale model", Types: []string{"spandrel_image_to_image"}, Bases: []string{"any"}, MinimumCount: 1},
-			{Name: "SDXL ControlNet", Types: []string{"controlnet"}, Bases: []string{"sdxl"}, MinimumCount: 1},
+			{Name: label + " ControlNet", Types: []string{"controlnet"}, Bases: []string{base}, MinimumCount: 1},
 		},
 	}
 }

@@ -136,7 +136,7 @@ func ValidateRequest(request Request) error {
 		return operation.InvalidRequest("steps must be positive")
 	}
 	if request.Scheduler != nil && !slices.Contains(schedulers, *request.Scheduler) {
-		return operation.InvalidRequest("scheduler is not supported for SDXL upscale")
+		return operation.InvalidRequest("scheduler is not supported for upscale")
 	}
 	if request.Guidance != nil && (math.IsNaN(*request.Guidance) || math.IsInf(*request.Guidance, 0) || *request.Guidance < 1) {
 		return operation.InvalidRequest("guidance must be finite and at least 1")
@@ -167,8 +167,9 @@ func ValidateRequest(request Request) error {
 	return nil
 }
 
-// ResolveSDXL selects the complete Upscale Component Set after local validation.
-func ResolveSDXL(request Request, inventory []graphops.ModelIdentifier, random io.Reader) (Resolution, error) {
+// Resolve accepts a main model of a registered upscale family and selects its
+// complete Upscale Component Set after local validation.
+func Resolve(request Request, inventory []graphops.ModelIdentifier, random io.Reader) (Resolution, error) {
 	if err := ValidateRequest(request); err != nil {
 		return Resolution{}, err
 	}
@@ -180,8 +181,9 @@ func ResolveSDXL(request Request, inventory []graphops.ModelIdentifier, random i
 	if err != nil {
 		return Resolution{}, err
 	}
-	if main.Base != "sdxl" || main.Variant != "normal" {
-		return Resolution{}, operation.UnsupportedCapability(fmt.Sprintf("model %q must be an SDXL normal main model for upscale", main.Key))
+	family, ok := familyFor(main.Base)
+	if !ok || main.Variant != "normal" {
+		return Resolution{}, operation.UnsupportedCapability(fmt.Sprintf("model %q must be a normal %s main model for upscale", main.Key, familyLabels()))
 	}
 	upscaleSelector, tileSelector, vaeSelector := "", "", ""
 	if request.Components != nil {
@@ -204,16 +206,16 @@ func ResolveSDXL(request Request, inventory []graphops.ModelIdentifier, random i
 	}
 	var tileModel graphops.ModelIdentifier
 	if tileSelector != "" {
-		tileModel, err = graphops.ResolveUniqueCompatible(inventory, tileSelector, graphops.ComponentRequirement{Kind: "tile_controlnet", Base: "sdxl", ModelType: "controlnet"})
+		tileModel, err = graphops.ResolveUniqueCompatible(inventory, tileSelector, graphops.ComponentRequirement{Kind: "tile_controlnet", Base: family.base, ModelType: "controlnet"})
 	} else {
 		candidates := make([]graphops.ModelIdentifier, 0)
 		for _, model := range inventory {
-			if model.Base == "sdxl" && model.Type == "controlnet" {
+			if model.Base == family.base && model.Type == "controlnet" {
 				candidates = append(candidates, model)
 			}
 		}
 		if len(candidates) == 0 {
-			err = operation.MissingComponent("tile_controlnet", "sdxl", "controlnet", "install the xinsir/controlNet-tile-sdxl-1.0 starter")
+			err = operation.MissingComponent("tile_controlnet", family.base, "controlnet", "install the "+family.tileStarter+" starter")
 		} else {
 			var choices []operation.SelectionCandidate
 			choices, err = graphops.SelectionCandidates(candidates)
@@ -227,7 +229,7 @@ func ResolveSDXL(request Request, inventory []graphops.ModelIdentifier, random i
 	}
 	models := Models{Main: main, UpscaleModel: upscaleModel, TileControlNet: tileModel}
 	if vaeSelector != "" {
-		models.VAE, err = graphops.ResolveUniqueCompatible(inventory, vaeSelector, graphops.ComponentRequirement{Kind: "vae", Base: "sdxl", ModelType: "vae"})
+		models.VAE, err = graphops.ResolveUniqueCompatible(inventory, vaeSelector, graphops.ComponentRequirement{Kind: "vae", Base: family.base, ModelType: "vae"})
 		if err != nil {
 			return Resolution{}, err
 		}

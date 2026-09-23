@@ -52,6 +52,7 @@ func TestSD1MainRemainsUnsupportedForGenerateAndRecall(t *testing.T) {
 				isolateUserConfigDir(t)
 				inventory := append(animaModelInventory(), map[string]any{
 					"key": "sd15-key", "hash": "sd15-hash", "name": "Dreamshaper 8", "base": "sd-1", "type": "main",
+					"variant": "normal", "format": "diffusers",
 				})
 				var mutations int
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

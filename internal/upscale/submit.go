@@ -7,7 +7,6 @@ import (
 	"math"
 	"slices"
 
-	"github.com/avienor/bediz/internal/capability"
 	"github.com/avienor/bediz/internal/graphops"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/images"
@@ -48,7 +47,7 @@ type ExecutionReceipt struct {
 	Warnings         []result.Warning `json:"warnings"`
 }
 
-// Submit validates the complete SDXL operation, then sends one enqueue mutation.
+// Submit validates the complete operation, then sends one enqueue mutation.
 func Submit(ctx context.Context, client *httpclient.Client, request Request) (ExecutionReceipt, error) {
 	if err := ValidateRequest(request); err != nil {
 		return ExecutionReceipt{}, err
@@ -60,11 +59,12 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	if err != nil {
 		return ExecutionReceipt{}, err
 	}
-	resolved, err := ResolveSDXL(request, inventory, rand.Reader)
+	resolved, err := Resolve(request, inventory, rand.Reader)
 	if err != nil {
 		return ExecutionReceipt{}, err
 	}
-	if err := graphops.CheckInvocations(ctx, client, capability.SDXLUpscaleEntry().Invocations); err != nil {
+	family, _ := familyFor(resolved.Models.Main.Base)
+	if err := graphops.CheckInvocations(ctx, client, family.entry().Invocations); err != nil {
 		return ExecutionReceipt{}, err
 	}
 	imageResult, err := images.Get(ctx, client, images.GetRequest{SchemaVersion: 1, ImageName: request.Source.Reference})
@@ -80,7 +80,7 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	}
 	outputWidth := source.Width * *resolved.Request.Scale / 8 * 8
 	outputHeight := source.Height * *resolved.Request.Scale / 8 * 8
-	graph, err := CompileSDXL(resolved, source)
+	graph, err := Compile(resolved, source)
 	if err != nil {
 		return ExecutionReceipt{}, err
 	}
