@@ -69,6 +69,8 @@ var RecallPatchFields = []RecallFieldRequirement{
 	{Name: "seed", Type: "integer"},
 }
 
+var SDXLCFGRecallField = RecallFieldRequirement{Name: "cfg_scale", Type: "number"}
+
 type EndpointRequirement struct {
 	Method string
 	Path   string
@@ -228,6 +230,7 @@ var Matrix = []Entry{
 		},
 	},
 	AnimaGenerationEntry(),
+	SDXLGenerationEntry(),
 	{
 		Operation:     result.OperationRecall,
 		VersionPolicy: VersionPolicySupportedRange,
@@ -250,6 +253,27 @@ var Matrix = []Entry{
 		VersionPolicy: VersionPolicySupportedRange,
 		Endpoints:     []EndpointRequirement{{Method: "DELETE", Path: HuggingFaceAuthEndpoint}},
 	},
+}
+
+// SDXLGenerationEntry records the tested stock 6.14.1 text-to-image graph.
+func SDXLGenerationEntry() Entry {
+	return Entry{
+		Operation: result.OperationGenerate, Family: "sdxl", UISync: "partial", VersionPolicy: VersionPolicySupportedRange,
+		Endpoints: slices.Clone(AnimaGenerationEntry().Endpoints),
+		Invocations: []InvocationRequirement{
+			{Schema: "SDXLModelLoaderInvocation", Type: "sdxl_model_loader", Properties: []string{"id", "is_intermediate", "use_cache", "type", "model"}},
+			{Schema: "StringInvocation", Type: "string", Properties: []string{"id", "is_intermediate", "use_cache", "type", "value"}},
+			{Schema: "SDXLCompelPromptInvocation", Type: "sdxl_compel_prompt", Properties: []string{"id", "is_intermediate", "use_cache", "type", "prompt", "style", "clip", "clip2"}},
+			{Schema: "CollectInvocation", Type: "collect", Properties: []string{"id", "is_intermediate", "use_cache", "type", "collection", "item"}},
+			{Schema: "IntegerInvocation", Type: "integer", Properties: []string{"id", "is_intermediate", "use_cache", "type", "value"}},
+			{Schema: "NoiseInvocation", Type: "noise", Properties: []string{"id", "is_intermediate", "use_cache", "type", "seed", "width", "height", "use_cpu"}},
+			{Schema: "DenoiseLatentsInvocation", Type: "denoise_latents", Properties: []string{"id", "is_intermediate", "use_cache", "type", "unet", "positive_conditioning", "negative_conditioning", "noise", "steps", "scheduler", "cfg_scale", "cfg_rescale_multiplier", "denoising_start", "denoising_end"}},
+			{Schema: "LatentsToImageInvocation", Type: "l2i", Properties: []string{"id", "is_intermediate", "use_cache", "type", "latents", "vae", "fp32", "metadata", "board"}},
+			{Schema: "VAELoaderInvocation", Type: "vae_loader", Properties: []string{"id", "is_intermediate", "use_cache", "type", "vae_model"}},
+			{Schema: "CoreMetadataInvocation", Type: "core_metadata", Properties: []string{"id", "is_intermediate", "use_cache", "type", "generation_mode", "positive_prompt", "negative_prompt", "seed", "width", "height", "steps", "scheduler", "cfg_scale", "cfg_rescale_multiplier", "rand_device", "model", "vae"}},
+		},
+		Models: []ModelRequirement{{Name: "SDXL main model", Types: []string{"main"}, Bases: []string{"sdxl"}, MinimumCount: 1}},
+	}
 }
 
 // AnimaGenerationEntry returns the tested InvokeAI requirements shared by

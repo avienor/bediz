@@ -338,7 +338,7 @@ func buildCapabilities(report Report, document openAPIDocument) []CapabilityRepo
 				}
 			}
 			for _, requirement := range entry.Invocations {
-				if !invocationAvailable(report.OpenAPI.Invocations, requirement.Schema) {
+				if !invocationRequirementAvailable(document, requirement) {
 					failures = append(failures, "incompatible_invocation:"+requirement.Type)
 				}
 			}
@@ -430,7 +430,7 @@ func recallSchemaFailures(document openAPIDocument) []string {
 	}
 	properties := document.Components.Schemas["RecallParameter"].Properties
 	failures := make([]string, 0)
-	for _, field := range capability.RecallPatchFields {
+	for _, field := range append(slices.Clone(capability.RecallPatchFields), capability.SDXLCFGRecallField) {
 		property, ok := properties[field.Name]
 		if !ok || !field.MatchesNullableAlternatives(property.AnyOf) {
 			failures = append(failures, "incompatible_recall_schema:"+field.Name)
@@ -470,13 +470,19 @@ func uniqueEndpoints() []capability.EndpointRequirement {
 }
 
 func uniqueInvocations() []capability.InvocationRequirement {
-	seen := make(map[string]bool)
+	seen := make(map[string]int)
 	var requirements []capability.InvocationRequirement
 	for _, entry := range capability.Matrix {
 		for _, requirement := range entry.Invocations {
-			if !seen[requirement.Schema] {
+			if index, ok := seen[requirement.Schema]; ok {
+				for _, property := range requirement.Properties {
+					if !slices.Contains(requirements[index].Properties, property) {
+						requirements[index].Properties = append(requirements[index].Properties, property)
+					}
+				}
+			} else {
+				seen[requirement.Schema] = len(requirements)
 				requirements = append(requirements, requirement)
-				seen[requirement.Schema] = true
 			}
 		}
 	}
@@ -510,13 +516,17 @@ func endpointAvailable(checks []EndpointCheck, requirement capability.EndpointRe
 	return false
 }
 
-func invocationAvailable(checks []InvocationCheck, schema string) bool {
-	for _, check := range checks {
-		if check.Schema == schema {
-			return check.Available && len(check.MissingProperties) == 0
+func invocationRequirementAvailable(document openAPIDocument, requirement capability.InvocationRequirement) bool {
+	schema, exists := document.Components.Schemas[requirement.Schema]
+	if !exists || schema.Properties["type"].Const != requirement.Type {
+		return false
+	}
+	for _, property := range requirement.Properties {
+		if _, exists := schema.Properties[property]; !exists {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func modelRequirementSatisfied(checks []ModelRequirement, name string) bool {

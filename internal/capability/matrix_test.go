@@ -19,6 +19,7 @@ func TestMatrixAdvertisesOnlyImplementedOperations(t *testing.T) {
 		result.OperationQueueList,
 		result.OperationQueueGet,
 		result.OperationGenerate,
+		result.OperationGenerate,
 		result.OperationRecall,
 		result.OperationAuthHFStatus,
 		result.OperationAuthHFLogin,

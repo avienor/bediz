@@ -109,7 +109,13 @@ func (c *CLI) executeGenerate(ctx context.Context, jsonOutput bool, command *cob
 			request.OutputCount = new(options.outputCount)
 		}
 		if command.Flags().Changed("vae") || command.Flags().Changed("qwen3-encoder") {
-			request.Components = &generation.Components{VAE: options.vae, Qwen3Encoder: options.qwen3Encoder}
+			request.Components = &generation.Components{}
+			if command.Flags().Changed("vae") {
+				request.Components.VAE = new(options.vae)
+			}
+			if command.Flags().Changed("qwen3-encoder") {
+				request.Components.Qwen3Encoder = new(options.qwen3Encoder)
+			}
 		}
 	}
 	execution := remoteExecution[generation.Request, generation.ExecutionReceipt]{

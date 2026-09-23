@@ -21,9 +21,43 @@ type familyAdapter interface {
 
 var families = map[string]familyAdapter{
 	"anima": animaAdapter{},
+	"sdxl":  sdxlAdapter{},
 }
 
 type animaAdapter struct{}
+type sdxlAdapter struct{}
+
+func (sdxlAdapter) resolve(request Request, main ModelIdentifier, inventory []ModelIdentifier, random io.Reader) (Resolution, error) {
+	return resolveSDXL(request, main, inventory, random)
+}
+
+func (sdxlAdapter) compile(resolved Resolution) (EnqueueRequest, error) {
+	return CompileSDXL(resolved)
+}
+
+func (sdxlAdapter) invocations() []capability.InvocationRequirement {
+	return capability.SDXLGenerationEntry().Invocations
+}
+
+func (sdxlAdapter) componentKeys(resolved Resolution) map[string]string {
+	keys := map[string]string{}
+	if resolved.Models.VAE.Key != "" {
+		keys["vae"] = resolved.Models.VAE.Key
+	}
+	return keys
+}
+
+func (sdxlAdapter) validateRecall(_ ModelIdentifier, width, height, steps *int) error {
+	return validateAlignedRecall(width, height, steps)
+}
+
+func (sdxlAdapter) synchronization(settings ResolvedSettings) (SyncSettings, []string) {
+	return SyncSettings{
+		Model: settings.ModelKey, PositivePrompt: settings.PositivePrompt, NegativePrompt: settings.NegativePrompt,
+		Width: settings.Width, Height: settings.Height, Steps: settings.Steps, Seed: settings.Seeds[0],
+		Additional: []capability.RecallPatchField{{Requirement: capability.SDXLCFGRecallField, Value: settings.Guidance}},
+	}, []string{"scheduler", "vae", "output_count", "board_id"}
+}
 
 func (animaAdapter) resolve(request Request, main ModelIdentifier, inventory []ModelIdentifier, random io.Reader) (Resolution, error) {
 	return resolveAnima(request, main, inventory, random)
@@ -42,6 +76,10 @@ func (animaAdapter) componentKeys(resolved Resolution) map[string]string {
 }
 
 func (animaAdapter) validateRecall(_ ModelIdentifier, width, height, steps *int) error {
+	return validateAlignedRecall(width, height, steps)
+}
+
+func validateAlignedRecall(width, height, steps *int) error {
 	if width != nil && (*width < 64 || *width%8 != 0 || *height < 64 || *height%8 != 0) {
 		return operation.InvalidRequest("width and height must be multiples of 8 and at least 64 for Recall")
 	}

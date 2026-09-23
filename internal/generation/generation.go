@@ -6,8 +6,8 @@ import (
 )
 
 type Components struct {
-	VAE          string `json:"vae,omitempty"`
-	Qwen3Encoder string `json:"qwen3_encoder,omitempty"`
+	VAE          *string `json:"vae,omitempty"`
+	Qwen3Encoder *string `json:"qwen3_encoder,omitempty"`
 }
 
 type Request struct {

@@ -13,7 +13,7 @@ import (
 )
 
 func TestGenerateDispatchesMainModelsAcrossInstalledFamilies(t *testing.T) {
-	for _, base := range []string{"sdxl", "flux", "sd-1"} {
+	for _, base := range []string{"flux", "sd-1"} {
 		t.Run(base, func(t *testing.T) {
 			isolateUserConfigDir(t)
 			inventory := append(animaModelInventory(), map[string]any{
@@ -109,7 +109,7 @@ func TestGenerateRejectsUnknownComponentBeforeEnqueue(t *testing.T) {
 func TestRecallRejectsUnregisteredMainModelBeforeMutation(t *testing.T) {
 	isolateUserConfigDir(t)
 	inventory := append(animaModelInventory(), map[string]any{
-		"key": "sdxl-main", "hash": "sdxl-hash", "name": "SDXL Main", "base": "sdxl", "type": "main",
+		"key": "flux-main", "hash": "flux-hash", "name": "FLUX Main", "base": "flux", "type": "main",
 	})
 	var posts int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -124,7 +124,7 @@ func TestRecallRejectsUnregisteredMainModelBeforeMutation(t *testing.T) {
 	defer server.Close()
 	var stdout, stderr bytes.Buffer
 	code := cli.New(&stdout, &stderr).Run(t.Context(), []string{
-		"recall", "--model", "sdxl-main", "--url", server.URL, "--json",
+		"recall", "--model", "flux-main", "--url", server.URL, "--json",
 	})
 	var envelope result.Envelope
 	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {

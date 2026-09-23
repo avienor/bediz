@@ -248,6 +248,7 @@ func TestLiveGate(t *testing.T) {
 	validateTarget(t, target)
 	binary := buildBinary(t)
 	var animaModels liveAnimaModelKeys
+	var sdxlMain string
 
 	if !t.Run("doctor verifies the supported baseline", func(t *testing.T) {
 		envelope := runJSONCommand(t, binary, target, "doctor")
@@ -290,36 +291,38 @@ func TestLiveGate(t *testing.T) {
 				animaModels.VAE = firstKey(animaModels.VAE, model.Key)
 			case model.Base == "any" && model.Type == "qwen3_encoder":
 				animaModels.Qwen3Encoder = firstKey(animaModels.Qwen3Encoder, model.Key)
+			case model.Base == "sdxl" && model.Type == "main":
+				sdxlMain = firstKey(sdxlMain, model.Key)
 			}
 		}
 		if animaModels.Main == "" || animaModels.VAE == "" || animaModels.Qwen3Encoder == "" {
 			t.Fatalf("doctor did not report exact keys for the required Anima models: %#v", animaModels)
+		}
+		if sdxlMain == "" {
+			t.Fatal("doctor did not report an exact SDXL main model key")
 		}
 		for _, requirement := range data.Models.Requirements {
 			if requirement.Name == "" || requirement.Available == nil || requirement.Required == nil || requirement.Satisfied == nil || !*requirement.Satisfied {
 				t.Errorf("doctor returned an unsatisfied or incomplete model requirement: %#v", requirement)
 			}
 		}
-		wantOperations := []string{"auth.huggingface.login", "auth.huggingface.logout", "auth.huggingface.status", "generate", "images.get", "images.list", "images.upload", "models.install", "models.install", "models.list", "models.status", "queue.get", "queue.list", "recall"}
+		wantOperations := []string{"auth.huggingface.login", "auth.huggingface.logout", "auth.huggingface.status", "generate", "generate", "images.get", "images.list", "images.upload", "models.install", "models.install", "models.list", "models.status", "queue.get", "queue.list", "recall"}
 		operations := make([]string, 0, len(data.Capabilities))
-		var generateFound bool
+		generateFamilies := map[string]bool{}
 		for _, capability := range data.Capabilities {
 			if capability.Compatible == nil || !*capability.Compatible || capability.Failures == nil || len(capability.Failures) != 0 {
 				t.Errorf("doctor reported an incompatible capability: %#v", capability)
 			}
 			operations = append(operations, capability.Operation)
 			if capability.Operation == "generate" {
-				generateFound = true
-				if capability.Family != "anima" {
-					t.Errorf("generate family = %q, want anima", capability.Family)
-				}
+				generateFamilies[capability.Family] = true
 				if capability.UISync != "partial" {
 					t.Errorf("generate ui_sync = %q, want partial", capability.UISync)
 				}
 			}
 		}
-		if !generateFound {
-			t.Error("doctor did not report generate capability")
+		if !generateFamilies["anima"] || !generateFamilies["sdxl"] || len(generateFamilies) != 2 {
+			t.Errorf("doctor generate families = %#v, want Anima and SDXL", generateFamilies)
 		}
 		if data.UISync["generate"] != "partial" {
 			t.Errorf("doctor UI synchronization = %#v, want partial generation", data.UISync)
@@ -537,7 +540,7 @@ func TestLiveGate(t *testing.T) {
 		}
 
 		image := output.Image
-		assertGeneratedImageReference(t, target, image)
+		assertGeneratedImageReference(t, target, image, 1024, 1024)
 
 		getEnvelope := runJSONCommand(t, binary, target, "images", "get", image.ImageName)
 		assertSuccessEnvelope(t, getEnvelope, "images.get")
@@ -546,6 +549,29 @@ func TestLiveGate(t *testing.T) {
 		if !reflect.DeepEqual(got.Image, image) {
 			t.Fatalf("images get reference differs from execution receipt: receipt=%#v get=%#v", image, got.Image)
 		}
+	}) {
+		return
+	}
+
+	if !t.Run("SDXL direct execution produces a completed receipt and self-cleans", func(t *testing.T) {
+		const testSeed uint32 = 43
+		envelope := runJSONCommand(t, binary, target, "generate", "--model", sdxlMain,
+			"--prompt", "a tiny blue teacup on white background", "--width", "768", "--height", "768",
+			"--steps", "2", "--seed", strconv.FormatUint(uint64(testSeed), 10))
+		registerGeneratedImageCleanup(t, binary, target, envelope.Data)
+		assertSuccessEnvelope(t, envelope, "generate", "ui_sync_partial")
+		var receipt executionReceiptData
+		unmarshalData(t, envelope.Data, &receipt)
+		if receipt.ResolvedSettings.ModelKey != sdxlMain || len(receipt.ResolvedSettings.ComponentKeys) != 0 ||
+			receipt.ResolvedSettings.Scheduler != "dpmpp_3m_k" || receipt.ResolvedSettings.Guidance != 7 ||
+			!slices.Equal(receipt.ResolvedSettings.Seeds, []uint32{testSeed}) || len(receipt.Outputs) != 1 ||
+			receipt.Outputs[0].Seed != testSeed || receipt.Outputs[0].ItemID != receipt.Queue.ItemIDs[0] {
+			t.Fatalf("unexpected SDXL execution receipt: %#v", receipt)
+		}
+		if len(receipt.Warnings) != 1 || !slices.Equal(receipt.Warnings[0].Details.NotRestored, []string{"scheduler", "vae", "output_count", "board_id"}) {
+			t.Fatalf("SDXL Handoff warning = %#v", receipt.Warnings)
+		}
+		assertGeneratedImageReference(t, target, receipt.Outputs[0].Image, 768, 768)
 	}) {
 		return
 	}
@@ -586,10 +612,10 @@ func registerGeneratedImageCleanup(t *testing.T, binary, target string, raw json
 	}
 }
 
-func assertGeneratedImageReference(t *testing.T, target string, image imageReference) {
+func assertGeneratedImageReference(t *testing.T, target string, image imageReference, width, height int) {
 	t.Helper()
 	if image.ImageName == "" || image.ImageOrigin != "internal" || image.ImageCategory != "general" ||
-		image.Width != 1024 || image.Height != 1024 || image.CreatedAt == "" || image.UpdatedAt == "" ||
+		image.Width != width || image.Height != height || image.CreatedAt == "" || image.UpdatedAt == "" ||
 		image.IsIntermediate == nil || *image.IsIntermediate || image.SessionID == nil || *image.SessionID == "" ||
 		image.NodeID == nil || *image.NodeID == "" || image.Starred == nil || *image.Starred ||
 		image.HasWorkflow == nil || image.BoardID != nil {

@@ -3212,7 +3212,7 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 		"/api/v1/queue/{queue_id}/i/{item_id}":           map[string]any{"get": map[string]any{}},
 		"/api/v1/queue/{queue_id}/enqueue_batch":         map[string]any{"post": map[string]any{}},
 	}
-	openAPIDocument := animaOpenAPIFixture("", "")
+	openAPIDocument := sdxlOpenAPIFixture(t)
 	paths["/api/v1/recall/{queue_id}"] = openAPIDocument["paths"].(map[string]any)["/api/v1/recall/{queue_id}"]
 	paths["/api/v2/models/hf_login"] = map[string]any{"get": map[string]any{}, "post": map[string]any{"requestBody": map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/Body_do_hf_login"}}}}}, "delete": map[string]any{}}
 	openAPIDocument["components"].(map[string]any)["schemas"].(map[string]any)["Body_do_hf_login"] = map[string]any{"properties": map[string]any{"token": map[string]any{"type": "string"}}, "required": []any{"token"}}
@@ -3228,6 +3228,7 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 				{"key": "main", "hash": "blake3:main", "name": "Anima", "base": "anima", "type": "main"},
 				{"key": "vae", "hash": "blake3:vae", "name": "VAE", "base": "anima", "type": "vae"},
 				{"key": "encoder", "hash": "blake3:encoder", "name": "Qwen3", "base": "any", "type": "qwen3_encoder"},
+				{"key": "sdxl", "hash": "blake3:sdxl", "name": "SDXL", "base": "sdxl", "type": "main"},
 			}})
 		default:
 			http.NotFound(w, r)
@@ -3273,10 +3274,10 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 		}
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
+	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "generate", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if envelope.SchemaVersion != 1 || !envelope.OK || envelope.Operation != "doctor" || !envelope.Data.Ready ||
 		!slices.Equal(operations, wantOperations) || envelope.Data.UISync["generate"] != "partial" ||
-		len(envelope.Data.OpenAPI.Invocations) != 8 || len(envelope.Data.Models.Relevant) != 3 || len(envelope.Data.Models.Requirements) != 3 {
+		len(envelope.Data.OpenAPI.Invocations) != 14 || len(envelope.Data.Models.Relevant) != 4 || len(envelope.Data.Models.Requirements) != 4 {
 		t.Fatalf("unexpected doctor envelope: %#v", envelope)
 	}
 }
