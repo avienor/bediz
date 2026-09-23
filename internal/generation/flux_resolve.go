@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/avienor/bediz/internal/capability"
+	"github.com/avienor/bediz/internal/graphops"
 	"github.com/avienor/bediz/internal/operation"
 )
 
@@ -106,15 +107,15 @@ func resolveFLUX(request Request, main ModelIdentifier, inventory []ModelIdentif
 			}
 		}
 	}
-	vae, err := resolveComponent(inventory, vaeSelector, fluxVAERequirement)
+	vae, err := graphops.ResolveComponent(inventory, vaeSelector, fluxVAERequirement)
 	if err != nil {
 		return Resolution{}, fmt.Errorf("resolve FLUX.1 VAE: %w", err)
 	}
-	t5, err := resolveComponent(inventory, t5Selector, fluxT5Requirement)
+	t5, err := graphops.ResolveComponent(inventory, t5Selector, fluxT5Requirement)
 	if err != nil {
 		return Resolution{}, fmt.Errorf("resolve FLUX.1 T5 encoder: %w", err)
 	}
-	clip, err := resolveComponent(inventory, clipSelector, fluxCLIPRequirement)
+	clip, err := graphops.ResolveComponent(inventory, clipSelector, fluxCLIPRequirement)
 	if err != nil {
 		return Resolution{}, fmt.Errorf("resolve FLUX.1 CLIP Embed: %w", err)
 	}

@@ -237,6 +237,41 @@ type executionReceiptData struct {
 	Warnings []uiSyncWarning `json:"warnings"`
 }
 
+type upscaleExecutionReceiptData struct {
+	SubmittedRequest jsontext.Value `json:"submitted_request"`
+	SourceImage      imageReference `json:"source_image"`
+	SourceUploaded   bool           `json:"source_uploaded"`
+	ResolvedSettings struct {
+		PositivePrompt string            `json:"positive_prompt"`
+		NegativePrompt string            `json:"negative_prompt"`
+		Scale          int               `json:"scale"`
+		Creativity     int               `json:"creativity"`
+		Structure      int               `json:"structure"`
+		Steps          int               `json:"steps"`
+		Scheduler      string            `json:"scheduler"`
+		Guidance       float64           `json:"guidance"`
+		TileSize       int               `json:"tile_size"`
+		TileOverlap    int               `json:"tile_overlap"`
+		OutputWidth    int               `json:"output_width"`
+		OutputHeight   int               `json:"output_height"`
+		BoardID        *string           `json:"board_id"`
+		ModelKey       string            `json:"model_key"`
+		ComponentKeys  map[string]string `json:"component_keys"`
+		Seeds          []uint32          `json:"seeds"`
+	} `json:"resolved_settings"`
+	Queue struct {
+		QueueID string `json:"queue_id"`
+		BatchID string `json:"batch_id"`
+		ItemIDs []int  `json:"item_ids"`
+	} `json:"queue"`
+	Outputs []struct {
+		ItemID int            `json:"item_id"`
+		Seed   uint32         `json:"seed"`
+		Image  imageReference `json:"image"`
+	} `json:"outputs"`
+	Warnings []uiSyncWarning `json:"warnings"`
+}
+
 type uiSyncWarning struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -254,6 +289,10 @@ func TestLiveGate(t *testing.T) {
 	binary := buildBinary(t)
 	var animaModels liveAnimaModelKeys
 	var sdxlMain string
+	var upscaleModel string
+	var tileControlNet string
+	var sd1Main string
+	var sd1TileControlNet string
 	var fluxSchnell string
 
 	if !t.Run("doctor verifies the supported baseline", func(t *testing.T) {
@@ -299,6 +338,14 @@ func TestLiveGate(t *testing.T) {
 				animaModels.Qwen3Encoder = firstKey(animaModels.Qwen3Encoder, model.Key)
 			case model.Base == "sdxl" && model.Type == "main":
 				sdxlMain = firstKey(sdxlMain, model.Key)
+			case model.Base == "any" && model.Type == "spandrel_image_to_image":
+				upscaleModel = firstKey(upscaleModel, model.Key)
+			case model.Base == "sdxl" && model.Type == "controlnet":
+				tileControlNet = firstKey(tileControlNet, model.Key)
+			case model.Base == "sd-1" && model.Type == "main" && model.Variant == "normal":
+				sd1Main = firstKey(sd1Main, model.Key)
+			case model.Base == "sd-1" && model.Type == "controlnet":
+				sd1TileControlNet = firstKey(sd1TileControlNet, model.Key)
 			case model.Base == "flux" && model.Type == "main" && model.Variant == "schnell" && capability.SupportsFLUXMain(model.Variant, model.Format):
 				fluxSchnell = firstKey(fluxSchnell, model.Key)
 			}
@@ -306,8 +353,11 @@ func TestLiveGate(t *testing.T) {
 		if animaModels.Main == "" || animaModels.VAE == "" || animaModels.Qwen3Encoder == "" {
 			t.Fatalf("doctor did not report exact keys for the required Anima models: %#v", animaModels)
 		}
-		if sdxlMain == "" {
-			t.Fatal("doctor did not report an exact SDXL main model key")
+		if sdxlMain == "" || upscaleModel == "" || tileControlNet == "" {
+			t.Fatalf("doctor did not report exact SDXL upscale model keys: main=%q spandrel=%q controlnet=%q", sdxlMain, upscaleModel, tileControlNet)
+		}
+		if sd1Main == "" || sd1TileControlNet == "" {
+			t.Fatalf("doctor did not report exact SD1.5 upscale model keys: main=%q controlnet=%q", sd1Main, sd1TileControlNet)
 		}
 		if fluxSchnell == "" {
 			t.Fatal("doctor did not report an exact FLUX.1 schnell main model key")
@@ -317,9 +367,10 @@ func TestLiveGate(t *testing.T) {
 				t.Errorf("doctor returned an unsatisfied or incomplete model requirement: %#v", requirement)
 			}
 		}
-		wantOperations := []string{"auth.huggingface.login", "auth.huggingface.logout", "auth.huggingface.status", "generate", "generate", "generate", "images.get", "images.list", "images.upload", "models.install", "models.install", "models.list", "models.status", "queue.get", "queue.list", "recall"}
+		wantOperations := []string{"auth.huggingface.login", "auth.huggingface.logout", "auth.huggingface.status", "generate", "generate", "generate", "images.get", "images.list", "images.upload", "models.install", "models.install", "models.list", "models.status", "queue.get", "queue.list", "recall", "upscale", "upscale"}
 		operations := make([]string, 0, len(data.Capabilities))
 		generateFamilies := map[string]bool{}
+		upscaleFamilies := map[string]bool{}
 		for _, capability := range data.Capabilities {
 			if capability.Compatible == nil || !*capability.Compatible || capability.Failures == nil || len(capability.Failures) != 0 {
 				t.Errorf("doctor reported an incompatible capability: %#v", capability)
@@ -331,12 +382,21 @@ func TestLiveGate(t *testing.T) {
 					t.Errorf("generate ui_sync = %q, want partial", capability.UISync)
 				}
 			}
+			if capability.Operation == "upscale" {
+				upscaleFamilies[capability.Family] = true
+				if capability.UISync != "partial" {
+					t.Errorf("upscale ui_sync = %q, want partial", capability.UISync)
+				}
+			}
+		}
+		if !upscaleFamilies["sdxl"] || !upscaleFamilies["sd-1"] || len(upscaleFamilies) != 2 {
+			t.Errorf("doctor upscale families = %#v, want SDXL and SD1.5", upscaleFamilies)
 		}
 		if !generateFamilies["anima"] || !generateFamilies["sdxl"] || !generateFamilies["flux"] || len(generateFamilies) != 3 {
 			t.Errorf("doctor generate families = %#v, want Anima, SDXL, and FLUX.1", generateFamilies)
 		}
-		if data.UISync["generate"] != "partial" {
-			t.Errorf("doctor UI synchronization = %#v, want partial generation", data.UISync)
+		if data.UISync["generate"] != "partial" || data.UISync["upscale"] != "partial" {
+			t.Errorf("doctor UI synchronization = %#v, want partial generation and upscale", data.UISync)
 		}
 		slices.Sort(operations)
 		if !slices.Equal(operations, wantOperations) {
@@ -586,6 +646,16 @@ func TestLiveGate(t *testing.T) {
 	}) {
 		return
 	}
+	if !t.Run("SDXL upscale produces a verified receipt and self-cleans", func(t *testing.T) {
+		runLiveUpscale(t, binary, target, sdxlMain, upscaleModel, tileControlNet, 45)
+	}) {
+		return
+	}
+	if !t.Run("SD1.5 upscale produces a verified receipt and self-cleans", func(t *testing.T) {
+		runLiveUpscale(t, binary, target, sd1Main, upscaleModel, sd1TileControlNet, 46)
+	}) {
+		return
+	}
 	if !t.Run("FLUX.1 schnell direct execution produces a completed receipt and self-cleans", func(t *testing.T) {
 		const testSeed uint32 = 44
 		envelope := runJSONCommand(t, binary, target, "generate", "--model", fluxSchnell,
@@ -705,17 +775,56 @@ func assertAccessibleImageURL(t *testing.T, target, field, rawURL string) {
 	}
 }
 
+// runLiveUpscale upscales a unique uploaded 512 × 512 source at scale 2 and
+// verifies the receipt and output before removing both images.
+func runLiveUpscale(t *testing.T, binary, target, mainModel, upscaleModel, tileControlNet string, testSeed uint32) {
+	t.Helper()
+	fixture := writeUniquePNGSize(t, 512)
+	upload := runJSONCommand(t, binary, target, "images", "upload", fixture.Path)
+	assertSuccessEnvelope(t, upload, "images.upload")
+	var source imageResultData
+	unmarshalData(t, upload.Data, &source)
+	if source.Image.ImageName == "" || source.Image.Width != 512 || source.Image.Height != 512 {
+		t.Fatalf("upscale source upload = %#v", source)
+	}
+	t.Logf("upscale source cleanup evidence: image_name=%q", source.Image.ImageName)
+	t.Cleanup(func() {
+		deleteBackendImage(t, target, source.Image.ImageName)
+		assertImageRemoved(t, binary, target, source.Image.ImageName)
+	})
+	envelope := runJSONCommand(t, binary, target, "upscale", "--image", source.Image.ImageName,
+		"--model", mainModel, "--upscale-model", upscaleModel, "--tile-controlnet", tileControlNet,
+		"--scale", "2", "--steps", "4", "--tile-size", "512", "--seed", strconv.FormatUint(uint64(testSeed), 10), "--timeout", "10m")
+	registerGeneratedImageCleanup(t, binary, target, envelope.Data)
+	assertSuccessEnvelope(t, envelope, "upscale", "ui_sync_partial")
+	var receipt upscaleExecutionReceiptData
+	unmarshalData(t, envelope.Data, &receipt)
+	if receipt.SourceUploaded || receipt.SourceImage.ImageName != source.Image.ImageName ||
+		receipt.ResolvedSettings.Scale != 2 || receipt.ResolvedSettings.OutputWidth != 1024 || receipt.ResolvedSettings.OutputHeight != 1024 ||
+		receipt.ResolvedSettings.ModelKey != mainModel || !reflect.DeepEqual(receipt.ResolvedSettings.ComponentKeys, map[string]string{"upscale_model": upscaleModel, "tile_controlnet": tileControlNet}) ||
+		!slices.Equal(receipt.ResolvedSettings.Seeds, []uint32{testSeed}) || receipt.Queue.QueueID != "default" || receipt.Queue.BatchID == "" || len(receipt.Queue.ItemIDs) != 1 ||
+		len(receipt.Outputs) != 1 || receipt.Outputs[0].ItemID != receipt.Queue.ItemIDs[0] || receipt.Outputs[0].Seed != testSeed || len(receipt.Warnings) != 1 ||
+		!slices.Equal(receipt.Warnings[0].Details.NotRestored, []string{"source_image", "upscale_model", "scale", "creativity", "structure", "tile_controlnet", "tile_size", "tile_overlap", "scheduler", "guidance", "vae", "board_id"}) {
+		t.Fatalf("upscale receipt = %#v", receipt)
+	}
+	assertGeneratedImageReference(t, target, receipt.Outputs[0].Image, 1024, 1024)
+}
+
 func writeUniquePNG(t *testing.T) uploadFixture {
+	return writeUniquePNGSize(t, 2)
+}
+
+func writeUniquePNGSize(t *testing.T, side int) uploadFixture {
 	t.Helper()
 	identifier := uuid.New()
 	path := filepath.Join(t.TempDir(), "bediz-e2e-upload-"+identifier.String()+".png")
 	var encoded bytes.Buffer
-	fixture := image.NewNRGBA(image.Rect(0, 0, 2, 2))
-	for index := range 4 {
-		fixture.SetNRGBA(index%2, index/2, color.NRGBA{
-			R: identifier[index*4],
-			G: identifier[index*4+1],
-			B: identifier[index*4+2],
+	fixture := image.NewNRGBA(image.Rect(0, 0, side, side))
+	for index := range side * side {
+		fixture.SetNRGBA(index%side, index/side, color.NRGBA{
+			R: identifier[index%len(identifier)],
+			G: identifier[(index+1)%len(identifier)],
+			B: identifier[(index+2)%len(identifier)],
 			A: 0xff,
 		})
 	}

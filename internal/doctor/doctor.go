@@ -120,8 +120,9 @@ type openAPIDocument struct {
 }
 
 type openAPISchema struct {
-	Properties map[string]openAPIProperty `json:"properties"`
-	Required   []string                   `json:"required"`
+	Properties           map[string]openAPIProperty `json:"properties"`
+	Required             []string                   `json:"required"`
+	AdditionalProperties bool                       `json:"additionalProperties"`
 }
 
 type openAPIProperty struct {
@@ -290,6 +291,9 @@ func inspectOpenAPI(document openAPIDocument) ([]EndpointCheck, []InvocationChec
 				check.MissingProperties = append(check.MissingProperties, property)
 			}
 		}
+		if requirement.RequiresAdditionalProperties && !schema.AdditionalProperties {
+			check.MissingProperties = append(check.MissingProperties, "additionalProperties")
+		}
 		invocations = append(invocations, check)
 	}
 	return endpoints, invocations
@@ -395,7 +399,7 @@ func buildCapabilities(report Report, document openAPIDocument) []CapabilityRepo
 	}
 	if recallReady {
 		for i := range capabilities {
-			if capabilities[i].Operation == result.OperationGenerate && capabilities[i].Compatible {
+			if capabilities[i].Compatible && capability.Matrix[i].UISync != "" {
 				capabilities[i].UISync = capability.Matrix[i].UISync
 			}
 		}
@@ -477,6 +481,7 @@ func uniqueInvocations() []capability.InvocationRequirement {
 	for _, entry := range capability.Matrix {
 		for _, requirement := range entry.Invocations {
 			if index, ok := seen[requirement.Schema]; ok {
+				requirements[index].RequiresAdditionalProperties = requirements[index].RequiresAdditionalProperties || requirement.RequiresAdditionalProperties
 				for _, property := range requirement.Properties {
 					if !slices.Contains(requirements[index].Properties, property) {
 						requirements[index].Properties = append(requirements[index].Properties, property)
@@ -522,7 +527,7 @@ func endpointAvailable(checks []EndpointCheck, requirement capability.EndpointRe
 
 func invocationRequirementAvailable(document openAPIDocument, requirement capability.InvocationRequirement) bool {
 	schema, exists := document.Components.Schemas[requirement.Schema]
-	if !exists || schema.Properties["type"].Const != requirement.Type {
+	if !exists || schema.Properties["type"].Const != requirement.Type || (requirement.RequiresAdditionalProperties && !schema.AdditionalProperties) {
 		return false
 	}
 	for _, property := range requirement.Properties {

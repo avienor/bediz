@@ -7,6 +7,7 @@ const (
 	OperationVersion         = "version"
 	OperationDoctor          = "doctor"
 	OperationGenerate        = "generate"
+	OperationUpscale         = "upscale"
 	OperationRecall          = "recall"
 	OperationConfig          = "config"
 	OperationConfigGet       = "config.get"

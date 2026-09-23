@@ -45,6 +45,45 @@ func TestGenerateDispatchesMainModelsAcrossInstalledFamilies(t *testing.T) {
 	}
 }
 
+func TestSD1MainRemainsUnsupportedForGenerateAndRecall(t *testing.T) {
+	for _, operationName := range []string{"generate", "recall"} {
+		for _, selector := range []string{"sd15-key", "Dreamshaper 8"} {
+			t.Run(operationName+"/"+selector, func(t *testing.T) {
+				isolateUserConfigDir(t)
+				inventory := append(animaModelInventory(), map[string]any{
+					"key": "sd15-key", "hash": "sd15-hash", "name": "Dreamshaper 8", "base": "sd-1", "type": "main",
+					"variant": "normal", "format": "diffusers",
+				})
+				var mutations int
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if serveAnimaPreflight(w, r, "6.14.1", animaOpenAPIFixture("", ""), inventory) {
+						return
+					}
+					if r.Method == http.MethodPost {
+						mutations++
+					}
+					http.NotFound(w, r)
+				}))
+				defer server.Close()
+				args := []string{operationName, "--model", selector, "--url", server.URL, "--json"}
+				if operationName == "generate" {
+					args = append(args, "--prompt", "test", "--no-wait")
+				}
+				var stdout, stderr bytes.Buffer
+				code := cli.New(&stdout, &stderr).Run(t.Context(), args)
+				var envelope result.Envelope
+				if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+					t.Fatal(err)
+				}
+				if code != result.ExitUnsupportedCapability || envelope.Error == nil || envelope.Error.Code != result.CodeUnsupportedCapability ||
+					envelope.Error.Message != `model family "sd-1" is not supported for generation` || mutations != 0 || stderr.Len() != 0 {
+					t.Fatalf("code=%d envelope=%#v mutations=%d stderr=%q", code, envelope, mutations, stderr.String())
+				}
+			})
+		}
+	}
+}
+
 func TestGenerateAmbiguousMainNameAcrossFamiliesRequiresSelection(t *testing.T) {
 	isolateUserConfigDir(t)
 	inventory := append(animaModelInventory(), map[string]any{

@@ -1,13 +1,13 @@
 package generation
 
 import (
-	"cmp"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"math"
 	"slices"
 
+	"github.com/avienor/bediz/internal/graphops"
 	"github.com/avienor/bediz/internal/operation"
 )
 
@@ -22,19 +22,13 @@ type Resolution struct {
 // AnimaResolution is the Anima compiler's resolution value.
 type AnimaResolution = Resolution
 
-type modelRequirement struct {
-	kind      string
-	base      string
-	modelType string
-}
-
 var (
-	animaVAERequirement     = modelRequirement{kind: "vae", base: "anima", modelType: "vae"}
-	sdxlVAERequirement      = modelRequirement{kind: "vae", base: "sdxl", modelType: "vae"}
-	qwen3EncoderRequirement = modelRequirement{kind: "qwen3_encoder", base: "any", modelType: "qwen3_encoder"}
-	fluxVAERequirement      = modelRequirement{kind: "vae", base: "flux", modelType: "vae"}
-	fluxT5Requirement       = modelRequirement{kind: "t5_encoder", base: "any", modelType: "t5_encoder"}
-	fluxCLIPRequirement     = modelRequirement{kind: "clip_embed", base: "any", modelType: "clip_embed"}
+	animaVAERequirement     = graphops.ComponentRequirement{Kind: "vae", Base: "anima", ModelType: "vae"}
+	sdxlVAERequirement      = graphops.ComponentRequirement{Kind: "vae", Base: "sdxl", ModelType: "vae"}
+	qwen3EncoderRequirement = graphops.ComponentRequirement{Kind: "qwen3_encoder", Base: "any", ModelType: "qwen3_encoder"}
+	fluxVAERequirement      = graphops.ComponentRequirement{Kind: "vae", Base: "flux", ModelType: "vae"}
+	fluxT5Requirement       = graphops.ComponentRequirement{Kind: "t5_encoder", Base: "any", ModelType: "t5_encoder"}
+	fluxCLIPRequirement     = graphops.ComponentRequirement{Kind: "clip_embed", Base: "any", ModelType: "clip_embed"}
 )
 
 // ResolveSDXL resolves an SDXL main model and its optional explicit VAE override.
@@ -86,7 +80,7 @@ func resolveSDXL(request Request, mainModel ModelIdentifier, inventory []ModelId
 	if *resolved.Steps < 1 {
 		return Resolution{}, operation.InvalidRequest("steps must be positive")
 	}
-	if !slices.Contains(sdxlSchedulers, *resolved.Scheduler) {
+	if !graphops.IsSDXLScheduler(*resolved.Scheduler) {
 		return Resolution{}, operation.InvalidRequest("scheduler is not supported for SDXL")
 	}
 	if math.IsNaN(*resolved.Guidance) || math.IsInf(*resolved.Guidance, 0) || *resolved.Guidance < 1 {
@@ -104,20 +98,13 @@ func resolveSDXL(request Request, mainModel ModelIdentifier, inventory []ModelId
 		if *request.Components.VAE == "" {
 			return Resolution{}, operation.InvalidRequest("VAE override must be a model key or unique name")
 		}
-		vae, err := resolveUniqueCompatible(inventory, *request.Components.VAE, sdxlVAERequirement)
+		vae, err := graphops.ResolveUniqueCompatible(inventory, *request.Components.VAE, sdxlVAERequirement)
 		if err != nil {
 			return Resolution{}, fmt.Errorf("resolve SDXL VAE: %w", err)
 		}
 		models.VAE = vae
 	}
 	return Resolution{Request: resolved, Models: models, Seeds: seeds}, nil
-}
-
-var sdxlSchedulers = []string{
-	"ddim", "ddpm", "deis", "deis_k", "lms", "lms_k", "pndm", "heun", "heun_k", "euler", "euler_k", "euler_a",
-	"kdpm_2", "kdpm_2_k", "kdpm_2_a", "kdpm_2_a_k", "dpmpp_2s", "dpmpp_2s_k", "dpmpp_2m", "dpmpp_2m_k",
-	"dpmpp_2m_sde", "dpmpp_2m_sde_k", "dpmpp_3m", "dpmpp_3m_k", "dpmpp_sde", "dpmpp_sde_k", "er_sde",
-	"unipc", "unipc_k", "lcm", "tcd",
 }
 
 // ResolveAnima applies Anima family defaults and resolves the required
@@ -164,11 +151,11 @@ func resolveAnima(request Request, mainModel ModelIdentifier, inventory []ModelI
 			encoderSelector = *request.Components.Qwen3Encoder
 		}
 	}
-	vae, err := resolveComponent(inventory, vaeSelector, animaVAERequirement)
+	vae, err := graphops.ResolveComponent(inventory, vaeSelector, animaVAERequirement)
 	if err != nil {
 		return AnimaResolution{}, fmt.Errorf("resolve Anima VAE: %w", err)
 	}
-	encoder, err := resolveComponent(inventory, encoderSelector, qwen3EncoderRequirement)
+	encoder, err := graphops.ResolveComponent(inventory, encoderSelector, qwen3EncoderRequirement)
 	if err != nil {
 		return AnimaResolution{}, fmt.Errorf("resolve Qwen3 encoder: %w", err)
 	}
@@ -254,103 +241,4 @@ func validateAnimaSettings(request Request) error {
 		return operation.InvalidRequest("output count must be positive")
 	}
 	return nil
-}
-
-func resolveComponent(inventory []ModelIdentifier, selector string, requirement modelRequirement) (ModelIdentifier, error) {
-	if selector != "" {
-		return resolveUniqueCompatible(inventory, selector, requirement)
-	}
-	return resolveOnlyCompatible(inventory, requirement)
-}
-
-func resolveUniqueCompatible(inventory []ModelIdentifier, selector string, requirement modelRequirement) (ModelIdentifier, error) {
-	for _, model := range inventory {
-		if model.Key != selector {
-			continue
-		}
-		if err := validateModelCompatibility(model, requirement); err != nil {
-			return ModelIdentifier{}, err
-		}
-		return completeModelIdentifier(model)
-	}
-	var matches []ModelIdentifier
-	for _, model := range inventory {
-		if model.Name == selector {
-			matches = append(matches, model)
-		}
-	}
-	if len(matches) == 1 {
-		if err := validateModelCompatibility(matches[0], requirement); err != nil {
-			return ModelIdentifier{}, err
-		}
-		return completeModelIdentifier(matches[0])
-	}
-	if len(matches) > 1 {
-		candidates, err := selectionCandidates(matches)
-		if err != nil {
-			return ModelIdentifier{}, err
-		}
-		return ModelIdentifier{}, operation.SelectionRequired(requirement.kind, selector, candidates)
-	}
-	return ModelIdentifier{}, operation.InvalidRequest(fmt.Sprintf("model selector %q did not resolve to an installed model", selector))
-}
-
-func resolveOnlyCompatible(inventory []ModelIdentifier, requirement modelRequirement) (ModelIdentifier, error) {
-	var matches []ModelIdentifier
-	for _, model := range inventory {
-		if model.Base == requirement.base && model.Type == requirement.modelType {
-			matches = append(matches, model)
-		}
-	}
-	if len(matches) == 1 {
-		return completeModelIdentifier(matches[0])
-	}
-	if len(matches) > 1 {
-		candidates, err := selectionCandidates(matches)
-		if err != nil {
-			return ModelIdentifier{}, err
-		}
-		return ModelIdentifier{}, operation.SelectionRequired(requirement.kind, "", candidates)
-	}
-	guidance := fmt.Sprintf(
-		"install an InvokeAI model with base %q and type %q", requirement.base, requirement.modelType,
-	)
-	return ModelIdentifier{}, operation.MissingComponent(
-		requirement.kind, requirement.base, requirement.modelType, guidance,
-	)
-}
-
-func validateModelCompatibility(model ModelIdentifier, requirement modelRequirement) error {
-	if model.Base == requirement.base && model.Type == requirement.modelType {
-		return nil
-	}
-	return operation.UnsupportedCapability(fmt.Sprintf(
-		"model %q has base %q and type %q; expected base %q and type %q",
-		model.Key, model.Base, model.Type, requirement.base, requirement.modelType,
-	))
-}
-
-func completeModelIdentifier(model ModelIdentifier) (ModelIdentifier, error) {
-	if model.Key == "" || model.Hash == "" || model.Name == "" || model.Base == "" || model.Type == "" {
-		return ModelIdentifier{}, operation.UnsupportedCapability(fmt.Sprintf(
-			"installed model %q does not provide a complete InvokeAI model identifier", model.Key,
-		))
-	}
-	return model, nil
-}
-
-func selectionCandidates(models []ModelIdentifier) ([]operation.SelectionCandidate, error) {
-	for _, model := range models {
-		if _, err := completeModelIdentifier(model); err != nil {
-			return nil, err
-		}
-	}
-	slices.SortFunc(models, func(a, b ModelIdentifier) int { return cmp.Compare(a.Key, b.Key) })
-	candidates := make([]operation.SelectionCandidate, 0, len(models))
-	for _, model := range models {
-		candidates = append(candidates, operation.SelectionCandidate{
-			Key: model.Key, Name: model.Name, Base: model.Base, Type: model.Type,
-		})
-	}
-	return candidates, nil
 }

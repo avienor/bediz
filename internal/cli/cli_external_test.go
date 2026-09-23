@@ -2863,6 +2863,46 @@ func TestImagesUploadLostResponseReturnsUnknownOutcomeWithoutRetry(t *testing.T)
 	}
 }
 
+func TestImagesUploadResponseWithoutImageNameReturnsUnknownOutcome(t *testing.T) {
+	isolateUserConfigDir(t)
+	imagePath := filepath.Join(t.TempDir(), "source.png")
+	writeTestPNG(t, imagePath)
+	var uploads atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_ = json.NewEncoder(w).Encode(map[string]string{"version": "6.14.1"})
+		case "/api/v1/images/upload":
+			uploads.Add(1)
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"image_url": "api/v1/images/i/uploaded.png/full", "thumbnail_url": "api/v1/images/i/uploaded.png/thumbnail",
+				"image_origin": "external", "image_category": "user", "width": 1, "height": 1,
+				"created_at": "created", "updated_at": "updated", "is_intermediate": false, "starred": false, "has_workflow": false,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{"images", "upload", imagePath, "--url", server.URL, "--json"})
+
+	if exitCode != result.ExitInvokeAIFailure || stderr.Len() != 0 || uploads.Load() != 1 {
+		t.Fatalf("exit code = %d, uploads = %d, stderr = %q, stdout = %q", exitCode, uploads.Load(), stderr.String(), stdout.String())
+	}
+	var envelope result.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
+	}
+	if envelope.OK || envelope.Operation != "images.upload" || envelope.Error == nil || envelope.Error.Code != "outcome_unknown" {
+		t.Fatalf("unexpected envelope: %#v", envelope)
+	}
+}
+
 func TestImagesUploadRejectsRelativePathBeforeConnecting(t *testing.T) {
 	isolateUserConfigDir(t)
 	var stdout bytes.Buffer
@@ -3228,7 +3268,11 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 				{"key": "main", "hash": "blake3:main", "name": "Anima", "base": "anima", "type": "main"},
 				{"key": "vae", "hash": "blake3:vae", "name": "VAE", "base": "anima", "type": "vae"},
 				{"key": "encoder", "hash": "blake3:encoder", "name": "Qwen3", "base": "any", "type": "qwen3_encoder"},
-				{"key": "sdxl", "hash": "blake3:sdxl", "name": "SDXL", "base": "sdxl", "type": "main"},
+				{"key": "sdxl", "hash": "blake3:sdxl", "name": "SDXL", "base": "sdxl", "type": "main", "variant": "normal"},
+				{"key": "spandrel", "hash": "blake3:spandrel", "name": "RealESRGAN x4plus", "base": "any", "type": "spandrel_image_to_image"},
+				{"key": "tile", "hash": "blake3:tile", "name": "Tile", "base": "sdxl", "type": "controlnet"},
+				{"key": "sd1", "hash": "blake3:sd1", "name": "Dreamshaper 8", "base": "sd-1", "type": "main", "variant": "normal"},
+				{"key": "sd1-tile", "hash": "blake3:sd1-tile", "name": "Tile", "base": "sd-1", "type": "controlnet"},
 				{"key": "flux-main", "hash": "blake3:flux-main", "name": "FLUX dev", "base": "flux", "type": "main", "format": "checkpoint", "variant": "dev"},
 				{"key": "flux-vae", "hash": "blake3:flux-vae", "name": "FLUX VAE", "base": "flux", "type": "vae"},
 				{"key": "flux-t5", "hash": "blake3:flux-t5", "name": "T5", "base": "any", "type": "t5_encoder"},
@@ -3278,10 +3322,10 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 		}
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "generate", "generate", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
+	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if envelope.SchemaVersion != 1 || !envelope.OK || envelope.Operation != "doctor" || !envelope.Data.Ready ||
 		!slices.Equal(operations, wantOperations) || envelope.Data.UISync["generate"] != "partial" ||
-		len(envelope.Data.OpenAPI.Invocations) != 18 || len(envelope.Data.Models.Relevant) != 8 || len(envelope.Data.Models.Requirements) != 8 {
+		len(envelope.Data.OpenAPI.Invocations) != 26 || len(envelope.Data.Models.Relevant) != 12 || len(envelope.Data.Models.Requirements) != 13 {
 		t.Fatalf("unexpected doctor envelope: %#v", envelope)
 	}
 }

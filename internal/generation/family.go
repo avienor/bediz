@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/avienor/bediz/internal/capability"
+	"github.com/avienor/bediz/internal/graphops"
 	"github.com/avienor/bediz/internal/operation"
 )
 
@@ -144,40 +145,17 @@ func adapterForBase(base string) (familyAdapter, error) {
 	return adapter, nil
 }
 
-// ResolveFamilyMain selects an installed main model across all bases, then
-// checks whether its family has a registered adapter.
+// ResolveFamilyMain selects an installed main model, then applies the
+// generation family registry. Other graph operations use graphops.ResolveMain.
 func ResolveFamilyMain(inventory []ModelIdentifier, selector string) (ModelIdentifier, error) {
-	for _, model := range inventory {
-		if model.Key == selector {
-			if model.Type != "main" {
-				return ModelIdentifier{}, operation.UnsupportedCapability(fmt.Sprintf("model %q has type %q; expected type %q", model.Key, model.Type, "main"))
-			}
-			if _, err := adapterForBase(model.Base); err != nil {
-				return ModelIdentifier{}, err
-			}
-			return completeModelIdentifier(model)
-		}
+	model, err := graphops.ResolveMain(inventory, selector)
+	if err != nil {
+		return ModelIdentifier{}, err
 	}
-	var matches []ModelIdentifier
-	for _, model := range inventory {
-		if model.Type == "main" && model.Name == selector {
-			matches = append(matches, model)
-		}
+	if _, err := adapterForBase(model.Base); err != nil {
+		return ModelIdentifier{}, err
 	}
-	if len(matches) > 1 {
-		candidates, err := selectionCandidates(matches)
-		if err != nil {
-			return ModelIdentifier{}, err
-		}
-		return ModelIdentifier{}, operation.SelectionRequired("main_model", selector, candidates)
-	}
-	if len(matches) == 1 {
-		if _, err := adapterForBase(matches[0].Base); err != nil {
-			return ModelIdentifier{}, err
-		}
-		return completeModelIdentifier(matches[0])
-	}
-	return ModelIdentifier{}, operation.InvalidRequest(fmt.Sprintf("model selector %q did not resolve to an installed model", selector))
+	return graphops.CompleteModelIdentifier(model)
 }
 
 // ValidateRecall checks settings whose meaning depends on the selected family.
