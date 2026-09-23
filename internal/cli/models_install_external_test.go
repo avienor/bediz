@@ -90,6 +90,127 @@ func TestModelsInstallFlagsAndDocumentProduceSameSafeEnvelope(t *testing.T) {
 	}
 }
 
+func TestModelsInstallProtectedURLUsesTemporaryStdinToken(t *testing.T) {
+	isolateUserConfigDir(t)
+	const sourceToken = "source-token-sentinel-742"
+	const connectionToken = "connection-token-sentinel-851"
+	var posts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}]}}}}`))
+		case "/api/v2/models/install":
+			posts.Add(1)
+			if r.Method != http.MethodPost || r.URL.Query().Get("source") != "https://example.org/protected.safetensors" || r.URL.Query().Get("access_token") != sourceToken || r.Header.Get("Authorization") != "Bearer "+connectionToken || len(r.URL.Query()) != 2 {
+				t.Errorf("incorrect protected installation request")
+			}
+			_, _ = w.Write([]byte(`{"id":9,"status":"waiting","source":{"access_token":"` + sourceToken + `"},"error":"` + sourceToken + `"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	document := `{"schema_version":1,"source":{"type":"url","reference":"https://example.org/protected.safetensors"}}`
+	path := filepath.Join(t.TempDir(), "request.json")
+	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"models", "install", "--source-type", "url", "--source", "https://example.org/protected.safetensors", "--token-stdin", "--url", server.URL, "--token", connectionToken, "--json"},
+		{"models", "install", "--request", path, "--token-stdin", "--url", server.URL, "--token", connectionToken, "--json"},
+	} {
+		code, stdout, stderr := runModelCommand(t, sourceToken+"\n", args...)
+		if code != result.ExitSuccess || !strings.Contains(stdout, `"job_id":9`) || stderr != "" || strings.Contains(stdout+stderr, sourceToken) || strings.Contains(stdout+stderr, connectionToken) {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+		}
+	}
+	if posts.Load() != 2 {
+		t.Fatalf("posts = %d", posts.Load())
+	}
+}
+
+func TestModelsInstallProtectedURLRejectsMissingTokenAndStdinConflictBeforeNetwork(t *testing.T) {
+	isolateUserConfigDir(t)
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests.Add(1) }))
+	t.Cleanup(server.Close)
+	for _, test := range []struct {
+		name  string
+		stdin string
+		args  []string
+	}{
+		{"empty", "", []string{"--source-type", "url", "--source", "https://example.org/model", "--token-stdin"}},
+		{"whitespace", " \r\n", []string{"--source-type", "url", "--source", "https://example.org/model", "--token-stdin"}},
+		{"stdin conflict", "source-token-sentinel-742", []string{"--request", "-", "--token-stdin"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			args := append([]string{"models", "install"}, test.args...)
+			args = append(args, "--url", server.URL, "--json")
+			code, stdout, stderr := runModelCommand(t, test.stdin, args...)
+			if code != result.ExitInvalidRequest || !strings.Contains(stdout, `"code":"invalid_request"`) || strings.Contains(stdout+stderr, "source-token-sentinel-742") || requests.Load() != 0 {
+				t.Fatalf("code=%d stdout=%q stderr=%q requests=%d", code, stdout, stderr, requests.Load())
+			}
+		})
+	}
+}
+
+func TestModelsInstallProtectedURLFailuresNeverRevealTokenOrRetry(t *testing.T) {
+	isolateUserConfigDir(t)
+	const token = "source-token-sentinel-742"
+	for _, test := range []struct {
+		name     string
+		response func(http.ResponseWriter)
+		code     string
+		status   int
+		human    bool
+	}{
+		{"authentication", func(w http.ResponseWriter) { http.Error(w, token, http.StatusUnauthorized) }, "authentication_failed", result.ExitConnection, false},
+		{"authentication diagnostic", func(w http.ResponseWriter) { http.Error(w, token, http.StatusUnauthorized) }, "authentication_failed", result.ExitConnection, true},
+		{"invalid response", func(w http.ResponseWriter) { _, _ = w.Write([]byte(token)) }, "outcome_unknown", result.ExitInvokeAIFailure, false},
+		{"lost response", func(w http.ResponseWriter) {
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				_ = conn.Close()
+			}
+		}, "outcome_unknown", result.ExitInvokeAIFailure, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var posts atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/app/version":
+					_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+				case "/openapi.json":
+					_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}]}}}}`))
+				case "/api/v2/models/install":
+					posts.Add(1)
+					if r.URL.Query().Get("access_token") != token {
+						t.Error("POST did not carry source token")
+					}
+					test.response(w)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(server.Close)
+			args := []string{"models", "install", "--source-type", "url", "--source", "https://example.org/model", "--token-stdin", "--url", server.URL}
+			if !test.human {
+				args = append(args, "--json")
+			}
+			code, stdout, stderr := runModelCommand(t, token+"\n", args...)
+			correctOutput := strings.Contains(stdout, `"code":"`+test.code+`"`) && stderr == ""
+			if test.human {
+				correctOutput = stdout == "" && strings.Contains(stderr, test.code)
+			}
+			if code != test.status || !correctOutput || strings.Contains(stdout+stderr, token) || posts.Load() != 1 {
+				t.Fatalf("code=%d stdout=%q stderr=%q posts=%d", code, stdout, stderr, posts.Load())
+			}
+		})
+	}
+}
+
 func TestModelsStatusFlagsAndDocumentProjectCurrentJob(t *testing.T) {
 	isolateUserConfigDir(t)
 	var posts atomic.Int32
@@ -121,6 +242,8 @@ func TestModelsInstallRejectsInvalidDocumentsAndMixedFlagsBeforeMutation(t *test
 	}{
 		{`{"schema_version":1,"source":{"type":"url","reference":"https://example.org/model?token=x"}}`, nil},
 		{`{"schema_version":1,"source":{"type":"url","reference":"https://example.org/model","file_id":1}}`, nil},
+		{`{"schema_version":1,"source":{"type":"url","reference":"https://example.org/model","access_token":"source-token-sentinel-742"}}`, nil},
+		{`{"schema_version":1,"source":{"type":"url","reference":"https://example.org/model"},"source_token":"source-token-sentinel-742"}`, nil},
 		{`{"schema_version":1,"source":{"type":"path","reference":"/tmp/model"}}`, nil},
 		{`{"schema_version":1,"source":{"type":"url","reference":"https://example.org/model"}}`, []string{"--source-type", "url"}},
 	} {

@@ -32,7 +32,7 @@ func TestInstallURLSubmitsOneGenericPOSTAndProjectsJob(t *testing.T) {
 		case "/api/v1/app/version":
 			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
 		case "/openapi.json":
-			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}]}}}}`))
+			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}]}}}}`))
 		case "/api/v2/models/install":
 			posts.Add(1)
 			if r.Method != http.MethodPost || r.URL.Query().Get("source") != "https://example.org/model.safetensors" {
@@ -202,5 +202,67 @@ func TestInstallUntestedVersionRejectsBeforeMutation(t *testing.T) {
 	_, err := models.Install(t.Context(), client, models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "url", Reference: "https://example.org/model"}})
 	if _, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); !ok || posts.Load() != 0 {
 		t.Fatalf("error = %v; posts = %d", err, posts.Load())
+	}
+}
+
+type installTransportFunc func(*http.Request) (*http.Response, error)
+
+func (f installTransportFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+func TestInstallProtectedURLRejectsNonLoopbackPlainHTTPBeforeNetwork(t *testing.T) {
+	var requests atomic.Int32
+	client, err := httpclient.New("http://invoke.example", "", httpclient.Options{HTTPClient: &http.Client{Transport: installTransportFunc(func(*http.Request) (*http.Response, error) {
+		requests.Add(1)
+		return nil, errors.New("unexpected request")
+	})}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = models.Install(t.Context(), client, models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "url", Reference: "https://example.org/model"}, SourceToken: "source-token-sentinel-742"})
+	if _, ok := errors.AsType[*operation.InvalidRequestError](err); !ok || requests.Load() != 0 || strings.Contains(err.Error(), "source-token-sentinel-742") {
+		t.Fatalf("error=%v requests=%d", err, requests.Load())
+	}
+}
+
+func TestInstallProtectedURLRedactsBackendFailureFromPublicError(t *testing.T) {
+	const token = "source-token-sentinel-742"
+	var posts atomic.Int32
+	client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}]}}}}`))
+		case "/api/v2/models/install":
+			posts.Add(1)
+			if r.URL.Query().Get("access_token") != token {
+				t.Error("source token missing from native parameter")
+			}
+			http.Error(w, "rejected "+token, http.StatusUnauthorized)
+		}
+	})
+	_, err := models.Install(t.Context(), client, models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "url", Reference: "https://example.org/model"}, SourceToken: token})
+	if httpErr, ok := errors.AsType[*httpclient.HTTPError](err); !ok || httpErr.StatusCode != http.StatusUnauthorized || httpErr.Body != "" || strings.Contains(err.Error(), token) || strings.Contains(err.Error(), "access_token") || posts.Load() != 1 {
+		t.Fatalf("error=%v posts=%d", err, posts.Load())
+	}
+}
+
+func TestInstallProtectedURLRequiresAdvertisedAccessTokenParameter(t *testing.T) {
+	var posts atomic.Int32
+	client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}]}}}}`))
+		case "/api/v2/models/install":
+			posts.Add(1)
+		}
+	})
+	_, err := models.Install(t.Context(), client, models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "url", Reference: "https://example.org/model"}, SourceToken: "source-token-sentinel-742"})
+	if _, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); !ok || posts.Load() != 0 {
+		t.Fatalf("error=%v posts=%d", err, posts.Load())
 	}
 }

@@ -66,6 +66,15 @@ func (endpoint InstallEndpoint) HasRequiredSource() bool {
 	return false
 }
 
+func (endpoint InstallEndpoint) HasAccessTokenQuery() bool {
+	for _, parameter := range endpoint.Parameters {
+		if parameter.Name == "access_token" && parameter.In == "query" {
+			return true
+		}
+	}
+	return false
+}
+
 type InvocationRequirement struct {
 	Schema     string
 	Type       string

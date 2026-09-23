@@ -22,6 +22,7 @@ type InstallSource struct {
 type InstallRequest struct {
 	SchemaVersion int           `json:"schema_version"`
 	Source        InstallSource `json:"source"`
+	SourceToken   string        `json:"-"`
 }
 
 type InstallJob struct {
@@ -68,12 +69,25 @@ func Install(ctx context.Context, client *httpclient.Client, request InstallRequ
 	if err := validateArtifactURL(request.Source.Reference); err != nil {
 		return InstallResult{}, err
 	}
-	if err := checkInstallCompatibility(ctx, client); err != nil {
+	if request.SourceToken != "" && !client.AllowsSourceToken() {
+		return InstallResult{}, operation.InvalidRequest("source token requires HTTPS or a loopback InvokeAI target")
+	}
+	if err := checkInstallCompatibility(ctx, client, request.SourceToken != ""); err != nil {
 		return InstallResult{}, err
 	}
 	query := url.Values{"source": {request.Source.Reference}}
+	if request.SourceToken != "" {
+		query.Set("access_token", request.SourceToken)
+	}
 	var job installBackendJob
-	if err := client.DoJSON(ctx, http.MethodPost, "/api/v2/models/install?"+query.Encode(), map[string]any{}, &job); err != nil {
+	path := "/api/v2/models/install?" + query.Encode()
+	var err error
+	if request.SourceToken != "" {
+		err = client.DoJSONPrivate(ctx, http.MethodPost, path, map[string]any{}, &job)
+	} else {
+		err = client.DoJSON(ctx, http.MethodPost, path, map[string]any{}, &job)
+	}
+	if err != nil {
 		return InstallResult{}, err
 	}
 	if err := validBackendJob(job); err != nil {
@@ -126,7 +140,7 @@ func validBackendJob(job installBackendJob) error {
 	}
 }
 
-func checkInstallCompatibility(ctx context.Context, client *httpclient.Client) error {
+func checkInstallCompatibility(ctx context.Context, client *httpclient.Client, hasSourceToken bool) error {
 	var version struct {
 		Version string `json:"version"`
 	}
@@ -150,8 +164,11 @@ func checkInstallCompatibility(ctx context.Context, client *httpclient.Client) e
 	if !ok {
 		return operation.UnsupportedCapability("InvokeAI generic model installation endpoint is unavailable")
 	}
-	if post.HasRequiredSource() {
-		return nil
+	if !post.HasRequiredSource() {
+		return operation.UnsupportedCapability("InvokeAI generic model installation source parameter is unavailable")
 	}
-	return operation.UnsupportedCapability("InvokeAI generic model installation source parameter is unavailable")
+	if hasSourceToken && !post.HasAccessTokenQuery() {
+		return operation.UnsupportedCapability("InvokeAI generic model installation access token parameter is unavailable")
+	}
+	return nil
 }

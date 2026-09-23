@@ -228,6 +228,71 @@ func TestMutationConnectionLossHasUnknownOutcome(t *testing.T) {
 	}
 }
 
+func TestPrivateMutationRedactsTransportURLAndFailure(t *testing.T) {
+	const token = "source-token-sentinel-742"
+	var calls atomic.Int32
+	client, err := New("https://invoke.example", "connection-token", Options{
+		HTTPClient: &http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+			calls.Add(1)
+			if request.URL.Query().Get("access_token") != token {
+				t.Error("token did not reach InvokeAI request")
+			}
+			return nil, errors.New("transport failed at " + request.URL.String())
+		})},
+		Retries: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = client.DoJSONPrivate(t.Context(), http.MethodPost, "/api/v2/models/install?source=model&access_token="+token, map[string]any{}, nil)
+	unknown, ok := errors.AsType[*OutcomeUnknownError](err)
+	if !ok || unknown.URL != "" || strings.Contains(err.Error(), token) || strings.Contains(err.Error(), "access_token") || calls.Load() != 1 {
+		t.Fatalf("error=%v calls=%d", err, calls.Load())
+	}
+}
+
+func TestPrivateMutationDoesNotForwardTokenOnRedirect(t *testing.T) {
+	const token = "source-token-sentinel-742"
+	var redirected atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { redirected.Add(1) }))
+	defer other.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", other.URL+"/captured?access_token="+token)
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	defer server.Close()
+	client, err := New(server.URL, "", Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = client.DoJSONPrivate(t.Context(), http.MethodPost, "/install?access_token="+token, map[string]any{}, nil)
+	httpErr, ok := errors.AsType[*HTTPError](err)
+	if !ok || httpErr.StatusCode != http.StatusTemporaryRedirect || redirected.Load() != 0 || strings.Contains(err.Error(), token) {
+		t.Fatalf("error=%v redirected=%d", err, redirected.Load())
+	}
+}
+
+func TestSourceTokenTargetAllowsLoopbackAndHTTPS(t *testing.T) {
+	for _, test := range []struct {
+		baseURL string
+		allowed bool
+	}{
+		{"http://127.0.0.1:9090", true},
+		{"http://[::1]:9090", true},
+		{"http://localhost:9090", true},
+		{"http://192.0.2.1:9090", false},
+		{"https://invoke.example", true},
+	} {
+		client, err := New(test.baseURL, "", Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := client.AllowsSourceToken(); got != test.allowed {
+			t.Errorf("target %q allows source token = %t, want %t", test.baseURL, got, test.allowed)
+		}
+	}
+}
+
 func TestAuthenticationFailureIsClassified(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "denied", http.StatusUnauthorized)

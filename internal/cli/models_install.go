@@ -1,10 +1,14 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"strings"
 
+	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/models"
+	"github.com/avienor/bediz/internal/operation"
 	"github.com/avienor/bediz/internal/result"
 	"github.com/spf13/cobra"
 )
@@ -14,6 +18,7 @@ type modelInstallOptions struct {
 	requestPath string
 	sourceType  string
 	source      string
+	tokenStdin  bool
 }
 
 func (c *CLI) newModelsInstallCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
@@ -22,13 +27,29 @@ func (c *CLI) newModelsInstallCommand(exitCode *int, jsonOutput *bool) *cobra.Co
 		Use: "install", Short: "Install a model from an exact URL", Args: cobra.NoArgs,
 		Annotations: map[string]string{operationAnnotation: result.OperationModelsInstall},
 		Run: func(cmd *cobra.Command, _ []string) {
+			if options.requestPath == "-" && options.tokenStdin {
+				*exitCode = c.fail(result.OperationModelsInstall, *jsonOutput, result.CodeInvalidRequest, "--request - cannot be combined with --token-stdin", nil)
+				return
+			}
 			options.captureRemoteFlags(cmd)
 			request := models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: options.sourceType, Reference: options.source}}
 			execution := remoteExecution[models.InstallRequest, models.InstallResult]{
 				operation: result.OperationModelsInstall, connection: options.remoteOptions, request: request,
 				requestPath:       options.requestPath,
 				operationFlagsSet: cmd.Flags().Changed("source-type") || cmd.Flags().Changed("source"),
-				invoke:            models.Install, render: renderInstallResult,
+				invoke: func(ctx context.Context, client *httpclient.Client, request models.InstallRequest) (models.InstallResult, error) {
+					if options.tokenStdin {
+						data, err := io.ReadAll(c.stdin)
+						if err != nil {
+							return models.InstallResult{}, operation.InvalidRequest("could not read source token from standard input")
+						}
+						request.SourceToken = strings.TrimSpace(string(data))
+						if request.SourceToken == "" {
+							return models.InstallResult{}, operation.InvalidRequest("source token must not be empty")
+						}
+					}
+					return models.Install(ctx, client, request)
+				}, render: renderInstallResult,
 			}
 			*exitCode = execution.run(cmd.Context(), c, *jsonOutput)
 		},
@@ -37,6 +58,7 @@ func (c *CLI) newModelsInstallCommand(exitCode *int, jsonOutput *bool) *cobra.Co
 	command.Flags().StringVar(&options.requestPath, "request", "", "read a request document from a file or standard input with -")
 	command.Flags().StringVar(&options.sourceType, "source-type", "", "model source type (url)")
 	command.Flags().StringVar(&options.source, "source", "", "exact HTTP(S) artifact URL")
+	command.Flags().BoolVar(&options.tokenStdin, "token-stdin", false, "read a temporary source access token from standard input")
 	return command
 }
 
