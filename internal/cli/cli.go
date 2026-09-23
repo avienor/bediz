@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -123,20 +125,51 @@ func (c *CLI) loadRequestDocument(path string, target any) error {
 		reader = file
 	}
 
-	// Request Documents keep the legacy decoding semantics, except that member
-	// names match exactly and unknown or repeated members are rejected at every
-	// depth.
-	decoder := jsontext.NewDecoder(reader, json.DefaultOptionsV1(),
-		jsonv2.MatchCaseInsensitiveNames(false), jsontext.AllowDuplicateNames(false), jsonv2.RejectUnknownMembers(true))
-	if err := jsonv2.UnmarshalDecode(decoder, target); err != nil {
+	decoder := jsontext.NewDecoder(reader, requestDocumentOptions)
+	document, err := decoder.ReadValue()
+	if err != nil {
 		return fmt.Errorf("decode request document: %w", err)
 	}
-	if _, err := decoder.ReadToken(); errors.Is(err, io.EOF) {
-		return nil
-	} else if err != nil {
+	document = document.Clone()
+	if _, err := decoder.ReadToken(); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return fmt.Errorf("decode request document: %w", err)
+		}
+		return errors.New("request document must contain exactly one JSON value")
+	}
+	if err := rejectNullMembers(document); err != nil {
+		return err
+	}
+	if err := jsonv2.Unmarshal(document, target, requestDocumentOptions); err != nil {
 		return fmt.Errorf("decode request document: %w", err)
 	}
-	return errors.New("request document must contain exactly one JSON value")
+	return nil
+}
+
+// requestDocumentOptions keep the legacy decoding semantics, except that member
+// names match exactly and unknown or repeated members are rejected at every
+// depth.
+var requestDocumentOptions = jsonv2.JoinOptions(json.DefaultOptionsV1(),
+	jsonv2.MatchCaseInsensitiveNames(false), jsontext.AllowDuplicateNames(false), jsonv2.RejectUnknownMembers(true))
+
+// rejectNullMembers reports the first explicit null member value in document
+// order, so an optional field is always omitted rather than null and the same
+// document always names the same field.
+func rejectNullMembers(document jsontext.Value) error {
+	decoder := jsontext.NewDecoder(bytes.NewReader(document), requestDocumentOptions)
+	for {
+		token, err := decoder.ReadToken()
+		if errors.Is(err, io.EOF) {
+			return nil
+		} else if err != nil {
+			return fmt.Errorf("decode request document: %w", err)
+		}
+		parent, _ := decoder.StackIndex(decoder.StackDepth())
+		if isMemberValue := parent == '{'; isMemberValue && token.Kind() == 'n' {
+			field := strings.Join(slices.Collect(decoder.StackPointer().Tokens()), ".")
+			return fmt.Errorf("field %q cannot be null", field)
+		}
+	}
 }
 
 func (c *CLI) newDoctorCommand(exitCode *int, jsonOutput *bool) *cobra.Command {

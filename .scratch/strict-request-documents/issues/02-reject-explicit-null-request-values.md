@@ -25,9 +25,9 @@
 
 **Permanent records:** V1 spec and tests. §8.1 states that explicit null member values are validation errors in every Request Document, and §13 refers to that rule instead of restating it for `upscale`. No new terminology and no ADR (this extends the existing strict request contract to nulls).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Explicit nulls are rejected before network access for `generate`, `recall`, and `models install`, at every depth
-- [ ] A document with several nulls reports the same field on every run
-- [ ] `upscale` null behavior is unchanged
-- [ ] V1 §8.1 records the general rule and §13 refers to it
+- [x] Explicit nulls are rejected before network access for `generate`, `recall`, and `models install`, at every depth
+- [x] A document with several nulls reports the same field on every run
+- [x] `upscale` null behavior is unchanged
+- [x] V1 §8.1 records the general rule and §13 refers to it
