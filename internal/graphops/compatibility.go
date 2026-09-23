@@ -31,7 +31,8 @@ func CheckVersion(ctx context.Context, client *httpclient.Client) error {
 type openAPIDocument struct {
 	Components struct {
 		Schemas map[string]struct {
-			Properties map[string]struct {
+			AdditionalProperties bool `json:"additionalProperties"`
+			Properties           map[string]struct {
 				Const string `json:"const"`
 			} `json:"properties"`
 		} `json:"schemas"`
@@ -51,6 +52,9 @@ func CheckInvocations(ctx context.Context, client *httpclient.Client, requiremen
 		}
 		if schema.Properties["type"].Const != requirement.Type {
 			return operation.UnsupportedCapability(fmt.Sprintf("InvokeAI invocation schema %s does not identify type %s", requirement.Schema, requirement.Type))
+		}
+		if requirement.RequiresAdditionalProperties && !schema.AdditionalProperties {
+			return operation.UnsupportedCapability(fmt.Sprintf("InvokeAI invocation schema %s does not allow required upscale metadata fields", requirement.Schema))
 		}
 		missing := make([]string, 0)
 		for _, property := range requirement.Properties {

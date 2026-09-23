@@ -81,8 +81,11 @@ type Item struct {
 	FieldValues []BatchFieldValue  `json:"-"`
 	// ImageOutputCount preserves raw session-result multiplicity even when
 	// duplicate names are normalized or an image can no longer be hydrated.
-	ImageOutputCount           int    `json:"-"`
-	ImageOutputValidationError string `json:"-"`
+	ImageOutputCount int `json:"-"`
+	// NonIntermediateImageOutputCount preserves multiplicity for image outputs
+	// whose hydrated Image Reference is marked as a final gallery image.
+	NonIntermediateImageOutputCount int    `json:"-"`
+	ImageOutputValidationError      string `json:"-"`
 }
 
 type GetResult struct {
@@ -243,6 +246,7 @@ func Get(ctx context.Context, client *httpclient.Client, request GetRequest) (Ge
 	}
 
 	imageNames := make(map[string]struct{}, len(response.Session.Results))
+	outputNames := make([]string, 0, len(response.Session.Results))
 	for _, raw := range response.Session.Results {
 		var outputType outputTypeRecord
 		if err := json.Unmarshal(raw, &outputType); err != nil || outputType.Type != "image_output" {
@@ -263,7 +267,9 @@ func Get(ctx context.Context, client *httpclient.Client, request GetRequest) (Ge
 			continue
 		}
 		imageNames[output.Image.ImageName] = struct{}{}
+		outputNames = append(outputNames, output.Image.ImageName)
 	}
+	hydrated := make(map[string]images.Reference, len(imageNames))
 	for _, imageName := range slices.Sorted(maps.Keys(imageNames)) {
 		image, err := images.Get(ctx, client, images.GetRequest{SchemaVersion: 1, ImageName: imageName})
 		if err != nil {
@@ -281,6 +287,12 @@ func Get(ctx context.Context, client *httpclient.Client, request GetRequest) (Ge
 			continue
 		}
 		item.Images = append(item.Images, image.Image)
+		hydrated[imageName] = image.Image
+	}
+	for _, imageName := range outputNames {
+		if image, ok := hydrated[imageName]; ok && !image.IsIntermediate {
+			item.NonIntermediateImageOutputCount++
+		}
 	}
 	return GetResult{Item: item}, nil
 }

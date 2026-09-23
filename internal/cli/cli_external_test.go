@@ -3228,7 +3228,9 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 				{"key": "main", "hash": "blake3:main", "name": "Anima", "base": "anima", "type": "main"},
 				{"key": "vae", "hash": "blake3:vae", "name": "VAE", "base": "anima", "type": "vae"},
 				{"key": "encoder", "hash": "blake3:encoder", "name": "Qwen3", "base": "any", "type": "qwen3_encoder"},
-				{"key": "sdxl", "hash": "blake3:sdxl", "name": "SDXL", "base": "sdxl", "type": "main"},
+				{"key": "sdxl", "hash": "blake3:sdxl", "name": "SDXL", "base": "sdxl", "type": "main", "variant": "normal"},
+				{"key": "spandrel", "hash": "blake3:spandrel", "name": "RealESRGAN x4plus", "base": "any", "type": "spandrel_image_to_image"},
+				{"key": "tile", "hash": "blake3:tile", "name": "Tile", "base": "sdxl", "type": "controlnet"},
 				{"key": "flux-main", "hash": "blake3:flux-main", "name": "FLUX dev", "base": "flux", "type": "main", "format": "checkpoint", "variant": "dev"},
 				{"key": "flux-vae", "hash": "blake3:flux-vae", "name": "FLUX VAE", "base": "flux", "type": "vae"},
 				{"key": "flux-t5", "hash": "blake3:flux-t5", "name": "T5", "base": "any", "type": "t5_encoder"},
@@ -3278,10 +3280,10 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 		}
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "generate", "generate", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
+	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "generate", "generate", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if envelope.SchemaVersion != 1 || !envelope.OK || envelope.Operation != "doctor" || !envelope.Data.Ready ||
 		!slices.Equal(operations, wantOperations) || envelope.Data.UISync["generate"] != "partial" ||
-		len(envelope.Data.OpenAPI.Invocations) != 18 || len(envelope.Data.Models.Relevant) != 8 || len(envelope.Data.Models.Requirements) != 8 {
+		len(envelope.Data.OpenAPI.Invocations) != 23 || len(envelope.Data.Models.Relevant) != 10 || len(envelope.Data.Models.Requirements) != 11 {
 		t.Fatalf("unexpected doctor envelope: %#v", envelope)
 	}
 }

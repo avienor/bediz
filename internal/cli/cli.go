@@ -89,6 +89,7 @@ func (c *CLI) newRootCommand(exitCode *int) *cobra.Command {
 
 	root.AddCommand(c.newDoctorCommand(exitCode, &jsonOutput))
 	root.AddCommand(c.newGenerateCommand(exitCode, &jsonOutput))
+	root.AddCommand(c.newUpscaleCommand(exitCode, &jsonOutput))
 	root.AddCommand(c.newRecallCommand(exitCode, &jsonOutput))
 	root.AddCommand(c.newConfigCommand(exitCode, &jsonOutput))
 	root.AddCommand(c.newModelsCommand(exitCode, &jsonOutput))

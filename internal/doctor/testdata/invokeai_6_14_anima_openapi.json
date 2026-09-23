@@ -184,6 +184,7 @@
         }
       },
       "CoreMetadataInvocation": {
+		"additionalProperties": true,
         "properties": {
           "id": {},
           "is_intermediate": {},
@@ -542,6 +543,96 @@
           "value": {},
           "type": {
             "const": "string_output"
+          }
+        }
+      },
+      "SpandrelImageToImageAutoscaleInvocation": {
+        "properties": {
+          "board": {},
+          "metadata": {},
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "image": {},
+          "image_to_image_model": {},
+          "tile_size": {},
+          "type": {
+            "const": "spandrel_image_to_image_autoscale"
+          },
+          "scale": {},
+          "fit_to_multiple_of_8": {}
+        }
+      },
+      "UnsharpMaskInvocation": {
+        "properties": {
+          "board": {},
+          "metadata": {},
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "image": {},
+          "radius": {},
+          "strength": {},
+          "type": {
+            "const": "unsharp_mask"
+          }
+        }
+      },
+      "ImageToLatentsInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "image": {},
+          "vae": {},
+          "tiled": {},
+          "tile_size": {},
+          "fp32": {},
+          "color_compensation": {},
+          "type": {
+            "const": "i2l"
+          }
+        }
+      },
+      "TiledMultiDiffusionDenoiseLatents": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "positive_conditioning": {},
+          "negative_conditioning": {},
+          "noise": {},
+          "latents": {},
+          "tile_height": {},
+          "tile_width": {},
+          "tile_overlap": {},
+          "steps": {},
+          "cfg_scale": {},
+          "denoising_start": {},
+          "denoising_end": {},
+          "scheduler": {},
+          "unet": {},
+          "cfg_rescale_multiplier": {},
+          "control": {},
+          "type": {
+            "const": "tiled_multi_diffusion_denoise_latents"
+          }
+        }
+      },
+      "ControlNetInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "image": {},
+          "control_model": {},
+          "control_weight": {},
+          "begin_step_percent": {},
+          "end_step_percent": {},
+          "control_mode": {},
+          "resize_mode": {},
+          "type": {
+            "const": "controlnet"
           }
         }
       }

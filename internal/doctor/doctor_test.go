@@ -40,7 +40,7 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 	for i, entry := range report.Capabilities {
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "generate", "generate", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
+	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "generate", "generate", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if !slices.Equal(operations, wantOperations) {
 		t.Fatalf("reported operations = %q, want implemented operations %q", operations, wantOperations)
 	}
@@ -52,8 +52,8 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 			t.Fatalf("invocation check failed: %#v", invocation)
 		}
 	}
-	if len(report.Models.Requirements) != 8 {
-		t.Fatalf("model requirements count = %d, want 8", len(report.Models.Requirements))
+	if len(report.Models.Requirements) != 11 {
+		t.Fatalf("model requirements count = %d, want 11", len(report.Models.Requirements))
 	}
 	for _, requirement := range report.Models.Requirements {
 		if !requirement.Satisfied {
@@ -834,7 +834,9 @@ func TestDoctorReportsSDXLOnlyWithSchemaModelAndRecallCFG(t *testing.T) {
 		wantSync string
 	}{
 		{"ready", func(map[string]any, *[]map[string]string) {}, "", "partial"},
-		{"missing SDXL model", func(_ map[string]any, models *[]map[string]string) { *models = (*models)[:len(*models)-1] }, "missing_component:SDXL main model", ""},
+		{"missing SDXL model", func(_ map[string]any, models *[]map[string]string) {
+			*models = slices.DeleteFunc(*models, func(model map[string]string) bool { return model["key"] == "sdxl" })
+		}, "missing_component:SDXL main model", ""},
 		{"missing noise schema", func(document map[string]any, _ *[]map[string]string) {
 			delete(document["components"].(map[string]any)["schemas"].(map[string]any), "NoiseInvocation")
 		}, "incompatible_invocation:noise", ""},
@@ -865,6 +867,55 @@ func TestDoctorReportsSDXLOnlyWithSchemaModelAndRecallCFG(t *testing.T) {
 			if sdxl.Family != "sdxl" || sdxl.UISync != test.wantSync || sdxl.Compatible != (test.failure == "") || (test.failure != "" && !slices.Contains(sdxl.Failures, test.failure)) {
 				t.Fatalf("SDXL capability = %#v", sdxl)
 			}
+		})
+	}
+}
+
+func TestDoctorReportsSDXLUpscaleOnlyWithTestedRequirements(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		edit    func(map[string]any, *[]map[string]string)
+		failure string
+	}{
+		{"ready", func(map[string]any, *[]map[string]string) {}, ""},
+		{"non-normal main", func(_ map[string]any, models *[]map[string]string) {
+			(*models)[7] = maps.Clone((*models)[7])
+			(*models)[7]["variant"] = "inpaint"
+		}, "missing_component:SDXL normal main model"},
+		{"missing Spandrel", func(_ map[string]any, models *[]map[string]string) {
+			*models = slices.DeleteFunc(*models, func(model map[string]string) bool { return model["key"] == "upscale" })
+		}, "missing_component:Spandrel upscale model"},
+		{"missing ControlNet", func(_ map[string]any, models *[]map[string]string) {
+			*models = slices.DeleteFunc(*models, func(model map[string]string) bool { return model["key"] == "tile" })
+		}, "missing_component:SDXL ControlNet"},
+		{"missing tiled denoiser", func(document map[string]any, _ *[]map[string]string) {
+			delete(document["components"].(map[string]any)["schemas"].(map[string]any), "TiledMultiDiffusionDenoiseLatents")
+		}, "incompatible_invocation:tiled_multi_diffusion_denoise_latents"},
+		{"metadata rejects upscale fields", func(document map[string]any, _ *[]map[string]string) {
+			delete(document["components"].(map[string]any)["schemas"].(map[string]any)["CoreMetadataInvocation"].(map[string]any), "additionalProperties")
+		}, "incompatible_invocation:core_metadata"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			document := openAPIFixture(t)
+			models := slices.Clone(baselineModels)
+			test.edit(document, &models)
+			server := newCustomInvokeAIServer(t, "6.14.1", document, models)
+			defer server.Close()
+			client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			report := Run(t.Context(), client, version.Info{Version: "test"})
+			for _, entry := range report.Capabilities {
+				if entry.Operation != result.OperationUpscale || entry.Family != "sdxl" {
+					continue
+				}
+				if entry.Compatible != (test.failure == "") || entry.UISync != "" || (test.failure != "" && !slices.Contains(entry.Failures, test.failure)) {
+					t.Fatalf("upscale capability = %#v", entry)
+				}
+				return
+			}
+			t.Fatal("missing upscale/sdxl capability")
 		})
 	}
 }
@@ -1007,7 +1058,9 @@ var baselineModels = []map[string]string{
 	{"key": "flux-vae", "hash": "blake3:flux-vae", "name": "FLUX VAE", "base": "flux", "type": "vae", "format": "checkpoint"},
 	{"key": "flux-t5", "hash": "blake3:flux-t5", "name": "T5", "base": "any", "type": "t5_encoder", "format": "diffusers"},
 	{"key": "flux-clip", "hash": "blake3:flux-clip", "name": "CLIP", "base": "any", "type": "clip_embed", "format": "diffusers"},
-	{"key": "sdxl", "hash": "blake3:sdxl", "name": "SDXL", "base": "sdxl", "type": "main", "format": "diffusers"},
+	{"key": "sdxl", "hash": "blake3:sdxl", "name": "SDXL", "base": "sdxl", "type": "main", "format": "diffusers", "variant": "normal"},
+	{"key": "upscale", "hash": "blake3:upscale", "name": "RealESRGAN x4plus", "base": "any", "type": "spandrel_image_to_image", "format": "checkpoint"},
+	{"key": "tile", "hash": "blake3:tile", "name": "Tile", "base": "sdxl", "type": "controlnet", "format": "diffusers"},
 }
 
 func TestDoctorFLUXMainRequirementUsesVariantAndFormat(t *testing.T) {

@@ -18,6 +18,7 @@ import (
 	"github.com/avienor/bediz/internal/operation"
 	queueops "github.com/avienor/bediz/internal/queue"
 	"github.com/avienor/bediz/internal/result"
+	"github.com/avienor/bediz/internal/upscale"
 	"github.com/avienor/bediz/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -213,6 +214,22 @@ func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
 			"required_base":         missing.RequiredBase,
 			"required_type":         missing.RequiredType,
 			"installation_guidance": missing.InstallationGuidance,
+		})
+	}
+	if failed, ok := errors.AsType[*upscale.ScaleNotAppliedError](err); ok {
+		return c.fail(operationName, jsonOutput, result.CodeInvokeAIOperationFailed, failed.Error(), map[string]any{
+			"reason":          "scale_not_applied",
+			"expected_width":  failed.ExpectedWidth,
+			"expected_height": failed.ExpectedHeight,
+			"actual_width":    failed.ActualWidth,
+			"actual_height":   failed.ActualHeight,
+			"queue_id":        failed.Queue.QueueID,
+			"batch_id":        failed.Queue.BatchID,
+			"item_ids":        failed.Queue.ItemIDs,
+			"item_id":         failed.Output.ItemID,
+			"seed":            failed.Output.Seed,
+			"output_image":    failed.Output.Image,
+			"source_image":    failed.SourceImage,
 		})
 	}
 	if timeout, ok := errors.AsType[*operation.WaitTimeoutError](err); ok {

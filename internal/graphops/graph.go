@@ -1,6 +1,9 @@
 package graphops
 
-import "slices"
+import (
+	"encoding/json"
+	"slices"
+)
 
 // ModelReference is the complete identifier shape accepted by invocation inputs.
 type ModelReference struct {
@@ -71,6 +74,21 @@ type BatchDatum struct {
 	NodePath  string   `json:"node_path"`
 	FieldName string   `json:"field_name"`
 	Items     []uint32 `json:"items"`
+	// StringItems represents stock batch fields such as upscale prompts. It is
+	// encoded as the same "items" field, without changing numeric seed batches.
+	StringItems []string `json:"-"`
+}
+
+func (datum BatchDatum) MarshalJSON() ([]byte, error) {
+	if datum.StringItems != nil {
+		return json.Marshal(struct {
+			NodePath  string   `json:"node_path"`
+			FieldName string   `json:"field_name"`
+			Items     []string `json:"items"`
+		}{NodePath: datum.NodePath, FieldName: datum.FieldName, Items: datum.StringItems})
+	}
+	type numericBatchDatum BatchDatum
+	return json.Marshal(numericBatchDatum(datum))
 }
 
 // SeedField identifies the batch field whose value is checked on each queue item.

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/avienor/bediz/internal/httpclient"
+	"github.com/avienor/bediz/internal/images"
 	"github.com/avienor/bediz/internal/operation"
 	"github.com/avienor/bediz/internal/queue"
 )
@@ -35,7 +36,8 @@ const (
 // WaitOptions bounds local waiting. A zero Timeout waits without a total
 // deadline.
 type WaitOptions struct {
-	Timeout time.Duration
+	Timeout                   time.Duration
+	OnlyNonIntermediateImages bool
 }
 
 // Wait polls accepted queue items. It returns completed outputs accumulated before
@@ -63,7 +65,7 @@ func Wait(ctx context.Context, client *httpclient.Client, accepted QueueReceipt,
 		if err != nil {
 			return outputs, err
 		}
-		output, err := completedOutput(position, itemID, seeds[index], seedField, item)
+		output, err := completedOutput(position, itemID, seeds[index], seedField, item, options.OnlyNonIntermediateImages)
 		if err != nil {
 			return outputs, err
 		}
@@ -117,7 +119,7 @@ func waitForItem(ctx, waitContext context.Context, client *httpclient.Client, po
 
 // completedOutput verifies the batch metadata before associating an image
 // with the same-position resolved seed.
-func completedOutput(position operation.QueuePosition, itemID int, expectedSeed uint32, seedField SeedField, item queue.Item) (Output, error) {
+func completedOutput(position operation.QueuePosition, itemID int, expectedSeed uint32, seedField SeedField, item queue.Item, onlyNonIntermediate bool) (Output, error) {
 	seed, err := itemSeed(item, seedField)
 	if err != nil {
 		return Output{}, &operation.InvalidQueueResultError{
@@ -134,6 +136,27 @@ func completedOutput(position operation.QueuePosition, itemID int, expectedSeed 
 		return Output{}, &operation.InvalidQueueResultError{
 			Position: position, ItemID: itemID, Status: item.Status, Detail: item.ImageOutputValidationError,
 		}
+	}
+	if onlyNonIntermediate {
+		if item.NonIntermediateImageOutputCount != 1 {
+			return Output{}, &operation.InvalidQueueResultError{
+				Position: position, ItemID: itemID, Status: item.Status,
+				Detail: fmt.Sprintf("completed with %d non-intermediate image outputs; expected exactly one", item.NonIntermediateImageOutputCount),
+			}
+		}
+		var finalImages []images.Reference
+		for _, image := range item.Images {
+			if !image.IsIntermediate {
+				finalImages = append(finalImages, image)
+			}
+		}
+		if len(finalImages) != 1 {
+			return Output{}, &operation.InvalidQueueResultError{
+				Position: position, ItemID: itemID, Status: item.Status,
+				Detail: fmt.Sprintf("completed with one non-intermediate image output but %d accessible final Image References", len(finalImages)),
+			}
+		}
+		return Output{ItemID: itemID, Seed: expectedSeed, Image: finalImages[0]}, nil
 	}
 	if item.ImageOutputCount != 1 {
 		return Output{}, &operation.InvalidQueueResultError{

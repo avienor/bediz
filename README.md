@@ -15,6 +15,7 @@ The current implementation includes these V1 capabilities:
 - Hugging Face authentication through InvokeAI with `auth huggingface status`, `login --token-stdin`, and `logout`;
 - single-file image upload with supported-version validation, no automatic mutation retry, and `outcome_unknown` reporting when the transport result is inconclusive;
 - Anima text-to-image Direct Execution with deterministic model and component resolution, ordered multi-output seed resolution, graph compilation targeting the tested InvokeAI 6.14.x baseline, safe queue-polling to an Execution Receipt, and `--no-wait` support;
+- SDXL Generative Upscale from an existing InvokeAI image, with explicit Tile ControlNet selection, single enqueue, output-dimension verification, and an Execution Receipt;
 - manual Anima Parameter Recall and automatic generation UI Synchronization after enqueue, with the verified `partial` level on stock InvokeAI 6.14.x.
 
 On a compatible 6.14.x installation, `doctor --json` reports `generate` as compatible and `ui_sync.generate` as `partial` when the tested Recall endpoint and patch schema are present. Missing Recall requirements appear under the separate `recall` capability; they do not make Direct Execution incompatible. An unsupported InvokeAI version is not advertised as ready for generation or Recall.
@@ -51,6 +52,7 @@ printf '%s' "$HF_TOKEN" | ./bediz auth huggingface login --token-stdin --json
 ./bediz queue list --json
 ./bediz queue get ITEM_ID --json
 ./bediz generate --model "Anima Base 1.0" --prompt "a lighthouse in a storm" --json
+./bediz upscale --image IMAGE_NAME --model "Juggernaut-XL-v9" --tile-controlnet TILE_MODEL_KEY --scale 2 --json
 ./bediz recall --model "Anima Base 1.0" --prompt "a lighthouse in a storm" --seed 42 --json
 ```
 
