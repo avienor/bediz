@@ -2,7 +2,7 @@
 
 Bediz is a deterministic Go CLI for controlling a local InvokeAI installation. The V1 contract is defined in [`docs/spec/v1.md`](docs/spec/v1.md).
 
-The current implementation includes the first four V1 delivery slices:
+The current implementation includes these V1 capabilities:
 
 - per-user connection configuration with flag, environment, file, and default precedence;
 - a bounded HTTP client with bearer authentication, safe-read retries, and unknown-outcome classification for mutations;
@@ -10,6 +10,7 @@ The current implementation includes the first four V1 delivery slices:
 - `version`, with concise human output and a stable V1 JSON result envelope;
 - `doctor`, which checks InvokeAI version compatibility (`>= 6.14.1, < 6.15.0`), the OpenAPI endpoints and schemas required by implemented capabilities, and separate readiness for Anima Direct Execution and Parameter Recall;
 - safe installed-model, gallery-image, and queue inspection;
+- exact public URL model installation through one InvokeAI job, plus current install-job status inspection;
 - single-file image upload with supported-version validation, no automatic mutation retry, and `outcome_unknown` reporting when the transport result is inconclusive;
 - Anima text-to-image Direct Execution with deterministic model and component resolution, ordered multi-output seed resolution, graph compilation targeting the tested InvokeAI 6.14.x baseline, safe queue-polling to an Execution Receipt, and `--no-wait` support;
 - manual Anima Parameter Recall and automatic generation UI Synchronization after enqueue, with the verified `partial` level on stock InvokeAI 6.14.x.
@@ -18,7 +19,7 @@ On a compatible 6.14.x installation, `doctor --json` reports `generate` as compa
 
 The partial Handoff restores positive and negative prompts, the exact Anima main model, dimensions, steps, and the first output seed in an open InvokeAI browser after Recall is accepted. It does not restore scheduler, guidance, VAE, Qwen3 encoder, output count, or Output Board controls. The visible queue item, result image, metadata, and complete Execution Receipt retain the resolved settings and every output seed. A successful generation carries `ui_sync_partial`; if the Recall patch fails, generation still succeeds with `ui_sync_failed`. Recall API acceptance does not prove that a browser was open to receive the event. V1 does not support `recall --replace` or claim `full` UI Synchronization.
 
-The remaining management commands will be added in later V1 slices described by the specification.
+Additional management commands will be added in later V1 slices described by the specification.
 
 ## Build and run
 
@@ -29,6 +30,8 @@ go build -o bediz ./cmd/bediz
 ./bediz doctor
 ./bediz doctor --json
 ./bediz models list --json
+./bediz models install --source-type url --source https://example.org/model.safetensors --json
+./bediz models status --job-id 0 --json
 ./bediz images list --json
 ./bediz images get IMAGE_NAME --json
 ./bediz images upload /absolute/path/to/image.png --json
@@ -39,6 +42,8 @@ go build -o bediz ./cmd/bediz
 ```
 
 Inspection commands return normalized Bediz records rather than raw InvokeAI response documents. List output is page-bounded, image selectors use stable InvokeAI image names, and queue listing hydrates only the requested page of lightweight summaries. On supported InvokeAI 6.14.x versions, preserving queue order and total count requires reading the complete lightweight item-ID index; the configured HTTP response-size limit bounds that response, and Bediz never fetches execution graphs while listing.
+
+Model installation accepts an exact HTTP(S) artifact URL without userinfo, query, or fragment. Its job ID identifies only a job in the current InvokeAI registry; after a restart, use `models list` and the InvokeAI install job list before deciding whether to resubmit an uncertain installation. `models status` returns a safe projection of the job currently under that ID.
 
 Each operation also accepts a schema-versioned request document from a file or standard input. Operation arguments and flags cannot be mixed with `--request`:
 

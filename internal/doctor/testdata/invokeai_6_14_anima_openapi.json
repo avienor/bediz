@@ -2,6 +2,8 @@
   "paths": {
     "/api/v1/app/version": {"get": {}},
     "/api/v2/models/": {"get": {}},
+    "/api/v2/models/install": {"post": {"parameters": [{"name": "source", "in": "query", "required": true}]}, "get": {}},
+    "/api/v2/models/install/{id}": {"get": {}},
     "/api/v1/images/": {"get": {}},
     "/api/v1/images/i/{image_name}": {"get": {}},
     "/api/v1/images/upload": {"post": {}},

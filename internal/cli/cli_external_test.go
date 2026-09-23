@@ -3180,6 +3180,8 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 	paths := map[string]any{
 		"/api/v1/app/version":                            map[string]any{"get": map[string]any{}},
 		"/api/v2/models/":                                map[string]any{"get": map[string]any{}},
+		"/api/v2/models/install":                         map[string]any{"post": map[string]any{"parameters": []any{map[string]any{"name": "source", "in": "query", "required": true}}}},
+		"/api/v2/models/install/{id}":                    map[string]any{"get": map[string]any{}},
 		"/api/v1/images/":                                map[string]any{"get": map[string]any{}},
 		"/api/v1/images/i/{image_name}":                  map[string]any{"get": map[string]any{}},
 		"/api/v1/images/upload":                          map[string]any{"post": map[string]any{}},
@@ -3247,7 +3249,7 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 		}
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "recall"}
+	wantOperations := []string{"models.list", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "recall"}
 	if envelope.SchemaVersion != 1 || !envelope.OK || envelope.Operation != "doctor" || !envelope.Data.Ready ||
 		!slices.Equal(operations, wantOperations) || envelope.Data.UISync["generate"] != "partial" ||
 		len(envelope.Data.OpenAPI.Invocations) != 8 || len(envelope.Data.Models.Relevant) != 3 || len(envelope.Data.Models.Requirements) != 3 {

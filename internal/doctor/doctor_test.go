@@ -40,7 +40,7 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 	for i, entry := range report.Capabilities {
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "recall"}
+	wantOperations := []string{"models.list", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "recall"}
 	if !slices.Equal(operations, wantOperations) {
 		t.Fatalf("reported operations = %q, want implemented operations %q", operations, wantOperations)
 	}
@@ -65,6 +65,28 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 	}
 }
 
+func TestDoctorDoesNotAdvertiseInstallWithoutGenericSourceParameter(t *testing.T) {
+	document := openAPIFixture(t)
+	paths := document["paths"].(map[string]any)
+	paths["/api/v2/models/install"].(map[string]any)["post"] = map[string]any{}
+	server := newCustomInvokeAIServer(t, "6.14.1", document, baselineModels)
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := Run(t.Context(), client, version.Info{Version: "test"})
+	for _, entry := range report.Capabilities {
+		if entry.Operation == result.OperationModelsInstall {
+			if entry.Compatible || !slices.Contains(entry.Failures, "incompatible_install_schema:source") {
+				t.Fatalf("install capability = %#v", entry)
+			}
+			return
+		}
+	}
+	t.Fatal("install capability absent")
+}
+
 func TestRunReportsInspectionAndUploadCapabilities(t *testing.T) {
 	server := newInvokeAIServer(t)
 	defer server.Close()
@@ -79,7 +101,7 @@ func TestRunReportsInspectionAndUploadCapabilities(t *testing.T) {
 	for _, entry := range report.Capabilities {
 		got[entry.Operation] = entry.Compatible
 	}
-	for _, operation := range []string{"models.list", "images.list", "images.get", "images.upload", "queue.list", "queue.get"} {
+	for _, operation := range []string{"models.list", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get"} {
 		if !got[operation] {
 			t.Errorf("capability %q missing or incompatible: %#v", operation, report.Capabilities)
 		}
@@ -196,12 +218,12 @@ func TestRunAllowsReadOnlyInspectionOnEndpointCompatibleUntestedVersion(t *testi
 	for _, entry := range report.Capabilities {
 		compatibility[entry.Operation] = entry.Compatible
 	}
-	for _, operation := range []string{"models.list", "images.list", "images.get", "queue.list", "queue.get"} {
+	for _, operation := range []string{"models.list", "models.status", "images.list", "images.get", "queue.list", "queue.get"} {
 		if !compatibility[operation] {
 			t.Errorf("read-only capability %q should remain compatible: %#v", operation, report.Capabilities)
 		}
 	}
-	if compatibility["images.upload"] || compatibility["generate"] {
+	if compatibility["models.install"] || compatibility["images.upload"] || compatibility["generate"] {
 		t.Fatalf("mutating and graph-producing capabilities should require the supported range: %#v", report.Capabilities)
 	}
 }

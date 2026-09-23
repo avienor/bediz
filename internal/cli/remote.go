@@ -181,6 +181,9 @@ func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
 		return c.fail(operationName, jsonOutput, result.CodeInvalidInvokeAIResponse, invalid.Error(), acceptedItemDetails(invalid.Position, invalid.ItemID, invalid.Status))
 	}
 	if _, ok := errors.AsType[*httpclient.OutcomeUnknownError](err); ok {
+		if operationName == result.OperationModelsInstall {
+			return c.fail(operationName, jsonOutput, result.CodeOutcomeUnknown, "InvokeAI may have accepted the installation; inspect the current model inventory and install job list before submitting again", nil)
+		}
 		return c.fail(operationName, jsonOutput, result.CodeOutcomeUnknown, "InvokeAI may have accepted the operation; inspect remote state before retrying", nil)
 	}
 	if errors.Is(err, context.Canceled) {
@@ -546,7 +549,7 @@ func (c *CLI) newModelsCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
 	listCommand.Flags().StringVar(&options.modelType, "type", "", "include one exact model type")
 	listCommand.Flags().StringVar(&options.modelFormat, "format", "", "include one exact model format")
 	listCommand.Flags().StringVar(&options.modelName, "name", "", "include one exact model name")
-	command.AddCommand(listCommand)
+	command.AddCommand(listCommand, c.newModelsInstallCommand(exitCode, jsonOutput), c.newModelsStatusCommand(exitCode, jsonOutput))
 	return command
 }
 

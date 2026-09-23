@@ -10,6 +10,8 @@ import (
 func TestMatrixAdvertisesOnlyImplementedOperations(t *testing.T) {
 	want := []string{
 		result.OperationModelsList,
+		result.OperationModelsInstall,
+		result.OperationModelsStatus,
 		result.OperationImagesList,
 		result.OperationImagesGet,
 		result.OperationImagesUpload,

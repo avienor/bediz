@@ -356,6 +356,11 @@ func buildCapabilities(report Report, document openAPIDocument) []CapabilityRepo
 			endpointAvailable(report.OpenAPI.Endpoints, capability.EndpointRequirement{Method: "POST", Path: capability.RecallEndpoint}) {
 			failures = append(failures, recallSchemaFailures(document)...)
 		}
+		if entry.Operation == result.OperationModelsInstall && report.OpenAPI.Available &&
+			endpointAvailable(report.OpenAPI.Endpoints, capability.EndpointRequirement{Method: "POST", Path: "/api/v2/models/install"}) &&
+			!hasInstallSourceParameter(document.Paths["/api/v2/models/install"]["post"]) {
+			failures = append(failures, "incompatible_install_schema:source")
+		}
 		capabilities = append(capabilities, CapabilityReport{
 			Operation:  entry.Operation,
 			Family:     entry.Family,
@@ -377,6 +382,14 @@ func buildCapabilities(report Report, document openAPIDocument) []CapabilityRepo
 		}
 	}
 	return capabilities
+}
+
+func hasInstallSourceParameter(post json.RawMessage) bool {
+	var endpoint capability.InstallEndpoint
+	if err := jsonv2.Unmarshal(post, &endpoint); err != nil {
+		return false
+	}
+	return endpoint.HasRequiredSource()
 }
 
 func recallSchemaFailures(document openAPIDocument) []string {

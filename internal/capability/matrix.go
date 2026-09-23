@@ -47,6 +47,25 @@ type EndpointRequirement struct {
 	Path   string
 }
 
+// InstallEndpoint describes the OpenAPI parameters required by the tested
+// generic model installation route.
+type InstallEndpoint struct {
+	Parameters []struct {
+		Name     string `json:"name"`
+		In       string `json:"in"`
+		Required bool   `json:"required"`
+	} `json:"parameters"`
+}
+
+func (endpoint InstallEndpoint) HasRequiredSource() bool {
+	for _, parameter := range endpoint.Parameters {
+		if parameter.Name == "source" && parameter.In == "query" && parameter.Required {
+			return true
+		}
+	}
+	return false
+}
+
 type InvocationRequirement struct {
 	Schema     string
 	Type       string
@@ -83,6 +102,21 @@ var Matrix = []Entry{
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v2/models/"},
+		},
+	},
+	{
+		Operation:     result.OperationModelsInstall,
+		VersionPolicy: VersionPolicySupportedRange,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/app/version"},
+			{Method: "POST", Path: "/api/v2/models/install"},
+		},
+	},
+	{
+		Operation:     result.OperationModelsStatus,
+		VersionPolicy: VersionPolicyCompatibleEndpoint,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v2/models/install/{id}"},
 		},
 	},
 	{
