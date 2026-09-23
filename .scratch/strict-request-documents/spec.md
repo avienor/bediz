@@ -2,7 +2,7 @@
 
 ## Problem
 
-Every command that accepts `--request` (`generate`, `recall`, `models install`, and `upscale`) reads its Request Document through one shared loader. That loader is lenient in three ways that V1 §8.1 ("Unknown request fields are validation errors. Bediz does not ignore misspelled or inapplicable settings.") does not intend:
+Every command that accepts `--request` reads its Request Document through one shared loader. The operation commands (`generate`, `recall`, `models install`, and `upscale`) are the ones where a lenient document reaches InvokeAI as a mutation; the read commands (such as `models list`, `queue`, and `images`) share the same loader and the same rules. That loader is lenient in three ways that V1 §8.1 ("Unknown request fields are validation errors. Bediz does not ignore misspelled or inapplicable settings.") does not intend:
 
 - **Case-folded member names:** `{"MODEL": "m"}` is accepted as `model`.
 - **Duplicate members:** `{"model": "a", "model": "m"}` is accepted, and the last value silently wins.

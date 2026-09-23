@@ -26,9 +26,9 @@
 
 **Permanent records:** V1 spec and tests. §8.1 states that member names match exactly and that duplicate members are validation errors. No new terminology (Request Document already covers this) and no ADR (this enforces the existing §8.1 contract).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Case-folded members are rejected before network access for all four commands, at every depth
-- [ ] Duplicate members are rejected before network access for all four commands, at every depth
-- [ ] Valid documents and existing tests are unchanged
-- [ ] V1 §8.1 records the rule
+- [x] Case-folded members are rejected before network access for all four commands, at every depth
+- [x] Duplicate members are rejected before network access for all four commands, at every depth
+- [x] Valid documents and existing tests are unchanged
+- [x] V1 §8.1 records the rule

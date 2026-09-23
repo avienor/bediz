@@ -4,6 +4,8 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -121,13 +123,15 @@ func (c *CLI) loadRequestDocument(path string, target any) error {
 		reader = file
 	}
 
-	decoder := json.NewDecoder(reader)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
+	// Request Documents keep the legacy decoding semantics, except that member
+	// names match exactly and unknown or repeated members are rejected at every
+	// depth.
+	decoder := jsontext.NewDecoder(reader, json.DefaultOptionsV1(),
+		jsonv2.MatchCaseInsensitiveNames(false), jsontext.AllowDuplicateNames(false), jsonv2.RejectUnknownMembers(true))
+	if err := jsonv2.UnmarshalDecode(decoder, target); err != nil {
 		return fmt.Errorf("decode request document: %w", err)
 	}
-	var trailing any
-	if err := decoder.Decode(&trailing); errors.Is(err, io.EOF) {
+	if _, err := decoder.ReadToken(); errors.Is(err, io.EOF) {
 		return nil
 	} else if err != nil {
 		return fmt.Errorf("decode request document: %w", err)
