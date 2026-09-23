@@ -291,6 +291,8 @@ func SD1UpscaleEntry() Entry {
 	})
 }
 
+// upscaleEntry requires the image upload endpoint because the upscale contract
+// includes local-file sources.
 func upscaleEntry(base, label string, conditioning []InvocationRequirement) Entry {
 	invocations := []InvocationRequirement{
 		{Schema: "StringInvocation", Type: "string", Properties: []string{"id", "is_intermediate", "use_cache", "type", "value"}},
@@ -311,7 +313,7 @@ func upscaleEntry(base, label string, conditioning []InvocationRequirement) Entr
 	)
 	return Entry{
 		Operation: result.OperationUpscale, Family: base, VersionPolicy: VersionPolicySupportedRange,
-		Endpoints:   slices.Clone(AnimaGenerationEntry().Endpoints),
+		Endpoints:   append(slices.Clone(AnimaGenerationEntry().Endpoints), EndpointRequirement{Method: "POST", Path: "/api/v1/images/upload"}),
 		Invocations: invocations,
 		Models: []ModelRequirement{
 			{Name: label + " normal main model", Types: []string{"main"}, Bases: []string{base}, Variants: []string{"normal"}, MinimumCount: 1},

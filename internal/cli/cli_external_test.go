@@ -2863,6 +2863,46 @@ func TestImagesUploadLostResponseReturnsUnknownOutcomeWithoutRetry(t *testing.T)
 	}
 }
 
+func TestImagesUploadResponseWithoutImageNameReturnsUnknownOutcome(t *testing.T) {
+	isolateUserConfigDir(t)
+	imagePath := filepath.Join(t.TempDir(), "source.png")
+	writeTestPNG(t, imagePath)
+	var uploads atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_ = json.NewEncoder(w).Encode(map[string]string{"version": "6.14.1"})
+		case "/api/v1/images/upload":
+			uploads.Add(1)
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"image_url": "api/v1/images/i/uploaded.png/full", "thumbnail_url": "api/v1/images/i/uploaded.png/thumbnail",
+				"image_origin": "external", "image_category": "user", "width": 1, "height": 1,
+				"created_at": "created", "updated_at": "updated", "is_intermediate": false, "starred": false, "has_workflow": false,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := cli.New(&stdout, &stderr)
+
+	exitCode := app.Run(t.Context(), []string{"images", "upload", imagePath, "--url", server.URL, "--json"})
+
+	if exitCode != result.ExitInvokeAIFailure || stderr.Len() != 0 || uploads.Load() != 1 {
+		t.Fatalf("exit code = %d, uploads = %d, stderr = %q, stdout = %q", exitCode, uploads.Load(), stderr.String(), stdout.String())
+	}
+	var envelope result.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v; stdout = %q", err, stdout.String())
+	}
+	if envelope.OK || envelope.Operation != "images.upload" || envelope.Error == nil || envelope.Error.Code != "outcome_unknown" {
+		t.Fatalf("unexpected envelope: %#v", envelope)
+	}
+}
+
 func TestImagesUploadRejectsRelativePathBeforeConnecting(t *testing.T) {
 	isolateUserConfigDir(t)
 	var stdout bytes.Buffer

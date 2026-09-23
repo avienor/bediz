@@ -157,45 +157,86 @@ func Upload(ctx context.Context, client *httpclient.Client, request UploadReques
 	if request.SchemaVersion != 1 {
 		return GetResult{}, operation.InvalidRequest(fmt.Sprintf("unsupported request schema version %d", request.SchemaVersion))
 	}
-	if !filepath.IsAbs(request.Path) {
-		return GetResult{}, operation.InvalidRequest("upload path must be absolute")
-	}
-	file, err := os.Open(request.Path)
+	upload, err := PrepareUpload(request.Path)
 	if err != nil {
-		return GetResult{}, operation.InvalidRequest(fmt.Sprintf("open upload file: %v", err))
+		return GetResult{}, err
 	}
-	info, err := file.Stat()
-	if err != nil {
-		_ = file.Close()
-		return GetResult{}, operation.InvalidRequest(fmt.Sprintf("inspect upload file: %v", err))
-	}
-	if !info.Mode().IsRegular() {
-		_ = file.Close()
-		return GetResult{}, operation.InvalidRequest("upload path must name a regular file")
-	}
-	fileContentType, err := uploadContentType(file, request.Path)
-	if err != nil {
-		_ = file.Close()
-		return GetResult{}, operation.InvalidRequest(fmt.Sprintf("read upload file: %v", err))
-	}
+	defer func() { _ = upload.Close() }()
 
 	var version struct {
 		Version string `json:"version"`
 	}
 	if err := client.GetJSON(ctx, "/api/v1/app/version", &version); err != nil {
-		_ = file.Close()
 		return GetResult{}, err
 	}
 	supported, err := capability.SupportsInvokeAI(version.Version)
 	if err != nil {
-		_ = file.Close()
 		return GetResult{}, err
 	}
 	if !supported {
-		_ = file.Close()
 		return GetResult{}, operation.UnsupportedCapability(fmt.Sprintf("InvokeAI %s is outside the supported range %s", version.Version, capability.SupportedInvokeAIRange))
 	}
+	reference, err := upload.Send(ctx, client)
+	if err != nil {
+		return GetResult{}, err
+	}
+	return GetResult{Image: reference}, nil
+}
 
+// PreparedUpload is a local image file that passed every check possible
+// without network access. Callers that must finish remote validation first
+// prepare the upload early and send it later.
+type PreparedUpload struct {
+	file        *os.File
+	path        string
+	contentType string
+}
+
+// PrepareUpload requires an absolute path naming a readable regular file.
+func PrepareUpload(path string) (*PreparedUpload, error) {
+	if !filepath.IsAbs(path) {
+		return nil, operation.InvalidRequest("upload path must be absolute")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, operation.InvalidRequest(fmt.Sprintf("open upload file: %v", err))
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, operation.InvalidRequest(fmt.Sprintf("inspect upload file: %v", err))
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, operation.InvalidRequest("upload path must name a regular file")
+	}
+	contentType, err := uploadContentType(file, path)
+	if err != nil {
+		_ = file.Close()
+		return nil, operation.InvalidRequest(fmt.Sprintf("read upload file: %v", err))
+	}
+	return &PreparedUpload{file: file, path: path, contentType: contentType}, nil
+}
+
+// Close releases an upload that was not sent. It is safe after Send.
+func (u *PreparedUpload) Close() error {
+	if u.file == nil {
+		return nil
+	}
+	err := u.file.Close()
+	u.file = nil
+	return err
+}
+
+// Send uploads the file once as a non-intermediate user image without a
+// board, resizing, or injected metadata. It is never retried: a transport
+// failure or an incomplete response is an OutcomeUnknownError.
+func (u *PreparedUpload) Send(ctx context.Context, client *httpclient.Client) (Reference, error) {
+	if u.file == nil {
+		return Reference{}, errors.New("upload file was already sent or closed")
+	}
+	file := u.file
+	u.file = nil
 	reader, writer := io.Pipe()
 	multipartWriter := multipart.NewWriter(writer)
 	formContentType := multipartWriter.FormDataContentType()
@@ -204,9 +245,9 @@ func Upload(ctx context.Context, client *httpclient.Client, request UploadReques
 		header := make(textproto.MIMEHeader)
 		header.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{
 			"name":     "file",
-			"filename": filepath.Base(request.Path),
+			"filename": filepath.Base(u.path),
 		}))
-		header.Set("Content-Type", fileContentType)
+		header.Set("Content-Type", u.contentType)
 		part, writeErr := multipartWriter.CreatePart(header)
 		if writeErr == nil {
 			_, writeErr = io.Copy(part, file)
@@ -217,18 +258,22 @@ func Upload(ctx context.Context, client *httpclient.Client, request UploadReques
 		_ = writer.CloseWithError(writeErr)
 	}()
 
+	const uploadPath = "/api/v1/images/upload"
 	query := url.Values{}
 	query.Set("image_category", "user")
 	query.Set("is_intermediate", "false")
 	var response imageRecord
-	if err := client.PostStream(ctx, "/api/v1/images/upload?"+query.Encode(), reader, formContentType, &response); err != nil {
-		return GetResult{}, err
+	if err := client.PostStream(ctx, uploadPath+"?"+query.Encode(), reader, formContentType, &response); err != nil {
+		return Reference{}, err
 	}
-	reference, err := normalizeReference(client, response)
-	if err != nil {
-		return GetResult{}, err
+	if response.ImageName == "" {
+		uploadURL, err := client.ResolveURL(uploadPath)
+		if err != nil {
+			return Reference{}, fmt.Errorf("resolve upload URL: %w", err)
+		}
+		return Reference{}, &httpclient.OutcomeUnknownError{Method: http.MethodPost, URL: uploadURL, Err: errors.New("InvokeAI returned an upload result without an image name")}
 	}
-	return GetResult{Image: reference}, nil
+	return normalizeReference(client, response)
 }
 
 func uploadContentType(file *os.File, path string) (string, error) {

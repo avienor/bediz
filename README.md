@@ -53,6 +53,7 @@ printf '%s' "$HF_TOKEN" | ./bediz auth huggingface login --token-stdin --json
 ./bediz queue get ITEM_ID --json
 ./bediz generate --model "Anima Base 1.0" --prompt "a lighthouse in a storm" --json
 ./bediz upscale --image IMAGE_NAME --model "Juggernaut-XL-v9" --tile-controlnet TILE_MODEL_KEY --scale 2 --json
+./bediz upscale --image-path /absolute/path/to/image.png --model "Juggernaut-XL-v9" --tile-controlnet TILE_MODEL_KEY --scale 2 --json
 ./bediz recall --model "Anima Base 1.0" --prompt "a lighthouse in a storm" --seed 42 --json
 ```
 

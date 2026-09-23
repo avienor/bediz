@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"path/filepath"
 	"slices"
 
 	"github.com/avienor/bediz/internal/graphops"
@@ -114,11 +115,17 @@ func ValidateRequest(request Request) error {
 	if request.SchemaVersion != 1 {
 		return operation.InvalidRequest(fmt.Sprintf("unsupported request schema version %d", request.SchemaVersion))
 	}
-	if request.Source.Type == "path" {
-		return operation.UnsupportedCapability("local source paths are not supported for upscale yet")
-	}
-	if request.Source.Type != "image" || request.Source.Reference == "" {
-		return operation.InvalidRequest("source must name an existing InvokeAI image")
+	switch request.Source.Type {
+	case "image":
+		if request.Source.Reference == "" {
+			return operation.InvalidRequest("image source must name an existing InvokeAI image")
+		}
+	case "path":
+		if !filepath.IsAbs(request.Source.Reference) {
+			return operation.InvalidRequest("path source must be an absolute local image path")
+		}
+	default:
+		return operation.InvalidRequest("source requires an existing InvokeAI image or an absolute local image path")
 	}
 	if request.Model == "" {
 		return operation.InvalidRequest("model is required")

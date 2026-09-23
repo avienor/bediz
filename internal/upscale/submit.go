@@ -47,10 +47,20 @@ type ExecutionReceipt struct {
 	Warnings         []result.Warning `json:"warnings"`
 }
 
-// Submit validates the complete operation, then sends one enqueue mutation.
+// Submit validates the complete operation, then sends one enqueue mutation. A
+// path source is checked locally before any request and uploaded once, only
+// after every validation and resolution step, immediately before the enqueue.
 func Submit(ctx context.Context, client *httpclient.Client, request Request) (ExecutionReceipt, error) {
 	if err := ValidateRequest(request); err != nil {
 		return ExecutionReceipt{}, err
+	}
+	var upload *images.PreparedUpload
+	if request.Source.Type == "path" {
+		var err error
+		if upload, err = images.PrepareUpload(request.Source.Reference); err != nil {
+			return ExecutionReceipt{}, err
+		}
+		defer func() { _ = upload.Close() }()
 	}
 	if err := graphops.CheckVersion(ctx, client); err != nil {
 		return ExecutionReceipt{}, err
@@ -67,6 +77,17 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	if err := graphops.CheckInvocations(ctx, client, family.entry().Invocations); err != nil {
 		return ExecutionReceipt{}, err
 	}
+	if upload != nil {
+		source, err := upload.Send(ctx, client)
+		if err != nil {
+			return ExecutionReceipt{}, err
+		}
+		receipt, err := submitSource(ctx, client, request, resolved, source, true)
+		if err != nil {
+			return receipt, &UploadedSourceError{Source: source, Err: err}
+		}
+		return receipt, nil
+	}
 	imageResult, err := images.Get(ctx, client, images.GetRequest{SchemaVersion: 1, ImageName: request.Source.Reference})
 	if err != nil {
 		return ExecutionReceipt{}, err
@@ -75,6 +96,23 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	if source.ImageName != request.Source.Reference {
 		return ExecutionReceipt{}, &httpclient.InvalidResponseError{Err: fmt.Errorf("source image has contradictory name %q; expected %q", source.ImageName, request.Source.Reference)}
 	}
+	return submitSource(ctx, client, request, resolved, source, false)
+}
+
+// UploadedSourceError reports a failure after Bediz uploaded the local source
+// image. The uploaded image is retained and never deleted automatically.
+type UploadedSourceError struct {
+	Source images.Reference
+	Err    error
+}
+
+func (e *UploadedSourceError) Error() string {
+	return fmt.Sprintf("%v (uploaded source image %s was retained)", e.Err, e.Source.ImageName)
+}
+
+func (e *UploadedSourceError) Unwrap() error { return e.Err }
+
+func submitSource(ctx context.Context, client *httpclient.Client, request Request, resolved Resolution, source images.Reference, uploaded bool) (ExecutionReceipt, error) {
 	if source.Width < 1 || source.Height < 1 || source.Width > math.MaxInt / *resolved.Request.Scale || source.Height > math.MaxInt / *resolved.Request.Scale {
 		return ExecutionReceipt{}, &httpclient.InvalidResponseError{Err: fmt.Errorf("source image has invalid dimensions %d × %d", source.Width, source.Height)}
 	}
@@ -96,7 +134,7 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 		componentKeys["vae"] = resolved.Models.VAE.Key
 	}
 	return ExecutionReceipt{
-		SubmittedRequest: request, SourceImage: source, SourceUploaded: false,
+		SubmittedRequest: request, SourceImage: source, SourceUploaded: uploaded,
 		ResolvedSettings: ResolvedSettings{
 			PositivePrompt: resolved.Request.PositivePrompt, NegativePrompt: resolved.Request.NegativePrompt,
 			Scale: *resolved.Request.Scale, Creativity: *resolved.Request.Creativity, Structure: *resolved.Request.Structure,
@@ -128,7 +166,16 @@ func (e *ScaleNotAppliedError) Error() string {
 
 // Wait inspects the accepted queue item, checks its seed and output image, and
 // reports a scale failure when the completed dimensions differ from the receipt.
+// A failure after an uploaded source also reports that source.
 func Wait(ctx context.Context, client *httpclient.Client, accepted ExecutionReceipt, options WaitOptions) (ExecutionReceipt, error) {
+	receipt, err := wait(ctx, client, accepted, options)
+	if err != nil && accepted.SourceUploaded {
+		return receipt, &UploadedSourceError{Source: accepted.SourceImage, Err: err}
+	}
+	return receipt, err
+}
+
+func wait(ctx context.Context, client *httpclient.Client, accepted ExecutionReceipt, options WaitOptions) (ExecutionReceipt, error) {
 	if len(accepted.Queue.ItemIDs) != 1 || len(accepted.ResolvedSettings.Seeds) != 1 {
 		return accepted, operation.InvalidRequest("upscale wait requires one accepted queue item and seed")
 	}

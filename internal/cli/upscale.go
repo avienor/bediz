@@ -54,7 +54,7 @@ func (c *CLI) newUpscaleCommand(exitCode *int, jsonOutput *bool) *cobra.Command 
 	command.Flags().StringVar(&options.requestPath, "request", "", "read a request document from a file or standard input with -")
 	command.Flags().BoolVar(&options.noWait, "no-wait", false, "return after InvokeAI accepts the request")
 	command.Flags().StringVar(&options.image, "image", "", "existing InvokeAI image name")
-	command.Flags().StringVar(&options.imagePath, "image-path", "", "local source image path (not supported yet)")
+	command.Flags().StringVar(&options.imagePath, "image-path", "", "absolute local source image path to upload")
 	command.Flags().StringVar(&options.model, "model", "", "SD1.5 or SDXL main model key or unique name")
 	command.Flags().StringVar(&options.prompt, "prompt", "", "positive prompt")
 	command.Flags().StringVar(&options.negativePrompt, "negative-prompt", "", "negative prompt")

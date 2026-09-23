@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"strconv"
@@ -149,8 +150,30 @@ func (e remoteExecution[Request, Result]) run(ctx context.Context, c *CLI, jsonO
 
 // failRemote maps one domain failure to its public structured error code. It is
 // the single place command failures become structured error codes; doctor
-// classifies its own diagnostic issues before it reports one.
+// classifies its own diagnostic issues before it reports one. A failure after
+// an uploaded upscale source keeps the code of its cause and adds the complete
+// uploaded Image Reference to the details.
 func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
+	if uploaded, ok := errors.AsType[*upscale.UploadedSourceError](err); ok {
+		return c.classifyRemote(operationName, jsonOutput, uploaded.Err, map[string]any{
+			"source_image":    uploaded.Source,
+			"source_uploaded": true,
+		})
+	}
+	return c.classifyRemote(operationName, jsonOutput, err, nil)
+}
+
+func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, extra map[string]any) int {
+	fail := func(code, message string, details map[string]any) int {
+		if len(extra) > 0 {
+			details = maps.Clone(details)
+			if details == nil {
+				details = map[string]any{}
+			}
+			maps.Copy(details, extra)
+		}
+		return c.fail(operationName, jsonOutput, code, message, details)
+	}
 	if submission, ok := errors.AsType[*models.StarterSubmissionError](err); ok {
 		details := map[string]any{"jobs": submission.Progress.Jobs, "skipped": submission.Progress.Skipped}
 		if _, uncertain := errors.AsType[*httpclient.OutcomeUnknownError](submission.Cause); uncertain {
@@ -158,7 +181,7 @@ func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
 			if submission.DependencyIndex != nil {
 				details["uncertain_dependency_index"] = *submission.DependencyIndex
 			}
-			return c.fail(operationName, jsonOutput, result.CodeOutcomeUnknown, "InvokeAI may have accepted the installation; inspect the current model inventory and install job list before submitting again", details)
+			return fail(result.CodeOutcomeUnknown, "InvokeAI may have accepted the installation; inspect the current model inventory and install job list before submitting again", details)
 		}
 		details["rejected_role"] = submission.Role
 		if submission.DependencyIndex != nil {
@@ -167,49 +190,49 @@ func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
 		if rejection, ok := errors.AsType[*httpclient.HTTPError](submission.Cause); ok {
 			details["status"] = rejection.StatusCode
 		}
-		return c.fail(operationName, jsonOutput, result.CodeInvokeAIOperationFailed, "InvokeAI rejected a starter installation job; reinspect the catalog before retrying", details)
+		return fail(result.CodeInvokeAIOperationFailed, "InvokeAI rejected a starter installation job; reinspect the catalog before retrying", details)
 	}
 	if _, ok := errors.AsType[*models.RepositoryAccessError](err); ok {
-		return c.fail(operationName, jsonOutput, result.CodeConnectionFailed, "could not verify public Hugging Face repository access", nil)
+		return fail(result.CodeConnectionFailed, "could not verify public Hugging Face repository access", nil)
 	}
 	if access, ok := errors.AsType[*models.CivitaiMetadataAccessError](err); ok {
 		if access.StatusCode == http.StatusNotFound {
-			return c.fail(operationName, jsonOutput, result.CodeNotFound, "Civitai metadata was not found", nil)
+			return fail(result.CodeNotFound, "Civitai metadata was not found", nil)
 		}
-		return c.fail(operationName, jsonOutput, result.CodeConnectionFailed, "could not verify Civitai metadata", nil)
+		return fail(result.CodeConnectionFailed, "could not verify Civitai metadata", nil)
 	}
 	if auth, ok := errors.AsType[*operation.AuthenticationRequiredError](err); ok {
-		return c.fail(operationName, jsonOutput, result.CodeAuthenticationFailed, auth.Error(), nil)
+		return fail(result.CodeAuthenticationFailed, auth.Error(), nil)
 	}
 	if _, ok := errors.AsType[*huggingface.RejectedTokenError](err); ok {
-		return c.fail(operationName, jsonOutput, result.CodeAuthenticationFailed, "Hugging Face rejected the token", nil)
+		return fail(result.CodeAuthenticationFailed, "Hugging Face rejected the token", nil)
 	}
 	if _, ok := errors.AsType[*huggingface.UnchangedStateError](err); ok {
-		return c.fail(operationName, jsonOutput, result.CodeInvokeAIOperationFailed, "InvokeAI did not clear the Hugging Face token", nil)
+		return fail(result.CodeInvokeAIOperationFailed, "InvokeAI did not clear the Hugging Face token", nil)
 	}
 	if invalid, ok := errors.AsType[*operation.InvalidRequestError](err); ok {
-		return c.fail(operationName, jsonOutput, result.CodeInvalidRequest, invalid.Error(), nil)
+		return fail(result.CodeInvalidRequest, invalid.Error(), nil)
 	}
 	if unsupported, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); ok {
-		return c.fail(operationName, jsonOutput, result.CodeUnsupportedCapability, unsupported.Error(), nil)
+		return fail(result.CodeUnsupportedCapability, unsupported.Error(), nil)
 	}
 	if selection, ok := errors.AsType[*operation.CivitaiFileSelectionError](err); ok {
-		return c.fail(operationName, jsonOutput, result.CodeSelectionRequired, selection.Error(), map[string]any{
+		return fail(result.CodeSelectionRequired, selection.Error(), map[string]any{
 			"kind": "civitai_file", "selector": selection.VersionID, "candidates": selection.Candidates,
 		})
 	}
 	if selection, ok := errors.AsType[*operation.CivitaiVersionSelectionError](err); ok {
-		return c.fail(operationName, jsonOutput, result.CodeSelectionRequired, selection.Error(), map[string]any{
+		return fail(result.CodeSelectionRequired, selection.Error(), map[string]any{
 			"kind": "civitai_version", "selector": selection.ModelID, "candidates": selection.Candidates,
 		})
 	}
 	if selection, ok := errors.AsType[*operation.SelectionRequiredError](err); ok {
-		return c.fail(operationName, jsonOutput, result.CodeSelectionRequired, selection.Error(), map[string]any{
+		return fail(result.CodeSelectionRequired, selection.Error(), map[string]any{
 			"kind": selection.Kind, "selector": selection.Selector, "candidates": selection.Candidates,
 		})
 	}
 	if missing, ok := errors.AsType[*operation.MissingComponentError](err); ok {
-		return c.fail(operationName, jsonOutput, result.CodeMissingComponent, missing.Error(), map[string]any{
+		return fail(result.CodeMissingComponent, missing.Error(), map[string]any{
 			"component_type":        missing.ComponentType,
 			"required_base":         missing.RequiredBase,
 			"required_type":         missing.RequiredType,
@@ -217,7 +240,7 @@ func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
 		})
 	}
 	if failed, ok := errors.AsType[*upscale.ScaleNotAppliedError](err); ok {
-		return c.fail(operationName, jsonOutput, result.CodeInvokeAIOperationFailed, failed.Error(), map[string]any{
+		return fail(result.CodeInvokeAIOperationFailed, failed.Error(), map[string]any{
 			"reason":          "scale_not_applied",
 			"expected_width":  failed.ExpectedWidth,
 			"expected_height": failed.ExpectedHeight,
@@ -233,43 +256,43 @@ func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
 		})
 	}
 	if timeout, ok := errors.AsType[*operation.WaitTimeoutError](err); ok {
-		return c.fail(operationName, jsonOutput, result.CodeWaitTimeout, timeout.Error(), queuePositionDetails(timeout.Position))
+		return fail(result.CodeWaitTimeout, timeout.Error(), queuePositionDetails(timeout.Position))
 	}
 	if interrupted, ok := errors.AsType[*operation.InterruptedError](err); ok {
-		return c.fail(operationName, jsonOutput, result.CodeInterrupted, interrupted.Error(), queuePositionDetails(interrupted.Position))
+		return fail(result.CodeInterrupted, interrupted.Error(), queuePositionDetails(interrupted.Position))
 	}
 	if failure, ok := errors.AsType[*operation.ItemFailureError](err); ok {
-		return c.fail(operationName, jsonOutput, result.CodeInvokeAIOperationFailed, failure.Error(), acceptedItemDetails(failure.Position, failure.ItemID, failure.Status))
+		return fail(result.CodeInvokeAIOperationFailed, failure.Error(), acceptedItemDetails(failure.Position, failure.ItemID, failure.Status))
 	}
 	if invalid, ok := errors.AsType[*operation.InvalidQueueResultError](err); ok {
-		return c.fail(operationName, jsonOutput, result.CodeInvalidInvokeAIResponse, invalid.Error(), acceptedItemDetails(invalid.Position, invalid.ItemID, invalid.Status))
+		return fail(result.CodeInvalidInvokeAIResponse, invalid.Error(), acceptedItemDetails(invalid.Position, invalid.ItemID, invalid.Status))
 	}
 	if _, ok := errors.AsType[*httpclient.OutcomeUnknownError](err); ok {
 		if operationName == result.OperationModelsInstall {
-			return c.fail(operationName, jsonOutput, result.CodeOutcomeUnknown, "InvokeAI may have accepted the installation; inspect the current model inventory and install job list before submitting again", nil)
+			return fail(result.CodeOutcomeUnknown, "InvokeAI may have accepted the installation; inspect the current model inventory and install job list before submitting again", nil)
 		}
-		return c.fail(operationName, jsonOutput, result.CodeOutcomeUnknown, "InvokeAI may have accepted the operation; inspect remote state before retrying", nil)
+		return fail(result.CodeOutcomeUnknown, "InvokeAI may have accepted the operation; inspect remote state before retrying", nil)
 	}
 	if errors.Is(err, context.Canceled) {
-		return c.fail(operationName, jsonOutput, result.CodeInterrupted, "operation was interrupted locally", nil)
+		return fail(result.CodeInterrupted, "operation was interrupted locally", nil)
 	}
 	if _, ok := errors.AsType[*httpclient.NetworkError](err); ok {
-		return c.fail(operationName, jsonOutput, result.CodeConnectionFailed, "could not reach InvokeAI", nil)
+		return fail(result.CodeConnectionFailed, "could not reach InvokeAI", nil)
 	}
 	if _, ok := errors.AsType[*httpclient.InvalidResponseError](err); ok {
-		return c.fail(operationName, jsonOutput, result.CodeInvalidInvokeAIResponse, "InvokeAI returned an invalid response", nil)
+		return fail(result.CodeInvalidInvokeAIResponse, "InvokeAI returned an invalid response", nil)
 	}
 	if httpErr, ok := errors.AsType[*httpclient.HTTPError](err); ok {
 		switch {
 		case httpErr.AuthenticationFailure():
-			return c.fail(operationName, jsonOutput, result.CodeAuthenticationFailed, "InvokeAI rejected authentication", map[string]any{"status": httpErr.StatusCode})
+			return fail(result.CodeAuthenticationFailed, "InvokeAI rejected authentication", map[string]any{"status": httpErr.StatusCode})
 		case httpErr.StatusCode == http.StatusNotFound:
-			return c.fail(operationName, jsonOutput, result.CodeNotFound, "the requested InvokeAI resource was not found", nil)
+			return fail(result.CodeNotFound, "the requested InvokeAI resource was not found", nil)
 		default:
-			return c.fail(operationName, jsonOutput, result.CodeInvokeAIOperationFailed, "InvokeAI rejected the operation", map[string]any{"status": httpErr.StatusCode})
+			return fail(result.CodeInvokeAIOperationFailed, "InvokeAI rejected the operation", map[string]any{"status": httpErr.StatusCode})
 		}
 	}
-	return c.fail(operationName, jsonOutput, result.CodeInvokeAIOperationFailed, err.Error(), nil)
+	return fail(result.CodeInvokeAIOperationFailed, err.Error(), nil)
 }
 
 // queuePositionDetails reports accepted remote work in the structured failure

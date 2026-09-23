@@ -213,10 +213,6 @@ func TestUpscaleRejectsInvalidLocalValuesBeforeNetwork(t *testing.T) {
 			t.Fatalf("non-finite guidance %q: code=%d envelope=%#v network calls=%d", guidance, code, envelope, calls.Load())
 		}
 	}
-	code, envelope = runUpscale(t, server.URL, "upscale", "--image-path", "/tmp/source.png", "--model", "sdxl-main")
-	if code != result.ExitUnsupportedCapability || envelope.Error == nil || envelope.Error.Code != result.CodeUnsupportedCapability || calls.Load() != 0 {
-		t.Fatalf("path source: code=%d envelope=%#v network calls=%d", code, envelope, calls.Load())
-	}
 }
 
 func TestUpscaleWaitVerifiesOutputDimensionsAndSeed(t *testing.T) {

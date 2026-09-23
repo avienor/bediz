@@ -894,6 +894,9 @@ func TestDoctorReportsSDXLUpscaleOnlyWithTestedRequirements(t *testing.T) {
 		{"metadata rejects upscale fields", func(document map[string]any, _ *[]map[string]string) {
 			delete(document["components"].(map[string]any)["schemas"].(map[string]any)["CoreMetadataInvocation"].(map[string]any), "additionalProperties")
 		}, "incompatible_invocation:core_metadata"},
+		{"missing upload endpoint", func(document map[string]any, _ *[]map[string]string) {
+			delete(document["paths"].(map[string]any), "/api/v1/images/upload")
+		}, "missing_endpoint:POST /api/v1/images/upload"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			document := openAPIFixture(t)
@@ -947,6 +950,9 @@ func TestDoctorReportsSD1UpscaleOnlyWithTestedRequirements(t *testing.T) {
 		{"missing main loader", func(document map[string]any, _ *[]map[string]string) {
 			delete(document["components"].(map[string]any)["schemas"].(map[string]any), "MainModelLoaderInvocation")
 		}, "incompatible_invocation:main_model_loader"},
+		{"missing upload endpoint", func(document map[string]any, _ *[]map[string]string) {
+			delete(document["paths"].(map[string]any), "/api/v1/images/upload")
+		}, "missing_endpoint:POST /api/v1/images/upload"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			document := openAPIFixture(t)
@@ -971,7 +977,7 @@ func TestDoctorReportsSD1UpscaleOnlyWithTestedRequirements(t *testing.T) {
 			if sd1 == nil || sd1.Compatible != (test.failure == "") || sd1.UISync != "" || (test.failure != "" && !slices.Contains(sd1.Failures, test.failure)) {
 				t.Fatalf("upscale/sd-1 capability = %#v", sd1)
 			}
-			sdxlAffected := test.name == "missing Spandrel"
+			sdxlAffected := test.name == "missing Spandrel" || test.name == "missing upload endpoint"
 			if sdxl == nil || sdxl.Compatible == sdxlAffected {
 				t.Fatalf("upscale/sdxl capability = %#v", sdxl)
 			}
