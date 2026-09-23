@@ -46,6 +46,21 @@ type SelectionRequiredError struct {
 	Candidates []SelectionCandidate
 }
 
+type CivitaiFileCandidate struct {
+	ID      int    `json:"id"`
+	Name    string `json:"name"`
+	Primary bool   `json:"primary"`
+}
+
+type CivitaiFileSelectionError struct {
+	VersionID  int
+	Candidates []CivitaiFileCandidate
+}
+
+func (*CivitaiFileSelectionError) Error() string {
+	return "Civitai version requires one exact file selection"
+}
+
 func (e *SelectionRequiredError) Error() string {
 	return "model selector requires one exact selection"
 }

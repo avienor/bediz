@@ -26,6 +26,7 @@ import (
 type InstallSource struct {
 	Type      string `json:"type"`
 	Reference string `json:"reference"`
+	FileID    *int   `json:"file_id,omitempty"`
 }
 
 type InstallRequest struct {
@@ -39,6 +40,7 @@ type InstallRequest struct {
 type Installer struct {
 	Backend                *httpclient.Client
 	PublicRepositoryClient *http.Client
+	CivitaiMetadataClient  *http.Client
 }
 
 type RepositoryAccessError struct{}
@@ -116,6 +118,9 @@ func (installer Installer) Install(ctx context.Context, request InstallRequest) 
 	if request.Move != nil && request.Source.Type != "path" {
 		return InstallResult{}, operation.InvalidRequest("move applies only to a server path source")
 	}
+	if request.Source.FileID != nil && request.Source.Type != "civitai" {
+		return InstallResult{}, operation.InvalidRequest("file_id applies only to a Civitai source")
+	}
 	if request.Source.Type == "path" {
 		if request.SourceToken != "" {
 			return InstallResult{}, operation.InvalidRequest("source token does not apply to a server path source")
@@ -126,6 +131,9 @@ func (installer Installer) Install(ctx context.Context, request InstallRequest) 
 	}
 	if request.Source.Type == "starter" {
 		return installer.installStarter(ctx, request)
+	}
+	if request.SourceToken != "" && !client.AllowsSourceToken() {
+		return InstallResult{}, operation.InvalidRequest("source token requires HTTPS or a loopback InvokeAI target")
 	}
 	source := request.Source.Reference
 	switch request.Source.Type {
@@ -143,11 +151,14 @@ func (installer Installer) Install(ctx context.Context, request InstallRequest) 
 		if !strings.HasPrefix(source, "/") && !windowsServerPath.MatchString(source) {
 			return InstallResult{}, operation.InvalidRequest("server path source must be absolute in the InvokeAI filesystem namespace")
 		}
+	case "civitai":
+		var err error
+		source, err = installer.resolveCivitai(ctx, request.Source, request.SourceToken)
+		if err != nil {
+			return InstallResult{}, err
+		}
 	default:
-		return InstallResult{}, operation.InvalidRequest("source type must be starter, url, huggingface, or path")
-	}
-	if request.SourceToken != "" && !client.AllowsSourceToken() {
-		return InstallResult{}, operation.InvalidRequest("source token requires HTTPS or a loopback InvokeAI target")
+		return InstallResult{}, operation.InvalidRequest("source type must be starter, url, huggingface, path, or civitai")
 	}
 	if err := checkInstallCompatibility(ctx, client, request.SourceToken != "", request.Source.Type); err != nil {
 		return InstallResult{}, err

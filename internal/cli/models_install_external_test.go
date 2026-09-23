@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"encoding/json/v2"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -72,6 +73,167 @@ func mockPublicHuggingFaceRepository(t *testing.T, gated string) {
 		return previous.RoundTrip(request)
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
+}
+
+func mockCivitaiVersion(t *testing.T, body string) {
+	t.Helper()
+	previous := http.DefaultTransport
+	http.DefaultTransport = huggingFaceTransport(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Host == "civitai.com" {
+			if request.URL.String() != "https://civitai.com/api/v1/model-versions/42" {
+				t.Errorf("unexpected Civitai metadata request: %s", request.URL)
+			}
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+		}
+		return previous.RoundTrip(request)
+	})
+	t.Cleanup(func() { http.DefaultTransport = previous })
+}
+
+func TestModelsInstallCivitaiAmbiguousFilesUseSelectionEnvelope(t *testing.T) {
+	isolateUserConfigDir(t)
+	mockCivitaiVersion(t, `{"id":42,"files":[{"id":10,"name":"ten","primary":false,"downloadUrl":"https://civitai.com/api/download/models/42?fileId=10"},{"id":2,"name":"two","primary":false,"downloadUrl":"https://civitai.com/api/download/models/42?fileId=2"}]}`)
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Error(w, "unexpected InvokeAI request", http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	code, stdout, stderr := runModelCommand(t, "", "models", "install", "--source-type", "civitai", "--source", "42", "--url", server.URL, "--json")
+	var envelope struct {
+		Error struct {
+			Code    string `json:"code"`
+			Details struct {
+				Kind       string `json:"kind"`
+				Selector   int    `json:"selector"`
+				Candidates []struct {
+					ID      int    `json:"id"`
+					Name    string `json:"name"`
+					Primary bool   `json:"primary"`
+				} `json:"candidates"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	choices := envelope.Error.Details.Candidates
+	if code != result.ExitSelectionRequired || stderr != "" || envelope.Error.Code != result.CodeSelectionRequired || envelope.Error.Details.Kind != "civitai_file" || envelope.Error.Details.Selector != 42 || len(choices) != 2 || choices[0].ID != 2 || choices[1].ID != 10 || requests.Load() != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q requests=%d", code, stdout, stderr, requests.Load())
+	}
+}
+
+func TestModelsInstallCivitaiSelectedFileFlagAndDocumentAgree(t *testing.T) {
+	isolateUserConfigDir(t)
+	mockCivitaiVersion(t, `{"id":42,"files":[{"id":10,"name":"ten","primary":false,"downloadUrl":"https://civitai.com/api/download/models/42?fileId=10"},{"id":2,"name":"two","primary":false,"downloadUrl":"https://civitai.com/api/download/models/42?fileId=2"}]}`)
+	var posts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(pathInstallOpenAPI))
+		case "/api/v2/models/install":
+			posts.Add(1)
+			if r.URL.Query().Get("source") != "https://civitai.com/api/download/models/42?fileId=2" {
+				t.Errorf("source = %q", r.URL.Query().Get("source"))
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":12,"status":"waiting"}`))
+		default:
+			t.Errorf("unexpected request: %s", r.URL)
+		}
+	}))
+	t.Cleanup(server.Close)
+	for _, input := range []struct {
+		stdin string
+		args  []string
+	}{
+		{"", []string{"--source-type", "civitai", "--source", "42", "--file-id", "2"}},
+		{`{"schema_version":1,"source":{"type":"civitai","reference":"42","file_id":2}}`, []string{"--request", "-"}},
+	} {
+		args := append([]string{"models", "install", "--url", server.URL, "--json"}, input.args...)
+		code, stdout, stderr := runModelCommand(t, input.stdin, args...)
+		if code != result.ExitSuccess || stderr != "" || !strings.Contains(stdout, `"job_id":12`) || !strings.Contains(stdout, `"source_type":"civitai"`) {
+			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", input.args, code, stdout, stderr)
+		}
+	}
+	if posts.Load() != 2 {
+		t.Fatalf("posts = %d", posts.Load())
+	}
+}
+
+func TestModelsInstallCivitaiUnknownOutcomeSubmitsOnceWithoutSecrets(t *testing.T) {
+	isolateUserConfigDir(t)
+	const token = "civitai-token-sentinel-742"
+	mockCivitaiVersion(t, `{"id":42,"files":[{"id":7,"name":"model.safetensors","primary":true,"downloadUrl":"https://civitai.com/api/download/models/42?fileId=7"}]}`)
+	var posts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(huggingFaceInstallOpenAPI))
+		case "/api/v2/models/install":
+			posts.Add(1)
+			if r.URL.Query().Get("access_token") != token || r.URL.Query().Get("source") != "https://civitai.com/api/download/models/42?fileId=7" {
+				t.Error("incorrect Civitai install parameters")
+			}
+			connection, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			_ = connection.Close()
+		default:
+			t.Errorf("unexpected request: %s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+	code, stdout, stderr := runModelCommand(t, token, "models", "install", "--source-type", "civitai", "--source", "42", "--token-stdin", "--url", server.URL, "--json")
+	if code != result.ExitInvokeAIFailure || stderr != "" || !strings.Contains(stdout, `"code":"outcome_unknown"`) || strings.Contains(stdout, token) || strings.Contains(stdout, "civitai.com") || posts.Load() != 1 {
+		t.Fatalf("code=%d stdout=%q stderr=%q posts=%d", code, stdout, stderr, posts.Load())
+	}
+}
+
+func TestModelsInstallCivitaiMetadataOutageIsSafeConnectionFailure(t *testing.T) {
+	isolateUserConfigDir(t)
+	const token = "civitai-token-sentinel-742"
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Error(w, "unexpected InvokeAI request", http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	for _, test := range []struct {
+		name     string
+		response func(*http.Request) (*http.Response, error)
+		exit     int
+		code     string
+	}{
+		{"transport failure", func(*http.Request) (*http.Response, error) { return nil, errors.New(token) }, result.ExitConnection, result.CodeConnectionFailed},
+		{"service unavailable", func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusServiceUnavailable, Body: io.NopCloser(strings.NewReader(token)), Header: make(http.Header)}, nil
+		}, result.ExitConnection, result.CodeConnectionFailed},
+		{"missing version", func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader(token)), Header: make(http.Header)}, nil
+		}, result.ExitInvokeAIFailure, result.CodeNotFound},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			previous := http.DefaultTransport
+			http.DefaultTransport = huggingFaceTransport(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Host == "civitai.com" {
+					return test.response(r)
+				}
+				return previous.RoundTrip(r)
+			})
+			t.Cleanup(func() { http.DefaultTransport = previous })
+			code, stdout, stderr := runModelCommand(t, token, "models", "install", "--source-type", "civitai", "--source", "42", "--token-stdin", "--url", server.URL, "--json")
+			if code != test.exit || stderr != "" || !strings.Contains(stdout, `"code":"`+test.code+`"`) || strings.Contains(stdout, token) || strings.Contains(stdout, "civitai.com/api") || requests.Load() != 0 {
+				t.Fatalf("code=%d stdout=%q stderr=%q requests=%d", code, stdout, stderr, requests.Load())
+			}
+		})
+	}
 }
 
 func TestHuggingFaceInstallFlagsAndDocumentProduceSameCanonicalJob(t *testing.T) {
@@ -478,7 +640,9 @@ func TestModelsInstallRejectsInvalidDocumentsAndMixedFlagsBeforeMutation(t *test
 		flags    []string
 	}{
 		{`{"schema_version":1,"source":{"type":"url","reference":"https://example.org/model?token=x"}}`, nil},
+		{`{"schema_version":1,"source":{"type":"url","reference":"https://civitai.com/api/download/models/42?fileId=7"}}`, nil},
 		{`{"schema_version":1,"source":{"type":"url","reference":"https://example.org/model","file_id":1}}`, nil},
+		{`{"schema_version":1,"source":{"type":"civitai","reference":"42","file_id":0}}`, nil},
 		{`{"schema_version":1,"source":{"type":"url","reference":"https://example.org/model","access_token":"source-token-sentinel-742"}}`, nil},
 		{`{"schema_version":1,"source":{"type":"url","reference":"https://example.org/model"},"source_token":"source-token-sentinel-742"}`, nil},
 		{`{"schema_version":1,"source":{"type":"path","reference":"org/repo"}}`, nil},
@@ -486,6 +650,7 @@ func TestModelsInstallRejectsInvalidDocumentsAndMixedFlagsBeforeMutation(t *test
 		{`{"schema_version":1,"source":{"type":"path","reference":"/tmp/model"},"yes":true}`, nil},
 		{`{"schema_version":1,"source":{"type":"url","reference":"https://example.org/model"}}`, []string{"--source-type", "url"}},
 		{`{"schema_version":1,"source":{"type":"path","reference":"/tmp/model"}}`, []string{"--move"}},
+		{`{"schema_version":1,"source":{"type":"civitai","reference":"42"}}`, []string{"--file-id", "2"}},
 	} {
 		args := append([]string{"models", "install", "--request", "-", "--url", server.URL, "--json"}, input.flags...)
 		code, stdout, _ := runModelCommand(t, input.document, args...)

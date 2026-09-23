@@ -1,6 +1,7 @@
 package models_test
 
 import (
+	"context"
 	"encoding/json/v2"
 	"errors"
 	"io"
@@ -30,6 +31,287 @@ func installClient(t *testing.T, handler http.HandlerFunc) *httpclient.Client {
 		t.Fatal(err)
 	}
 	return client
+}
+
+func TestInstallCivitaiExactVersionUsesVerifiedFileURL(t *testing.T) {
+	var posts atomic.Int32
+	client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(huggingFaceInstallOpenAPI))
+		case "/api/v2/models/install":
+			posts.Add(1)
+			if r.Method != http.MethodPost || r.URL.Query().Get("source") != "https://civitai.com/api/download/models/42?fileId=7" {
+				t.Errorf("unexpected install source: %s", r.URL)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":9,"status":"waiting"}`))
+		default:
+			t.Errorf("unexpected InvokeAI request: %s %s", r.Method, r.URL)
+		}
+	})
+	metadata := &http.Client{Transport: installTransportFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet || r.URL.String() != "https://civitai.com/api/v1/model-versions/42" {
+			t.Errorf("unexpected Civitai request: %s %s", r.Method, r.URL)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":42,"files":[{"id":7,"name":"model.safetensors","primary":true,"downloadUrl":"https://civitai.com/api/download/models/42?fileId=7"}]}`)), Header: make(http.Header)}, nil
+	})}
+	got, err := (models.Installer{Backend: client, CivitaiMetadataClient: metadata}).Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "civitai", Reference: "42"}})
+	if err != nil || posts.Load() != 1 || len(got.Jobs) != 1 || got.Jobs[0].JobID != 9 || got.Jobs[0].SourceType != "civitai" {
+		t.Fatalf("result=%#v err=%v posts=%d", got, err, posts.Load())
+	}
+}
+
+func TestInstallCivitaiPageVersionSelectsOnlyPrimaryFile(t *testing.T) {
+	var posts atomic.Int32
+	client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(huggingFaceInstallOpenAPI))
+		case "/api/v2/models/install":
+			posts.Add(1)
+			if r.URL.Query().Get("source") != "https://civitai.com/api/download/models/42?fileId=8" {
+				t.Errorf("source = %q", r.URL.Query().Get("source"))
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":10,"status":"waiting"}`))
+		default:
+			t.Errorf("unexpected request: %s", r.URL)
+		}
+	})
+	metadata := &http.Client{Transport: installTransportFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":42,"modelId":21,"files":[{"id":7,"name":"preview.png","primary":false,"downloadUrl":"https://civitai.com/api/download/models/42?fileId=7"},{"id":8,"name":"model.safetensors","primary":true,"downloadUrl":"https://civitai.com/api/download/models/42?fileId=8"}]}`)), Header: make(http.Header)}, nil
+	})}
+	got, err := (models.Installer{Backend: client, CivitaiMetadataClient: metadata}).Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "civitai", Reference: "https://civitai.com/models/21?modelVersionId=42"}})
+	if err != nil || posts.Load() != 1 || len(got.Jobs) != 1 || got.Jobs[0].JobID != 10 {
+		t.Fatalf("result=%#v err=%v posts=%d", got, err, posts.Load())
+	}
+}
+
+func TestInstallCivitaiAmbiguousFilesReturnNumericChoicesWithoutMutation(t *testing.T) {
+	var posts atomic.Int32
+	client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			posts.Add(1)
+		}
+		http.Error(w, "unexpected InvokeAI request", http.StatusInternalServerError)
+	})
+	metadata := &http.Client{Transport: installTransportFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":42,"files":[{"id":10,"name":"ten","primary":false,"downloadUrl":"https://civitai.com/api/download/models/42?fileId=10"},{"id":2,"name":"two","primary":false,"downloadUrl":"https://civitai.com/api/download/models/42?fileId=2"}]}`)), Header: make(http.Header)}, nil
+	})}
+	_, err := (models.Installer{Backend: client, CivitaiMetadataClient: metadata}).Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "civitai", Reference: "42"}})
+	selection, ok := errors.AsType[*operation.CivitaiFileSelectionError](err)
+	if !ok || selection.VersionID != 42 || !slices.Equal(selection.Candidates, []operation.CivitaiFileCandidate{{ID: 2, Name: "two", Primary: false}, {ID: 10, Name: "ten", Primary: false}}) || posts.Load() != 0 {
+		t.Fatalf("selection=%#v err=%v posts=%d", selection, err, posts.Load())
+	}
+}
+
+func TestInstallCivitaiMultiplePrimariesRequireFileChoice(t *testing.T) {
+	var posts atomic.Int32
+	client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+		posts.Add(1)
+		http.Error(w, "unexpected InvokeAI request", http.StatusInternalServerError)
+	})
+	metadata := &http.Client{Transport: installTransportFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":42,"files":[{"id":10,"name":"ten","primary":true,"downloadUrl":"https://civitai.com/api/download/models/42?fileId=10"},{"id":2,"name":"two","primary":true,"downloadUrl":"https://civitai.com/api/download/models/42?fileId=2"}]}`)), Header: make(http.Header)}, nil
+	})}
+	_, err := (models.Installer{Backend: client, CivitaiMetadataClient: metadata}).Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "civitai", Reference: "42"}})
+	selection, ok := errors.AsType[*operation.CivitaiFileSelectionError](err)
+	if !ok || len(selection.Candidates) != 2 || selection.Candidates[0].ID != 2 || !selection.Candidates[0].Primary || posts.Load() != 0 {
+		t.Fatalf("selection=%#v err=%v posts=%d", selection, err, posts.Load())
+	}
+}
+
+func TestInstallCivitaiSelectedFileMustBelongToExactVersion(t *testing.T) {
+	var posts atomic.Int32
+	client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(huggingFaceInstallOpenAPI))
+		case "/api/v2/models/install":
+			posts.Add(1)
+			if r.URL.Query().Get("source") != "https://civitai.com/api/download/models/42?fileId=2" {
+				t.Errorf("source = %q", r.URL.Query().Get("source"))
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":11,"status":"waiting"}`))
+		default:
+			t.Errorf("unexpected request: %s", r.URL)
+		}
+	})
+	metadata := &http.Client{Transport: installTransportFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":42,"files":[{"id":10,"name":"ten","primary":false,"downloadUrl":"https://civitai.com/api/download/models/42?fileId=10"},{"id":2,"name":"two","primary":false,"downloadUrl":"https://civitai.com/api/download/models/42?fileId=2"}]}`)), Header: make(http.Header)}, nil
+	})}
+	installer := models.Installer{Backend: client, CivitaiMetadataClient: metadata}
+	_, err := installer.Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "civitai", Reference: "42", FileID: new(99)}})
+	if err == nil || posts.Load() != 0 {
+		t.Fatalf("out-of-version selection err=%v posts=%d", err, posts.Load())
+	}
+	got, err := installer.Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "civitai", Reference: "42", FileID: new(2)}})
+	if err != nil || posts.Load() != 1 || len(got.Jobs) != 1 || got.Jobs[0].JobID != 11 {
+		t.Fatalf("result=%#v err=%v posts=%d", got, err, posts.Load())
+	}
+}
+
+func TestInstallCivitaiProtectedVersionUsesTemporaryTokenWithoutEcho(t *testing.T) {
+	const token = "civitai-token-sentinel-742"
+	var posts atomic.Int32
+	client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(huggingFaceInstallOpenAPI))
+		case "/api/v2/models/install":
+			posts.Add(1)
+			if r.URL.Query().Get("access_token") != token || r.URL.Query().Get("source") != "https://civitai.com/api/download/models/42?fileId=7" {
+				t.Errorf("incorrect protected installation parameters")
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":13,"status":"waiting","error":"civitai-token-sentinel-742"}`))
+		default:
+			t.Errorf("unexpected InvokeAI request: %s", r.URL.Path)
+		}
+	})
+	metadata := &http.Client{Transport: installTransportFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("Authorization") != "Bearer "+token {
+			t.Error("Civitai metadata request lacks temporary bearer token")
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":42,"files":[{"id":7,"name":"model.safetensors","primary":true,"downloadUrl":"https://civitai.com/api/download/models/42?fileId=7"}]}`)), Header: make(http.Header)}, nil
+	})}
+	got, err := (models.Installer{Backend: client, CivitaiMetadataClient: metadata}).Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "civitai", Reference: "42"}, SourceToken: token})
+	if err != nil || posts.Load() != 1 {
+		t.Fatalf("result=%#v err=%v posts=%d", got, err, posts.Load())
+	}
+	encoded, _ := json.Marshal(got)
+	if strings.Contains(string(encoded), token) {
+		t.Fatalf("token leaked in result: %s", encoded)
+	}
+}
+
+func TestInstallCivitaiRejectsInvalidVersionReferencesBeforeMetadata(t *testing.T) {
+	for _, reference := range []string{
+		"0", "-1", "+42", "4.2", "abc", "https://civitai.com/models/12",
+		"https://civitai.com/models/12?modelVersionId=0",
+		"https://civitai.com/models/12?modelVersionId=42&modelVersionId=43",
+		"https://civitai.com/models/12?modelVersionId=42&token=secret",
+		"https://civitai.com/models/12?modelVersionId=42#fragment",
+		"https://user:secret@civitai.com/models/12?modelVersionId=42",
+		"https://elsewhere.example/models/12?modelVersionId=42",
+		"https://civitai.com/api/download/models/42?fileId=7",
+	} {
+		t.Run(reference, func(t *testing.T) {
+			var metadataRequests, posts atomic.Int32
+			client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+				posts.Add(1)
+				http.Error(w, "unexpected InvokeAI request", http.StatusInternalServerError)
+			})
+			metadata := &http.Client{Transport: installTransportFunc(func(*http.Request) (*http.Response, error) {
+				metadataRequests.Add(1)
+				return nil, errors.New("unexpected metadata request")
+			})}
+			_, err := (models.Installer{Backend: client, CivitaiMetadataClient: metadata}).Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "civitai", Reference: reference}})
+			if _, ok := errors.AsType[*operation.InvalidRequestError](err); !ok || metadataRequests.Load() != 0 || posts.Load() != 0 {
+				t.Fatalf("err=%v metadata=%d posts=%d", err, metadataRequests.Load(), posts.Load())
+			}
+		})
+	}
+}
+
+func TestInstallCivitaiRejectsMalformedOrUnsafeMetadataBeforeMutation(t *testing.T) {
+	for _, body := range []string{
+		`not-json`,
+		`{"id":43,"files":[{"id":7,"name":"file","primary":true,"downloadUrl":"https://civitai.com/api/download/models/43?fileId=7"}]}`,
+		`{"id":42,"files":[]}`,
+		`{"id":42,"files":[{"id":7,"name":"file","downloadUrl":"https://civitai.com/api/download/models/42?fileId=7"}]}`,
+		`{"id":42,"files":[{"id":7,"name":"file","primary":true,"downloadUrl":"https://evil.example/file"}]}`,
+		`{"id":42,"files":[{"id":7,"name":"file","primary":true,"downloadUrl":"https://user:secret@civitai.com/api/download/models/42?fileId=7"}]}`,
+		`{"id":42,"files":[{"id":7,"name":"file","primary":true,"downloadUrl":"https://civitai.com/api/download/models/42?fileId=7&token=secret"}]}`,
+		`{"id":42,"files":[{"id":7,"name":"file","primary":true,"downloadUrl":"https://civitai.com/api/download/models/42?fileId=7#fragment"}]}`,
+		`{"id":42,"downloadUrl":"https://evil.example/download","files":[{"id":7,"name":"file","primary":true,"downloadUrl":"https://civitai.com/api/download/models/42?fileId=7"}]}`,
+		`{"id":42,"files":[{"id":7,"name":"file","primary":true,"downloadUrl":"https://civitai.com/api/download/models/42?fileId=7"},{"id":7,"name":"copy","primary":false,"downloadUrl":"https://civitai.com/api/download/models/42?fileId=7"}]}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			var posts atomic.Int32
+			client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+				posts.Add(1)
+				http.Error(w, "unexpected InvokeAI request", http.StatusInternalServerError)
+			})
+			metadata := &http.Client{Transport: installTransportFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+			})}
+			_, err := (models.Installer{Backend: client, CivitaiMetadataClient: metadata}).Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "civitai", Reference: "42"}})
+			if err == nil || posts.Load() != 0 || strings.Contains(err.Error(), "evil.example") || strings.Contains(err.Error(), "secret") {
+				t.Fatalf("err=%v posts=%d", err, posts.Load())
+			}
+		})
+	}
+}
+
+func TestInstallCivitaiMetadataDenialIsSafeAuthenticationFailure(t *testing.T) {
+	const token = "civitai-token-sentinel-742"
+	var posts atomic.Int32
+	client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+		posts.Add(1)
+		http.Error(w, "unexpected InvokeAI request", http.StatusInternalServerError)
+	})
+	metadata := &http.Client{Transport: installTransportFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusUnauthorized, Body: io.NopCloser(strings.NewReader(token)), Header: make(http.Header)}, nil
+	})}
+	_, err := (models.Installer{Backend: client, CivitaiMetadataClient: metadata}).Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "civitai", Reference: "42"}, SourceToken: token})
+	if _, ok := errors.AsType[*operation.AuthenticationRequiredError](err); !ok || posts.Load() != 0 || strings.Contains(err.Error(), token) {
+		t.Fatalf("err=%v posts=%d", err, posts.Load())
+	}
+}
+
+func TestInstallCivitaiPageRejectsVersionFromAnotherModel(t *testing.T) {
+	var posts atomic.Int32
+	client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+		posts.Add(1)
+		http.Error(w, "unexpected InvokeAI request", http.StatusInternalServerError)
+	})
+	metadata := &http.Client{Transport: installTransportFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":42,"modelId":99,"files":[{"id":7,"name":"model.safetensors","primary":true,"downloadUrl":"https://civitai.com/api/download/models/42?fileId=7"}]}`)), Header: make(http.Header)}, nil
+	})}
+	_, err := (models.Installer{Backend: client, CivitaiMetadataClient: metadata}).Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "civitai", Reference: "https://civitai.com/models/21?modelVersionId=42"}})
+	if err == nil || posts.Load() != 0 {
+		t.Fatalf("err=%v posts=%d", err, posts.Load())
+	}
+}
+
+func TestInstallCivitaiTokenRejectsInsecureTargetBeforeMetadata(t *testing.T) {
+	client, err := httpclient.New("http://example.org", "", httpclient.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metadataRequests atomic.Int32
+	metadata := &http.Client{Transport: installTransportFunc(func(*http.Request) (*http.Response, error) {
+		metadataRequests.Add(1)
+		return nil, errors.New("unexpected metadata request")
+	})}
+	_, err = (models.Installer{Backend: client, CivitaiMetadataClient: metadata}).Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "civitai", Reference: "42"}, SourceToken: "sentinel"})
+	if _, ok := errors.AsType[*operation.InvalidRequestError](err); !ok || metadataRequests.Load() != 0 {
+		t.Fatalf("err=%v metadata=%d", err, metadataRequests.Load())
+	}
+}
+
+func TestInstallCivitaiMetadataCancellationRemainsInterrupted(t *testing.T) {
+	client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("unexpected InvokeAI request")
+	})
+	metadata := &http.Client{Transport: installTransportFunc(func(*http.Request) (*http.Response, error) {
+		return nil, context.Canceled
+	})}
+	_, err := (models.Installer{Backend: client, CivitaiMetadataClient: metadata}).Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "civitai", Reference: "42"}})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v, want cancellation", err)
+	}
 }
 
 func TestInstallURLSubmitsOneGenericPOSTAndProjectsJob(t *testing.T) {
