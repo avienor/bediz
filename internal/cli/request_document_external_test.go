@@ -188,3 +188,23 @@ func requestDocumentError(t *testing.T, stdout string) result.Error {
 	}
 	return *envelope.Error
 }
+
+// A null list element would otherwise become an empty value and silently change
+// the operation, so it is rejected like a null member.
+func TestRequestDocumentsRejectNullListElements(t *testing.T) {
+	args := []string{"models", "list"}
+	if requests, _, _ := runRequestDocument(t, args, `{"schema_version":1,"base_models":["sdxl"]}`); requests == 0 {
+		t.Fatal("document without null sent no request; the rejection cases would prove nothing")
+	}
+	for name, document := range map[string]string{
+		"only element":  `{"schema_version":1,"base_models":[null]}`,
+		"later element": `{"schema_version":1,"base_models":["sdxl",null]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			requests, exitCode, stdout := runRequestDocument(t, args, document)
+			if exitCode != result.ExitInvalidRequest || requests != 0 || requestDocumentError(t, stdout).Code != result.CodeInvalidRequest {
+				t.Fatalf("exit code = %d, requests = %d, stdout = %q", exitCode, requests, stdout)
+			}
+		})
+	}
+}
