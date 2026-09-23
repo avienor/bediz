@@ -61,6 +61,20 @@ func (*CivitaiFileSelectionError) Error() string {
 	return "Civitai version requires one exact file selection"
 }
 
+type CivitaiVersionCandidate struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+type CivitaiVersionSelectionError struct {
+	ModelID    int
+	Candidates []CivitaiVersionCandidate
+}
+
+func (*CivitaiVersionSelectionError) Error() string {
+	return "Civitai model page requires one exact version selection"
+}
+
 func (e *SelectionRequiredError) Error() string {
 	return "model selector requires one exact selection"
 }

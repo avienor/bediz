@@ -110,6 +110,95 @@ func TestInstallCivitaiAmbiguousFilesReturnNumericChoicesWithoutMutation(t *test
 	}
 }
 
+func TestInstallCivitaiModelPageReturnsNumericVersionChoicesWithoutMutation(t *testing.T) {
+	for _, reference := range []string{"https://civitai.com/models/21", "https://civitai.com/models/21/sample-model"} {
+		t.Run(reference, func(t *testing.T) {
+			var requests atomic.Int32
+			client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				http.Error(w, "unexpected InvokeAI request", http.StatusInternalServerError)
+			})
+			metadata := &http.Client{Transport: installTransportFunc(func(r *http.Request) (*http.Response, error) {
+				if r.Method != http.MethodGet || r.URL.String() != "https://civitai.com/api/v1/models/21" {
+					t.Errorf("unexpected Civitai request: %s %s", r.Method, r.URL)
+				}
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":21,"name":"Sample","modelVersions":[{"id":300,"name":"v3.0"},{"id":42,"name":"v1.0"},{"id":100,"name":"v2.0"}]}`)), Header: make(http.Header)}, nil
+			})}
+			_, err := (models.Installer{Backend: client, CivitaiMetadataClient: metadata}).Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "civitai", Reference: reference}})
+			selection, ok := errors.AsType[*operation.CivitaiVersionSelectionError](err)
+			if !ok || selection.ModelID != 21 || !slices.Equal(selection.Candidates, []operation.CivitaiVersionCandidate{{ID: 42, Name: "v1.0"}, {ID: 100, Name: "v2.0"}, {ID: 300, Name: "v3.0"}}) || requests.Load() != 0 {
+				t.Fatalf("selection=%#v err=%v requests=%d", selection, err, requests.Load())
+			}
+		})
+	}
+}
+
+func TestInstallCivitaiSingleVersionModelPageStillRequiresVersionChoice(t *testing.T) {
+	const token = "civitai-token-sentinel-742"
+	var requests atomic.Int32
+	client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Error(w, "unexpected InvokeAI request", http.StatusInternalServerError)
+	})
+	metadata := &http.Client{Transport: installTransportFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("Authorization") != "Bearer "+token {
+			t.Errorf("Civitai model metadata did not receive the source token")
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":21,"modelVersions":[{"id":42,"name":"only","files":[{"id":7,"name":"model.safetensors","primary":true,"downloadUrl":"https://civitai.com/api/download/models/42?fileId=7"}]}]}`)), Header: make(http.Header)}, nil
+	})}
+	_, err := (models.Installer{Backend: client, CivitaiMetadataClient: metadata}).Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "civitai", Reference: "https://civitai.com/models/21"}, SourceToken: token})
+	selection, ok := errors.AsType[*operation.CivitaiVersionSelectionError](err)
+	if !ok || selection.ModelID != 21 || !slices.Equal(selection.Candidates, []operation.CivitaiVersionCandidate{{ID: 42, Name: "only"}}) || requests.Load() != 0 || strings.Contains(err.Error(), token) {
+		t.Fatalf("selection=%#v err=%v requests=%d", selection, err, requests.Load())
+	}
+}
+
+func TestInstallCivitaiModelPageRejectsFileIDBeforeMetadata(t *testing.T) {
+	var metadataRequests, requests atomic.Int32
+	client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Error(w, "unexpected InvokeAI request", http.StatusInternalServerError)
+	})
+	metadata := &http.Client{Transport: installTransportFunc(func(*http.Request) (*http.Response, error) {
+		metadataRequests.Add(1)
+		return nil, errors.New("unexpected metadata request")
+	})}
+	_, err := (models.Installer{Backend: client, CivitaiMetadataClient: metadata}).Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "civitai", Reference: "https://civitai.com/models/21", FileID: new(7)}})
+	if _, ok := errors.AsType[*operation.InvalidRequestError](err); !ok || metadataRequests.Load() != 0 || requests.Load() != 0 {
+		t.Fatalf("err=%v metadata=%d requests=%d", err, metadataRequests.Load(), requests.Load())
+	}
+}
+
+func TestInstallCivitaiModelPageRejectsMalformedMetadataBeforeMutation(t *testing.T) {
+	for _, body := range []string{
+		`not-json`,
+		`{"modelVersions":[{"id":42,"name":"v1"}]}`,
+		`{"id":22,"modelVersions":[{"id":42,"name":"v1"}]}`,
+		`{"id":21,"modelVersions":[]}`,
+		`{"id":21}`,
+		`{"id":21,"modelVersions":[{"name":"v1"}]}`,
+		`{"id":21,"modelVersions":[{"id":0,"name":"v1"}]}`,
+		`{"id":21,"modelVersions":[{"id":"42","name":"v1"}]}`,
+		`{"id":21,"modelVersions":[{"id":42}]}`,
+		`{"id":21,"modelVersions":[{"id":42,"name":"v1"},{"id":42,"name":"copy"}]}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			var requests atomic.Int32
+			client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				http.Error(w, "unexpected InvokeAI request", http.StatusInternalServerError)
+			})
+			metadata := &http.Client{Transport: installTransportFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+			})}
+			_, err := (models.Installer{Backend: client, CivitaiMetadataClient: metadata}).Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "civitai", Reference: "https://civitai.com/models/21"}})
+			if _, ok := errors.AsType[*operation.InvalidRequestError](err); !ok || requests.Load() != 0 {
+				t.Fatalf("err=%v requests=%d", err, requests.Load())
+			}
+		})
+	}
+}
+
 func TestInstallCivitaiMultiplePrimariesRequireFileChoice(t *testing.T) {
 	var posts atomic.Int32
 	client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -197,7 +286,8 @@ func TestInstallCivitaiProtectedVersionUsesTemporaryTokenWithoutEcho(t *testing.
 
 func TestInstallCivitaiRejectsInvalidVersionReferencesBeforeMetadata(t *testing.T) {
 	for _, reference := range []string{
-		"0", "-1", "+42", "4.2", "abc", "https://civitai.com/models/12",
+		"0", "-1", "+42", "4.2", "abc", "https://civitai.com/models/0", "https://civitai.com/models/12?",
+		"https://civitai.com/models/12?token=secret", "https://civitai.com/models/12#fragment",
 		"https://civitai.com/models/12?modelVersionId=0",
 		"https://civitai.com/models/12?modelVersionId=42&modelVersionId=43",
 		"https://civitai.com/models/12?modelVersionId=42&token=secret",

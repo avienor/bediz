@@ -11,7 +11,7 @@ The current implementation includes these V1 capabilities:
 - `doctor`, which checks InvokeAI version compatibility (`>= 6.14.1, < 6.15.0`), the OpenAPI endpoints and schemas required by implemented capabilities, and separate readiness for Anima Direct Execution and Parameter Recall;
 - safe installed-model, gallery-image, and queue inspection;
 - exact public URL model installation through one InvokeAI job, plus current install-job status inspection;
-- exact Civitai version resolution with explicit file choices and a verified artifact URL;
+- exact Civitai version resolution with explicit version and file choices and a verified artifact URL;
 - single-file image upload with supported-version validation, no automatic mutation retry, and `outcome_unknown` reporting when the transport result is inconclusive;
 - Anima text-to-image Direct Execution with deterministic model and component resolution, ordered multi-output seed resolution, graph compilation targeting the tested InvokeAI 6.14.x baseline, safe queue-polling to an Execution Receipt, and `--no-wait` support;
 - manual Anima Parameter Recall and automatic generation UI Synchronization after enqueue, with the verified `partial` level on stock InvokeAI 6.14.x.
@@ -34,6 +34,7 @@ go build -o bediz ./cmd/bediz
 ./bediz models install --source-type url --source https://example.org/model.safetensors --json
 ./bediz models install --source-type huggingface --source org/repo --json
 ./bediz models install --source-type civitai --source 'https://civitai.com/models/MODEL_ID?modelVersionId=VERSION_ID' --json
+./bediz models install --source-type civitai --source 'https://civitai.com/models/MODEL_ID' --json
 ./bediz models install --source-type civitai --source VERSION_ID --file-id FILE_ID --json
 ./bediz models install --source-type path --source /server/models/model.safetensors --json
 ./bediz models install --source-type path --source /server/models/model.safetensors --move --yes --json
@@ -51,7 +52,7 @@ Inspection commands return normalized Bediz records rather than raw InvokeAI res
 
 Model installation accepts an exact HTTP(S) artifact URL without userinfo, query, or fragment. Its job ID identifies only a job in the current InvokeAI registry; after a restart, use `models list` and the InvokeAI install job list before deciding whether to resubmit an uncertain installation. `models status` returns a safe projection of the job currently under that ID.
 
-Civitai installation requires an exact version ID or a model page URL with `modelVersionId`. One file is selected directly; among multiple files, exactly one primary is selected. Otherwise the JSON result returns numeric file choices; resubmit the same version with `--file-id` or `source.file_id`. A direct Civitai download URL is a `url` source and follows the direct URL validation rules.
+Civitai installation requires an exact version ID or a model page URL with `modelVersionId`. One file is selected directly; among multiple files, exactly one primary is selected. Otherwise the JSON result returns numeric file choices; resubmit the same version with `--file-id` or `source.file_id`. A model page URL without `modelVersionId` never picks a version, even when only one exists: the JSON result returns numeric version choices to resubmit as the exact version reference. A direct Civitai download URL is a `url` source and follows the direct URL validation rules.
 
 Each operation also accepts a schema-versioned request document from a file or standard input. Operation arguments and flags cannot be mixed with `--request`:
 

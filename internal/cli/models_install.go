@@ -67,7 +67,7 @@ func (c *CLI) newModelsInstallCommand(exitCode *int, jsonOutput *bool) *cobra.Co
 	addRemoteFlags(command, &options.remoteOptions, requestTimeoutUsage)
 	command.Flags().StringVar(&options.requestPath, "request", "", "read a request document from a file or standard input with -")
 	command.Flags().StringVar(&options.sourceType, "source-type", "", "model source type (starter, url, huggingface, civitai, or path)")
-	command.Flags().StringVar(&options.source, "source", "", "exact source identifier, artifact URL, Hugging Face org/repo reference, Civitai version, or server path")
+	command.Flags().StringVar(&options.source, "source", "", "exact source identifier, artifact URL, Hugging Face org/repo reference, Civitai version or model page, or server path")
 	command.Flags().IntVar(&options.fileID, "file-id", 0, "exact Civitai file ID within the selected version")
 	command.Flags().BoolVar(&options.move, "move", false, "move a server path model into InvokeAI-managed storage")
 	command.Flags().BoolVar(&options.yes, "yes", false, "approve moving a server path model")

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -120,6 +121,79 @@ func TestModelsInstallCivitaiAmbiguousFilesUseSelectionEnvelope(t *testing.T) {
 	choices := envelope.Error.Details.Candidates
 	if code != result.ExitSelectionRequired || stderr != "" || envelope.Error.Code != result.CodeSelectionRequired || envelope.Error.Details.Kind != "civitai_file" || envelope.Error.Details.Selector != 42 || len(choices) != 2 || choices[0].ID != 2 || choices[1].ID != 10 || requests.Load() != 0 {
 		t.Fatalf("code=%d stdout=%q stderr=%q requests=%d", code, stdout, stderr, requests.Load())
+	}
+}
+
+func TestModelsInstallCivitaiModelPageReturnsVersionChoicesThatResubmitExactly(t *testing.T) {
+	isolateUserConfigDir(t)
+	const token = "civitai-token-sentinel-742"
+	previous := http.DefaultTransport
+	http.DefaultTransport = huggingFaceTransport(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Host != "civitai.com" {
+			return previous.RoundTrip(request)
+		}
+		var body string
+		switch request.URL.String() {
+		case "https://civitai.com/api/v1/models/21":
+			body = `{"id":21,"name":"Sample","modelVersions":[{"id":300,"name":"v3.0"},{"id":42,"name":"v1.0"}]}`
+		case "https://civitai.com/api/v1/model-versions/300":
+			body = `{"id":300,"modelId":21,"files":[{"id":7,"name":"model.safetensors","primary":true,"downloadUrl":"https://civitai.com/api/download/models/300?fileId=7"}]}`
+		default:
+			t.Errorf("unexpected Civitai metadata request: %s", request.URL)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = previous })
+	var posts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(huggingFaceInstallOpenAPI))
+		case "/api/v2/models/install":
+			posts.Add(1)
+			if r.URL.Query().Get("source") != "https://civitai.com/api/download/models/300?fileId=7" {
+				t.Errorf("source = %q", r.URL.Query().Get("source"))
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":13,"status":"waiting"}`))
+		default:
+			t.Errorf("unexpected request: %s", r.URL)
+		}
+	}))
+	t.Cleanup(server.Close)
+	page := "https://civitai.com/models/21/sample"
+	code, stdout, stderr := runModelCommand(t, token, "models", "install", "--source-type", "civitai", "--source", page, "--token-stdin", "--url", server.URL, "--json")
+	var envelope struct {
+		SchemaVersion int    `json:"schema_version"`
+		Operation     string `json:"operation"`
+		OK            bool   `json:"ok"`
+		Error         struct {
+			Code    string `json:"code"`
+			Details struct {
+				Kind       string `json:"kind"`
+				Selector   int    `json:"selector"`
+				Candidates []struct {
+					ID   int    `json:"id"`
+					Name string `json:"name"`
+				} `json:"candidates"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	choices := envelope.Error.Details.Candidates
+	if code != result.ExitSelectionRequired || stderr != "" || envelope.SchemaVersion != 1 || envelope.Operation != "models.install" || envelope.OK ||
+		envelope.Error.Code != result.CodeSelectionRequired || envelope.Error.Details.Kind != "civitai_version" || envelope.Error.Details.Selector != 21 ||
+		len(choices) != 2 || choices[0].ID != 42 || choices[0].Name != "v1.0" || choices[1].ID != 300 || choices[1].Name != "v3.0" ||
+		strings.Contains(stdout, token) || strings.Contains(stdout, page) || strings.Contains(stdout, "civitai.com") || posts.Load() != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q posts=%d", code, stdout, stderr, posts.Load())
+	}
+	code, stdout, stderr = runModelCommand(t, `{"schema_version":1,"source":{"type":"civitai","reference":"`+strconv.Itoa(choices[1].ID)+`"}}`, "models", "install", "--request", "-", "--url", server.URL, "--json")
+	if code != result.ExitSuccess || stderr != "" || !strings.Contains(stdout, `"job_id":13`) || posts.Load() != 1 {
+		t.Fatalf("resubmit code=%d stdout=%q stderr=%q posts=%d", code, stdout, stderr, posts.Load())
 	}
 }
 

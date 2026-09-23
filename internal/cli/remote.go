@@ -173,9 +173,9 @@ func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
 	}
 	if access, ok := errors.AsType[*models.CivitaiMetadataAccessError](err); ok {
 		if access.StatusCode == http.StatusNotFound {
-			return c.fail(operationName, jsonOutput, result.CodeNotFound, "Civitai version metadata was not found", nil)
+			return c.fail(operationName, jsonOutput, result.CodeNotFound, "Civitai metadata was not found", nil)
 		}
-		return c.fail(operationName, jsonOutput, result.CodeConnectionFailed, "could not verify Civitai version metadata", nil)
+		return c.fail(operationName, jsonOutput, result.CodeConnectionFailed, "could not verify Civitai metadata", nil)
 	}
 	if auth, ok := errors.AsType[*operation.AuthenticationRequiredError](err); ok {
 		return c.fail(operationName, jsonOutput, result.CodeAuthenticationFailed, auth.Error(), nil)
@@ -195,6 +195,11 @@ func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
 	if selection, ok := errors.AsType[*operation.CivitaiFileSelectionError](err); ok {
 		return c.fail(operationName, jsonOutput, result.CodeSelectionRequired, selection.Error(), map[string]any{
 			"kind": "civitai_file", "selector": selection.VersionID, "candidates": selection.Candidates,
+		})
+	}
+	if selection, ok := errors.AsType[*operation.CivitaiVersionSelectionError](err); ok {
+		return c.fail(operationName, jsonOutput, result.CodeSelectionRequired, selection.Error(), map[string]any{
+			"kind": "civitai_version", "selector": selection.ModelID, "candidates": selection.Candidates,
 		})
 	}
 	if selection, ok := errors.AsType[*operation.SelectionRequiredError](err); ok {
