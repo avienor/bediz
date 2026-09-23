@@ -32,6 +32,9 @@ var (
 	animaVAERequirement     = modelRequirement{kind: "vae", base: "anima", modelType: "vae"}
 	sdxlVAERequirement      = modelRequirement{kind: "vae", base: "sdxl", modelType: "vae"}
 	qwen3EncoderRequirement = modelRequirement{kind: "qwen3_encoder", base: "any", modelType: "qwen3_encoder"}
+	fluxVAERequirement      = modelRequirement{kind: "vae", base: "flux", modelType: "vae"}
+	fluxT5Requirement       = modelRequirement{kind: "t5_encoder", base: "any", modelType: "t5_encoder"}
+	fluxCLIPRequirement     = modelRequirement{kind: "clip_embed", base: "any", modelType: "clip_embed"}
 )
 
 // ResolveSDXL resolves an SDXL main model and its optional explicit VAE override.
@@ -50,8 +53,16 @@ func ResolveSDXL(request Request, inventory []ModelIdentifier, random io.Reader)
 }
 
 func resolveSDXL(request Request, mainModel ModelIdentifier, inventory []ModelIdentifier, random io.Reader) (Resolution, error) {
-	if request.Components != nil && request.Components.Qwen3Encoder != nil {
-		return Resolution{}, operation.InvalidRequest("qwen3_encoder is not applicable to SDXL")
+	if request.Components != nil {
+		if request.Components.Qwen3Encoder != nil {
+			return Resolution{}, operation.InvalidRequest("qwen3_encoder is not applicable to SDXL")
+		}
+		if request.Components.T5Encoder != nil {
+			return Resolution{}, operation.InvalidRequest("t5_encoder is not applicable to SDXL")
+		}
+		if request.Components.CLIPEmbed != nil {
+			return Resolution{}, operation.InvalidRequest("clip_embed is not applicable to SDXL")
+		}
 	}
 	resolved := request
 	if resolved.Width == nil {
@@ -126,6 +137,14 @@ func ResolveAnima(request Request, inventory []ModelIdentifier, random io.Reader
 }
 
 func resolveAnima(request Request, mainModel ModelIdentifier, inventory []ModelIdentifier, random io.Reader) (AnimaResolution, error) {
+	if request.Components != nil {
+		if request.Components.T5Encoder != nil {
+			return AnimaResolution{}, operation.InvalidRequest("t5_encoder is not applicable to Anima")
+		}
+		if request.Components.CLIPEmbed != nil {
+			return AnimaResolution{}, operation.InvalidRequest("clip_embed is not applicable to Anima")
+		}
+	}
 	resolved := applyAnimaDefaults(request)
 	if err := validateAnimaSettings(resolved); err != nil {
 		return AnimaResolution{}, err

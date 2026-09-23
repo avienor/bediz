@@ -7,7 +7,7 @@ import (
 
 type sdxlModelLoaderNode struct {
 	nodeAttributes
-	Model ModelIdentifier `json:"model"`
+	Model modelReference `json:"model"`
 }
 
 type sdxlPromptNode struct {
@@ -33,17 +33,17 @@ type sdxlDenoiseNode struct {
 
 type sdxlMetadataNode struct {
 	nodeAttributes
-	GenerationMode       string           `json:"generation_mode"`
-	NegativePrompt       string           `json:"negative_prompt"`
-	Width                int              `json:"width"`
-	Height               int              `json:"height"`
-	CFGScale             float64          `json:"cfg_scale"`
-	CFGRescaleMultiplier float64          `json:"cfg_rescale_multiplier"`
-	Steps                int              `json:"steps"`
-	Scheduler            string           `json:"scheduler"`
-	RandDevice           string           `json:"rand_device"`
-	Model                ModelIdentifier  `json:"model"`
-	VAE                  *ModelIdentifier `json:"vae,omitempty"`
+	GenerationMode       string          `json:"generation_mode"`
+	NegativePrompt       string          `json:"negative_prompt"`
+	Width                int             `json:"width"`
+	Height               int             `json:"height"`
+	CFGScale             float64         `json:"cfg_scale"`
+	CFGRescaleMultiplier float64         `json:"cfg_rescale_multiplier"`
+	Steps                int             `json:"steps"`
+	Scheduler            string          `json:"scheduler"`
+	RandDevice           string          `json:"rand_device"`
+	Model                modelReference  `json:"model"`
+	VAE                  *modelReference `json:"vae,omitempty"`
 }
 
 type sdxlDecodeNode struct {
@@ -54,7 +54,7 @@ type sdxlDecodeNode struct {
 
 type sdxlVAELoaderNode struct {
 	nodeAttributes
-	VAEModel ModelIdentifier `json:"vae_model"`
+	VAEModel modelReference `json:"vae_model"`
 }
 
 // CompileSDXL produces the stock InvokeAI 6.14.1 SDXL text-to-image graph.
@@ -67,7 +67,7 @@ func CompileSDXL(resolved Resolution) (EnqueueRequest, error) {
 		return EnqueueRequest{}, fmt.Errorf("compile SDXL graph: resolved seeds do not match the request")
 	}
 	nodes := map[string]any{
-		"model_loader":          sdxlModelLoaderNode{ID: "model_loader", IsIntermediate: true, UseCache: true, Type: "sdxl_model_loader", Model: resolved.Models.Main},
+		"model_loader":          sdxlModelLoaderNode{ID: "model_loader", IsIntermediate: true, UseCache: true, Type: "sdxl_model_loader", Model: reference(resolved.Models.Main)},
 		"positive_prompt":       stringNode{ID: "positive_prompt", IsIntermediate: true, UseCache: true, Type: "string", Value: request.PositivePrompt},
 		"negative_prompt":       stringNode{ID: "negative_prompt", IsIntermediate: true, UseCache: true, Type: "string", Value: request.NegativePrompt},
 		"positive_conditioning": sdxlPromptNode{ID: "positive_conditioning", IsIntermediate: true, UseCache: true, Type: "sdxl_compel_prompt"},
@@ -77,7 +77,7 @@ func CompileSDXL(resolved Resolution) (EnqueueRequest, error) {
 		"seed":                  integerNode{ID: "seed", IsIntermediate: true, UseCache: true, Type: "integer", Value: *request.Seed},
 		"noise":                 sdxlNoiseNode{ID: "noise", IsIntermediate: true, UseCache: true, Type: "noise", Width: *request.Width, Height: *request.Height, UseCPU: true},
 		"denoise":               sdxlDenoiseNode{ID: "denoise", IsIntermediate: true, UseCache: true, Type: "denoise_latents", CFGScale: *request.Guidance, CFGRescaleMultiplier: 0, DenoisingStart: 0, DenoisingEnd: 1, Steps: *request.Steps, Scheduler: *request.Scheduler},
-		"metadata":              sdxlMetadataNode{ID: "metadata", IsIntermediate: true, UseCache: true, Type: "core_metadata", GenerationMode: "sdxl_txt2img", NegativePrompt: request.NegativePrompt, Width: *request.Width, Height: *request.Height, CFGScale: *request.Guidance, CFGRescaleMultiplier: 0, Steps: *request.Steps, Scheduler: *request.Scheduler, RandDevice: "cpu", Model: resolved.Models.Main},
+		"metadata":              sdxlMetadataNode{ID: "metadata", IsIntermediate: true, UseCache: true, Type: "core_metadata", GenerationMode: "sdxl_txt2img", NegativePrompt: request.NegativePrompt, Width: *request.Width, Height: *request.Height, CFGScale: *request.Guidance, CFGRescaleMultiplier: 0, Steps: *request.Steps, Scheduler: *request.Scheduler, RandDevice: "cpu", Model: reference(resolved.Models.Main)},
 		"decode":                sdxlDecodeNode{ID: "decode", IsIntermediate: false, UseCache: false, Type: "l2i", FP32: true},
 	}
 	decode := nodes["decode"].(sdxlDecodeNode)
@@ -111,9 +111,9 @@ func CompileSDXL(resolved Resolution) (EnqueueRequest, error) {
 	if resolved.Models.VAE.Key != "" {
 		vae := resolved.Models.VAE
 		metadata := nodes["metadata"].(sdxlMetadataNode)
-		metadata.VAE = &vae
+		metadata.VAE = new(reference(vae))
 		nodes["metadata"] = metadata
-		nodes["vae_loader"] = sdxlVAELoaderNode{ID: "vae_loader", IsIntermediate: true, UseCache: true, Type: "vae_loader", VAEModel: vae}
+		nodes["vae_loader"] = sdxlVAELoaderNode{ID: "vae_loader", IsIntermediate: true, UseCache: true, Type: "vae_loader", VAEModel: reference(vae)}
 		vaeSource = "vae_loader"
 	}
 	edges = append(edges, edge(vaeSource, "vae", "decode", "vae"))

@@ -31,6 +31,8 @@ type generateOptions struct {
 	boardID        string
 	vae            string
 	qwen3Encoder   string
+	t5Encoder      string
+	clipEmbed      string
 }
 
 func (c *CLI) newGenerateCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
@@ -62,6 +64,8 @@ func (c *CLI) newGenerateCommand(exitCode *int, jsonOutput *bool) *cobra.Command
 	command.Flags().StringVar(&options.boardID, "board", "", "exact output board id")
 	command.Flags().StringVar(&options.vae, "vae", "", "applicable VAE key or unique name")
 	command.Flags().StringVar(&options.qwen3Encoder, "qwen3-encoder", "", "Qwen3 encoder key or unique name")
+	command.Flags().StringVar(&options.t5Encoder, "t5-encoder", "", "T5 encoder key or unique name")
+	command.Flags().StringVar(&options.clipEmbed, "clip-embed", "", "CLIP Embed key or unique name")
 	return command
 }
 
@@ -74,7 +78,7 @@ func (c *CLI) executeGenerate(ctx context.Context, jsonOutput bool, command *cob
 	}
 	operationFlags := []string{
 		"model", "prompt", "negative-prompt", "width", "height", "steps", "scheduler", "guidance",
-		"seed", "output-count", "board", "vae", "qwen3-encoder",
+		"seed", "output-count", "board", "vae", "qwen3-encoder", "t5-encoder", "clip-embed",
 	}
 	fieldsSet := false
 	for _, name := range operationFlags {
@@ -108,13 +112,19 @@ func (c *CLI) executeGenerate(ctx context.Context, jsonOutput bool, command *cob
 		if command.Flags().Changed("output-count") {
 			request.OutputCount = new(options.outputCount)
 		}
-		if command.Flags().Changed("vae") || command.Flags().Changed("qwen3-encoder") {
+		if command.Flags().Changed("vae") || command.Flags().Changed("qwen3-encoder") || command.Flags().Changed("t5-encoder") || command.Flags().Changed("clip-embed") {
 			request.Components = &generation.Components{}
 			if command.Flags().Changed("vae") {
 				request.Components.VAE = new(options.vae)
 			}
 			if command.Flags().Changed("qwen3-encoder") {
 				request.Components.Qwen3Encoder = new(options.qwen3Encoder)
+			}
+			if command.Flags().Changed("t5-encoder") {
+				request.Components.T5Encoder = new(options.t5Encoder)
+			}
+			if command.Flags().Changed("clip-embed") {
+				request.Components.CLIPEmbed = new(options.clipEmbed)
 			}
 		}
 	}

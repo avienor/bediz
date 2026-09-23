@@ -409,6 +409,141 @@
             "const": "vae_loader"
           }
         }
+      },
+      "FluxModelLoaderInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "model": {},
+          "t5_encoder_model": {},
+          "clip_embed_model": {},
+          "vae_model": {},
+          "type": {
+            "const": "flux_model_loader"
+          }
+        }
+      },
+      "FluxTextEncoderInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "clip": {},
+          "t5_encoder": {},
+          "t5_max_seq_len": {},
+          "prompt": {},
+          "mask": {},
+          "type": {
+            "const": "flux_text_encoder"
+          }
+        }
+      },
+      "FluxDenoiseInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "latents": {},
+          "noise": {},
+          "denoise_mask": {},
+          "denoising_start": {},
+          "denoising_end": {},
+          "add_noise": {},
+          "transformer": {},
+          "control_lora": {},
+          "positive_text_conditioning": {},
+          "negative_text_conditioning": {},
+          "redux_conditioning": {},
+          "fill_conditioning": {},
+          "cfg_scale": {},
+          "cfg_scale_start_step": {},
+          "cfg_scale_end_step": {},
+          "width": {},
+          "height": {},
+          "num_steps": {},
+          "scheduler": {},
+          "guidance": {},
+          "seed": {},
+          "control": {},
+          "controlnet_vae": {},
+          "ip_adapter": {},
+          "kontext_conditioning": {},
+          "dype_preset": {},
+          "dype_scale": {},
+          "dype_exponent": {},
+          "type": {
+            "const": "flux_denoise"
+          }
+        }
+      },
+      "FluxVaeDecodeInvocation": {
+        "properties": {
+          "board": {},
+          "metadata": {},
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "latents": {},
+          "vae": {},
+          "type": {
+            "const": "flux_vae_decode"
+          }
+        }
+      },
+      "FluxModelLoaderOutput": {
+        "properties": {
+          "transformer": {},
+          "clip": {},
+          "t5_encoder": {},
+          "vae": {},
+          "max_seq_len": {},
+          "type": {
+            "const": "flux_model_loader_output"
+          }
+        }
+      },
+      "FluxConditioningOutput": {
+        "properties": {
+          "conditioning": {},
+          "type": {
+            "const": "flux_conditioning_output"
+          }
+        }
+      },
+      "LatentsOutput": {
+        "properties": {
+          "latents": {},
+          "width": {},
+          "height": {},
+          "type": {
+            "const": "latents_output"
+          }
+        }
+      },
+      "MetadataOutput": {
+        "properties": {
+          "metadata": {},
+          "type": {
+            "const": "metadata_output"
+          }
+        }
+      },
+      "IntegerOutput": {
+        "properties": {
+          "value": {},
+          "type": {
+            "const": "integer_output"
+          }
+        }
+      },
+      "StringOutput": {
+        "properties": {
+          "value": {},
+          "type": {
+            "const": "string_output"
+          }
+        }
       }
     }
   }

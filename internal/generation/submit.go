@@ -22,7 +22,7 @@ type ResolvedSettings struct {
 	Height         int               `json:"height"`
 	Steps          int               `json:"steps"`
 	Scheduler      string            `json:"scheduler"`
-	Guidance       float64           `json:"guidance,omitzero"`
+	Guidance       *float64          `json:"guidance,omitempty"`
 	OutputCount    int               `json:"output_count"`
 	BoardID        string            `json:"board_id,omitempty"`
 	ModelKey       string            `json:"model_key"`
@@ -128,10 +128,6 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 		}
 	}
 
-	var guidance float64
-	if resolved.Request.Guidance != nil {
-		guidance = *resolved.Request.Guidance
-	}
 	return ExecutionReceipt{
 		Family:           main.Base,
 		SubmittedRequest: request,
@@ -142,7 +138,7 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 			Height:         *resolved.Request.Height,
 			Steps:          *resolved.Request.Steps,
 			Scheduler:      *resolved.Request.Scheduler,
-			Guidance:       guidance,
+			Guidance:       resolved.Request.Guidance,
 			OutputCount:    *resolved.Request.OutputCount,
 			BoardID:        resolved.Request.BoardID,
 			ModelKey:       resolved.Models.Main.Key,

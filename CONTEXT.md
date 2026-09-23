@@ -108,6 +108,10 @@ _Avoid_: Approval for generation, blanket download permission
 A group of models that share an execution-graph shape, required component types, and compatible generation settings.
 _Avoid_: Individual checkpoint, display name
 
+**Model Variant**:
+The InvokeAI-recorded subtype of a Model Family, such as FLUX.1 dev or schnell, that can change applicable settings and defaults.
+_Avoid_: Display name, model format
+
 **Model Key**:
 The InvokeAI-assigned identifier used to select one installed model exactly. A display name is only a valid selector when it resolves to one model key.
 _Avoid_: Ambiguous model name, gallery position

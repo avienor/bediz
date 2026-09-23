@@ -65,20 +65,22 @@ type ModelsReport struct {
 }
 
 type ModelSummary struct {
-	Key    string `json:"key"`
-	Name   string `json:"name"`
-	Base   string `json:"base"`
-	Type   string `json:"type"`
-	Format string `json:"format,omitempty"`
+	Key     string `json:"key"`
+	Name    string `json:"name"`
+	Base    string `json:"base"`
+	Type    string `json:"type"`
+	Format  string `json:"format,omitempty"`
+	Variant string `json:"variant,omitempty"`
 }
 
 type modelInventoryEntry struct {
-	Key    string `json:"key"`
-	Hash   string `json:"hash"`
-	Name   string `json:"name"`
-	Base   string `json:"base"`
-	Type   string `json:"type"`
-	Format string `json:"format"`
+	Key     string `json:"key"`
+	Hash    string `json:"hash"`
+	Name    string `json:"name"`
+	Base    string `json:"base"`
+	Type    string `json:"type"`
+	Format  string `json:"format"`
+	Variant string `json:"variant"`
 }
 
 func (m modelInventoryEntry) completeIdentifier() bool {
@@ -86,7 +88,7 @@ func (m modelInventoryEntry) completeIdentifier() bool {
 }
 
 func (m modelInventoryEntry) summary() ModelSummary {
-	return ModelSummary{Key: m.Key, Name: m.Name, Base: m.Base, Type: m.Type, Format: m.Format}
+	return ModelSummary{Key: m.Key, Name: m.Name, Base: m.Base, Type: m.Type, Format: m.Format, Variant: m.Variant}
 }
 
 type ModelRequirement struct {
@@ -504,7 +506,9 @@ func uniqueModelRequirements() []capability.ModelRequirement {
 }
 
 func modelMatches(model modelInventoryEntry, requirement capability.ModelRequirement) bool {
-	return model.completeIdentifier() && slices.Contains(requirement.Types, model.Type) && slices.Contains(requirement.Bases, model.Base)
+	return model.completeIdentifier() && slices.Contains(requirement.Types, model.Type) && slices.Contains(requirement.Bases, model.Base) &&
+		(len(requirement.Variants) == 0 || slices.Contains(requirement.Variants, model.Variant)) &&
+		(len(requirement.Formats) == 0 || slices.Contains(requirement.Formats, model.Format))
 }
 
 func endpointAvailable(checks []EndpointCheck, requirement capability.EndpointRequirement) bool {

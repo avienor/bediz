@@ -40,7 +40,7 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 	for i, entry := range report.Capabilities {
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "generate", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
+	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "generate", "generate", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if !slices.Equal(operations, wantOperations) {
 		t.Fatalf("reported operations = %q, want implemented operations %q", operations, wantOperations)
 	}
@@ -52,8 +52,8 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 			t.Fatalf("invocation check failed: %#v", invocation)
 		}
 	}
-	if len(report.Models.Requirements) != 4 {
-		t.Fatalf("model requirements count = %d, want 4", len(report.Models.Requirements))
+	if len(report.Models.Requirements) != 8 {
+		t.Fatalf("model requirements count = %d, want 8", len(report.Models.Requirements))
 	}
 	for _, requirement := range report.Models.Requirements {
 		if !requirement.Satisfied {
@@ -1003,7 +1003,51 @@ var baselineModels = []map[string]string{
 	{"key": "main", "hash": "blake3:main", "name": "Anima", "base": "anima", "type": "main", "format": "checkpoint"},
 	{"key": "vae", "hash": "blake3:vae", "name": "VAE", "base": "anima", "type": "vae", "format": "checkpoint"},
 	{"key": "encoder", "hash": "blake3:encoder", "name": "Qwen3", "base": "any", "type": "qwen3_encoder", "format": "checkpoint"},
+	{"key": "flux-main", "hash": "blake3:flux-main", "name": "FLUX dev", "base": "flux", "type": "main", "format": "checkpoint", "variant": "dev"},
+	{"key": "flux-vae", "hash": "blake3:flux-vae", "name": "FLUX VAE", "base": "flux", "type": "vae", "format": "checkpoint"},
+	{"key": "flux-t5", "hash": "blake3:flux-t5", "name": "T5", "base": "any", "type": "t5_encoder", "format": "diffusers"},
+	{"key": "flux-clip", "hash": "blake3:flux-clip", "name": "CLIP", "base": "any", "type": "clip_embed", "format": "diffusers"},
 	{"key": "sdxl", "hash": "blake3:sdxl", "name": "SDXL", "base": "sdxl", "type": "main", "format": "diffusers"},
+}
+
+func TestDoctorFLUXMainRequirementUsesVariantAndFormat(t *testing.T) {
+	for _, tc := range []struct {
+		name, variant, format string
+		compatible            bool
+	}{
+		{"dev", "dev", "checkpoint", true},
+		{"schnell", "schnell", "gguf_quantized", true},
+		{"dev fill", "dev_fill", "checkpoint", false},
+		{"unknown", "", "checkpoint", false},
+		{"SDNQ", "dev", "sdnq_quantized", false},
+		{"diffusers", "dev", "diffusers", false},
+		{"unknown format", "schnell", "unknown", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			models := slices.Clone(baselineModels)
+			models[3] = maps.Clone(models[3])
+			models[3]["variant"], models[3]["format"] = tc.variant, tc.format
+			server := newCustomInvokeAIServer(t, "6.14.1", openAPIFixture(t), models)
+			defer server.Close()
+			client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			report := Run(t.Context(), client, version.Info{Version: "test"})
+			for _, entry := range report.Capabilities {
+				if entry.Operation == result.OperationGenerate && entry.Family == "flux" {
+					if entry.Compatible != tc.compatible {
+						t.Fatalf("FLUX capability = %#v", entry)
+					}
+					if tc.compatible && entry.UISync != "partial" {
+						t.Fatalf("UI sync = %q", entry.UISync)
+					}
+					return
+				}
+			}
+			t.Fatal("FLUX capability absent")
+		})
+	}
 }
 
 var animaInvocationSchemas = []string{"AnimaModelLoaderInvocation", "StringInvocation", "AnimaTextEncoderInvocation", "CollectInvocation", "IntegerInvocation", "AnimaDenoiseInvocation", "CoreMetadataInvocation", "AnimaLatentsToImageInvocation"}

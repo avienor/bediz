@@ -8,6 +8,8 @@ import (
 type Components struct {
 	VAE          *string `json:"vae,omitempty"`
 	Qwen3Encoder *string `json:"qwen3_encoder,omitempty"`
+	T5Encoder    *string `json:"t5_encoder,omitempty"`
+	CLIPEmbed    *string `json:"clip_embed,omitempty"`
 }
 
 type Request struct {
@@ -27,17 +29,21 @@ type Request struct {
 }
 
 type ModelIdentifier struct {
-	Key  string `json:"key"`
-	Hash string `json:"hash"`
-	Name string `json:"name"`
-	Base string `json:"base"`
-	Type string `json:"type"`
+	Key     string `json:"key"`
+	Hash    string `json:"hash"`
+	Name    string `json:"name"`
+	Base    string `json:"base"`
+	Type    string `json:"type"`
+	Variant string `json:"variant,omitempty"`
+	Format  string `json:"format,omitempty"`
 }
 
 type ResolvedModels struct {
 	Main         ModelIdentifier
 	VAE          ModelIdentifier
 	Qwen3Encoder ModelIdentifier
+	T5Encoder    ModelIdentifier
+	CLIPEmbed    ModelIdentifier
 }
 
 type EdgeConnection struct {
@@ -65,9 +71,9 @@ type nodeAttributes struct {
 
 type animaModelLoaderNode struct {
 	nodeAttributes
-	Model             ModelIdentifier `json:"model"`
-	VAEModel          ModelIdentifier `json:"vae_model"`
-	Qwen3EncoderModel ModelIdentifier `json:"qwen3_encoder_model"`
+	Model             modelReference `json:"model"`
+	VAEModel          modelReference `json:"vae_model"`
+	Qwen3EncoderModel modelReference `json:"qwen3_encoder_model"`
 }
 
 type stringNode struct {
@@ -109,16 +115,16 @@ type animaDenoiseNode struct {
 
 type coreMetadataNode struct {
 	nodeAttributes
-	GenerationMode string          `json:"generation_mode"`
-	NegativePrompt string          `json:"negative_prompt"`
-	Width          int             `json:"width"`
-	Height         int             `json:"height"`
-	CFGScale       float64         `json:"cfg_scale"`
-	Steps          int             `json:"steps"`
-	Scheduler      string          `json:"scheduler"`
-	Model          ModelIdentifier `json:"model"`
-	VAE            ModelIdentifier `json:"vae"`
-	Qwen3Encoder   ModelIdentifier `json:"qwen3_encoder"`
+	GenerationMode string         `json:"generation_mode"`
+	NegativePrompt string         `json:"negative_prompt"`
+	Width          int            `json:"width"`
+	Height         int            `json:"height"`
+	CFGScale       float64        `json:"cfg_scale"`
+	Steps          int            `json:"steps"`
+	Scheduler      string         `json:"scheduler"`
+	Model          modelReference `json:"model"`
+	VAE            modelReference `json:"vae"`
+	Qwen3Encoder   modelReference `json:"qwen3_encoder"`
 }
 
 type boardField struct {
@@ -161,7 +167,7 @@ func CompileAnima(resolved AnimaResolution) (EnqueueRequest, error) {
 	nodes := map[string]any{
 		"model_loader": animaModelLoaderNode{
 			ID: "model_loader", IsIntermediate: true, UseCache: true, Type: "anima_model_loader",
-			Model: resolved.Models.Main, VAEModel: resolved.Models.VAE, Qwen3EncoderModel: resolved.Models.Qwen3Encoder,
+			Model: reference(resolved.Models.Main), VAEModel: reference(resolved.Models.VAE), Qwen3EncoderModel: reference(resolved.Models.Qwen3Encoder),
 		},
 		"positive_prompt": stringNode{
 			ID: "positive_prompt", IsIntermediate: true, UseCache: true, Type: "string",
@@ -197,7 +203,7 @@ func CompileAnima(resolved AnimaResolution) (EnqueueRequest, error) {
 			GenerationMode: "anima_txt2img", NegativePrompt: request.NegativePrompt,
 			Width: *request.Width, Height: *request.Height, CFGScale: *request.Guidance,
 			Steps: *request.Steps, Scheduler: *request.Scheduler,
-			Model: resolved.Models.Main, VAE: resolved.Models.VAE, Qwen3Encoder: resolved.Models.Qwen3Encoder,
+			Model: reference(resolved.Models.Main), VAE: reference(resolved.Models.VAE), Qwen3Encoder: reference(resolved.Models.Qwen3Encoder),
 		},
 		"decode": animaLatentsToImageNode{
 			ID: "decode", IsIntermediate: false, UseCache: false, Type: "anima_l2i",

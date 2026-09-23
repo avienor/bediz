@@ -22,10 +22,38 @@ type familyAdapter interface {
 var families = map[string]familyAdapter{
 	"anima": animaAdapter{},
 	"sdxl":  sdxlAdapter{},
+	"flux":  fluxAdapter{},
 }
 
 type animaAdapter struct{}
 type sdxlAdapter struct{}
+type fluxAdapter struct{}
+
+func (fluxAdapter) resolve(request Request, main ModelIdentifier, inventory []ModelIdentifier, random io.Reader) (Resolution, error) {
+	return resolveFLUX(request, main, inventory, random)
+}
+
+func (fluxAdapter) compile(resolved Resolution) (EnqueueRequest, error) { return CompileFLUX(resolved) }
+func (fluxAdapter) invocations() []capability.InvocationRequirement {
+	return capability.FLUXGenerationEntry().Invocations
+}
+func (fluxAdapter) componentKeys(resolved Resolution) map[string]string {
+	return map[string]string{"vae": resolved.Models.VAE.Key, "t5_encoder": resolved.Models.T5Encoder.Key, "clip_embed": resolved.Models.CLIPEmbed.Key}
+}
+func (fluxAdapter) validateRecall(model ModelIdentifier, width, height, steps *int) error {
+	if err := validateFLUXMain(model); err != nil {
+		return err
+	}
+	return validateAlignedRecall(width, height, steps, 16)
+}
+func (fluxAdapter) synchronization(settings ResolvedSettings) (SyncSettings, []string) {
+	fields := []string{"scheduler"}
+	if settings.Guidance != nil {
+		fields = append(fields, "guidance")
+	}
+	fields = append(fields, "vae", "t5_encoder", "clip_embed", "output_count", "board_id")
+	return SyncSettings{Model: settings.ModelKey, PositivePrompt: settings.PositivePrompt, NegativePrompt: settings.NegativePrompt, Width: settings.Width, Height: settings.Height, Steps: settings.Steps, Seed: settings.Seeds[0]}, fields
+}
 
 func (sdxlAdapter) resolve(request Request, main ModelIdentifier, inventory []ModelIdentifier, random io.Reader) (Resolution, error) {
 	return resolveSDXL(request, main, inventory, random)
@@ -48,7 +76,7 @@ func (sdxlAdapter) componentKeys(resolved Resolution) map[string]string {
 }
 
 func (sdxlAdapter) validateRecall(_ ModelIdentifier, width, height, steps *int) error {
-	return validateAlignedRecall(width, height, steps)
+	return validateAlignedRecall(width, height, steps, 8)
 }
 
 func (sdxlAdapter) synchronization(settings ResolvedSettings) (SyncSettings, []string) {
@@ -76,12 +104,12 @@ func (animaAdapter) componentKeys(resolved Resolution) map[string]string {
 }
 
 func (animaAdapter) validateRecall(_ ModelIdentifier, width, height, steps *int) error {
-	return validateAlignedRecall(width, height, steps)
+	return validateAlignedRecall(width, height, steps, 8)
 }
 
-func validateAlignedRecall(width, height, steps *int) error {
-	if width != nil && (*width < 64 || *width%8 != 0 || *height < 64 || *height%8 != 0) {
-		return operation.InvalidRequest("width and height must be multiples of 8 and at least 64 for Recall")
+func validateAlignedRecall(width, height, steps *int, alignment int) error {
+	if width != nil && (*width < 64 || *width%alignment != 0 || *height < 64 || *height%alignment != 0) {
+		return operation.InvalidRequest(fmt.Sprintf("width and height must be multiples of %d and at least 64 for Recall", alignment))
 	}
 	if steps != nil && *steps < 1 {
 		return operation.InvalidRequest("steps must be positive")
