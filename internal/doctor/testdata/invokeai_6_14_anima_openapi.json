@@ -4,6 +4,7 @@
     "/api/v2/models/": {"get": {}},
     "/api/v2/models/install": {"post": {"parameters": [{"name": "source", "in": "query", "required": true}]}, "get": {}},
     "/api/v2/models/install/{id}": {"get": {}},
+	"/api/v2/models/hf_login": {"get": {}, "post": {"requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/Body_do_hf_login"}}}}}, "delete": {}},
     "/api/v1/images/": {"get": {}},
     "/api/v1/images/i/{image_name}": {"get": {}},
     "/api/v1/images/upload": {"post": {}},
@@ -15,6 +16,8 @@
   },
   "components": {
     "schemas": {
+	  "Body_do_hf_login": {"properties": {"token": {"type": "string"}}, "required": ["token"]},
+	  "HFTokenStatus": {"type": "string", "enum": ["valid", "invalid", "unknown"]},
       "AnimaModelLoaderInvocation": {
         "properties": {
           "id": {},

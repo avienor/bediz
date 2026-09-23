@@ -28,6 +28,11 @@ func TestOperationNamesMatchThePublishedValues(t *testing.T) {
 		{name: "queue", value: OperationQueue, wire: "queue"},
 		{name: "queue list", value: OperationQueueList, wire: "queue.list"},
 		{name: "queue get", value: OperationQueueGet, wire: "queue.get"},
+		{name: "auth", value: OperationAuth, wire: "auth"},
+		{name: "auth huggingface", value: OperationAuthHuggingFace, wire: "auth.huggingface"},
+		{name: "auth huggingface status", value: OperationAuthHFStatus, wire: "auth.huggingface.status"},
+		{name: "auth huggingface login", value: OperationAuthHFLogin, wire: "auth.huggingface.login"},
+		{name: "auth huggingface logout", value: OperationAuthHFLogout, wire: "auth.huggingface.logout"},
 	}
 	for _, test := range tests {
 		if test.value != test.wire {

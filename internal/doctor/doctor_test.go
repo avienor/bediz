@@ -40,7 +40,7 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 	for i, entry := range report.Capabilities {
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "recall"}
+	wantOperations := []string{"models.list", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if !slices.Equal(operations, wantOperations) {
 		t.Fatalf("reported operations = %q, want implemented operations %q", operations, wantOperations)
 	}
@@ -85,6 +85,34 @@ func TestDoctorDoesNotAdvertiseInstallWithoutGenericSourceParameter(t *testing.T
 		}
 	}
 	t.Fatal("install capability absent")
+}
+
+func TestDoctorChecksHuggingFaceAuthMethodsAndLoginBody(t *testing.T) {
+	document := openAPIFixture(t)
+	paths := document["paths"].(map[string]any)
+	authPath := paths["/api/v2/models/hf_login"].(map[string]any)
+	delete(authPath, "delete")
+	authPath["post"] = map[string]any{"requestBody": map[string]any{}}
+	server := newCustomInvokeAIServer(t, "6.15.0", document, baselineModels)
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := Run(t.Context(), client, version.Info{Version: "test"})
+	got := make(map[string]CapabilityReport)
+	for _, entry := range report.Capabilities {
+		got[entry.Operation] = entry
+	}
+	if !got[result.OperationAuthHFStatus].Compatible {
+		t.Fatalf("read-only status unavailable: %#v", got[result.OperationAuthHFStatus])
+	}
+	if got[result.OperationAuthHFLogin].Compatible || !slices.Contains(got[result.OperationAuthHFLogin].Failures, "unsupported_version") || !slices.Contains(got[result.OperationAuthHFLogin].Failures, "incompatible_hf_login_schema:token") {
+		t.Fatalf("login capability: %#v", got[result.OperationAuthHFLogin])
+	}
+	if got[result.OperationAuthHFLogout].Compatible || !slices.Contains(got[result.OperationAuthHFLogout].Failures, "missing_endpoint:DELETE /api/v2/models/hf_login") {
+		t.Fatalf("logout capability: %#v", got[result.OperationAuthHFLogout])
+	}
 }
 
 func TestRunReportsInspectionAndUploadCapabilities(t *testing.T) {
@@ -574,7 +602,7 @@ func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 		components := baseline["components"].(map[string]any)
 		schemas := components["schemas"].(map[string]any)
 		for _, schemaName := range slices.Sorted(maps.Keys(schemas)) {
-			if schemaName == "RecallParameter" {
+			if schemaName == "RecallParameter" || schemaName == "Body_do_hf_login" || schemaName == "HFTokenStatus" {
 				continue
 			}
 			schema := schemas[schemaName].(map[string]any)
@@ -613,7 +641,7 @@ func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 		components := baseline["components"].(map[string]any)
 		schemas := components["schemas"].(map[string]any)
 		for _, schemaName := range slices.Sorted(maps.Keys(schemas)) {
-			if schemaName == "RecallParameter" {
+			if schemaName == "RecallParameter" || schemaName == "Body_do_hf_login" || schemaName == "HFTokenStatus" {
 				continue
 			}
 			schema := schemas[schemaName].(map[string]any)

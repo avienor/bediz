@@ -19,6 +19,9 @@ func TestMatrixAdvertisesOnlyImplementedOperations(t *testing.T) {
 		result.OperationQueueGet,
 		result.OperationGenerate,
 		result.OperationRecall,
+		result.OperationAuthHFStatus,
+		result.OperationAuthHFLogin,
+		result.OperationAuthHFLogout,
 	}
 	got := make([]string, len(Matrix))
 	for i, entry := range Matrix {
@@ -123,7 +126,13 @@ func TestMatrixRegistersAnimaDirectExecutionRequirements(t *testing.T) {
 }
 
 func TestMatrixRegistersRecallSeparatelyFromDirectExecution(t *testing.T) {
-	recall := Matrix[len(Matrix)-1]
+	var recall Entry
+	for _, entry := range Matrix {
+		if entry.Operation == result.OperationRecall {
+			recall = entry
+			break
+		}
+	}
 	if recall.Operation != result.OperationRecall || recall.VersionPolicy != VersionPolicySupportedRange ||
 		recall.UISync != "" || !slices.Equal(recall.Endpoints, []EndpointRequirement{{Method: "POST", Path: RecallEndpoint}}) {
 		t.Fatalf("Recall capability = %#v, want independent supported-version Recall requirement", recall)

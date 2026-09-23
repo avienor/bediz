@@ -119,10 +119,12 @@ type openAPIDocument struct {
 
 type openAPISchema struct {
 	Properties map[string]openAPIProperty `json:"properties"`
+	Required   []string                   `json:"required"`
 }
 
 type openAPIProperty struct {
 	Const string                               `json:"const"`
+	Type  string                               `json:"type"`
 	AnyOf []capability.RecallSchemaAlternative `json:"anyOf"`
 }
 
@@ -361,6 +363,11 @@ func buildCapabilities(report Report, document openAPIDocument) []CapabilityRepo
 			!hasInstallSourceParameter(document.Paths["/api/v2/models/install"]["post"]) {
 			failures = append(failures, "incompatible_install_schema:source")
 		}
+		if entry.Operation == result.OperationAuthHFLogin && report.OpenAPI.Available &&
+			endpointAvailable(report.OpenAPI.Endpoints, capability.EndpointRequirement{Method: "POST", Path: capability.HuggingFaceAuthEndpoint}) &&
+			!hasHuggingFaceTokenBody(document) {
+			failures = append(failures, "incompatible_hf_login_schema:token")
+		}
 		capabilities = append(capabilities, CapabilityReport{
 			Operation:  entry.Operation,
 			Family:     entry.Family,
@@ -382,6 +389,11 @@ func buildCapabilities(report Report, document openAPIDocument) []CapabilityRepo
 		}
 	}
 	return capabilities
+}
+
+func hasHuggingFaceTokenBody(document openAPIDocument) bool {
+	schema := document.Components.Schemas["Body_do_hf_login"]
+	return capability.HasHuggingFaceTokenBody(document.Paths[capability.HuggingFaceAuthEndpoint]["post"], schema.Properties["token"].Type, schema.Required)
 }
 
 func hasInstallSourceParameter(post json.RawMessage) bool {

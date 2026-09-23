@@ -12,6 +12,7 @@ import (
 
 	"github.com/avienor/bediz/internal/config"
 	"github.com/avienor/bediz/internal/httpclient"
+	"github.com/avienor/bediz/internal/huggingface"
 	"github.com/avienor/bediz/internal/images"
 	"github.com/avienor/bediz/internal/models"
 	"github.com/avienor/bediz/internal/operation"
@@ -149,6 +150,12 @@ func (e remoteExecution[Request, Result]) run(ctx context.Context, c *CLI, jsonO
 // the single place command failures become structured error codes; doctor
 // classifies its own diagnostic issues before it reports one.
 func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
+	if _, ok := errors.AsType[*huggingface.RejectedTokenError](err); ok {
+		return c.fail(operationName, jsonOutput, result.CodeAuthenticationFailed, "Hugging Face rejected the token", nil)
+	}
+	if _, ok := errors.AsType[*huggingface.UnchangedStateError](err); ok {
+		return c.fail(operationName, jsonOutput, result.CodeInvokeAIOperationFailed, "InvokeAI did not clear the Hugging Face token", nil)
+	}
 	if invalid, ok := errors.AsType[*operation.InvalidRequestError](err); ok {
 		return c.fail(operationName, jsonOutput, result.CodeInvalidRequest, invalid.Error(), nil)
 	}
