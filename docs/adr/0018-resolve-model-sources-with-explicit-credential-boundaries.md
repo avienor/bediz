@@ -1,0 +1,13 @@
+---
+status: accepted
+---
+
+# Resolve model sources with explicit credential boundaries
+
+This supersedes ADR-0005. Bediz still resolves Civitai model-version references through metadata into one exact artifact without providing discovery, ranking, or an implicit newest choice. A model page without a version returns version choices; a version with ambiguous files returns file choices; direct download URLs follow the URL path. A source that cannot be identified unambiguously yields structured choices or fails before mutation. Plain Hugging Face repository IDs are converted to canonical HTTPS repository URLs before installation because InvokeAI 6.14.1 otherwise checks for a server-local path first. Untested variant and subfolder reference forms are unsupported. The URL installation path does not apply InvokeAI's stored Hugging Face login token to file downloads: a protected repository therefore requires both a valid InvokeAI login for metadata and a fresh standard-input token for the download. Bediz never retrieves the stored login token.
+
+Protected generic URL and Civitai installs remain in V1 using a token read from standard input. Bediz does not persist that token or print it. Stock InvokeAI 6.14.1, however, accepts the token in an installation request query parameter and writes it to a plaintext temporary marker while a remote download is active; a paused or interrupted job can leave that marker on disk for resumption. We accept that server-side lifecycle for the supported baseline because retaining protected installation is useful, while making the boundary explicit. User-supplied direct artifact URLs containing userinfo, a query, or a fragment are rejected so embedded credentials are not passed to InvokeAI's source logging or marker. After verifying a Civitai file belongs to the selected version, Bediz constructs the artifact URL only as `https://civitai.com/api/download/models/{version_id}?fileId={file_id}` from the verified IDs; other metadata URL forms are unsupported. Token-bearing installation and Hugging Face login over non-loopback plain HTTP are also rejected.
+
+## Consequences
+
+The user must trust the configured InvokeAI installation and any proxy with its temporary installation credentials. Bediz cannot guarantee secrecy in upstream access logs or interrupted-job markers. A stricter end-to-end non-persistence guarantee would need a different installation transport or an upstream change. Already-installed starter entries are skipped; entries that need installation and whose sources or dependencies cannot be normalized safely fail before any installation mutation rather than choosing a different artifact. The V1 specification and capability tests describe the supported source forms and failure paths.
