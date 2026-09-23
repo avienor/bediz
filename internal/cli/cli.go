@@ -46,8 +46,11 @@ func (c *CLI) Run(ctx context.Context, args []string) int {
 	if err != nil {
 		operationName := commandOperation(executed)
 		message := err.Error()
-		if operationName == result.OperationAuth || strings.HasPrefix(operationName, result.OperationAuthHuggingFace) {
+		switch {
+		case operationName == result.OperationAuth || strings.HasPrefix(operationName, result.OperationAuthHuggingFace):
 			message = "invalid authentication command arguments"
+		case operationName == result.OperationModelsInstall:
+			message = "invalid model installation command arguments"
 		}
 		return c.fail(operationName, containsJSONFlag(args), result.CodeInvalidRequest, message, nil)
 	}

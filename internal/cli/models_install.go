@@ -19,6 +19,7 @@ type modelInstallOptions struct {
 	sourceType  string
 	source      string
 	fileID      int
+	artifact    string
 	move        bool
 	yes         bool
 	tokenStdin  bool
@@ -39,13 +40,16 @@ func (c *CLI) newModelsInstallCommand(exitCode *int, jsonOutput *bool) *cobra.Co
 			if cmd.Flags().Changed("file-id") {
 				request.Source.FileID = new(options.fileID)
 			}
+			if cmd.Flags().Changed("artifact") {
+				request.Source.Artifact = options.artifact
+			}
 			if cmd.Flags().Changed("move") {
 				request.Move = new(options.move)
 			}
 			execution := remoteExecution[models.InstallRequest, models.InstallResult]{
 				operation: result.OperationModelsInstall, connection: options.remoteOptions, request: request,
 				requestPath:       options.requestPath,
-				operationFlagsSet: cmd.Flags().Changed("source-type") || cmd.Flags().Changed("source") || cmd.Flags().Changed("file-id") || cmd.Flags().Changed("move"),
+				operationFlagsSet: cmd.Flags().Changed("source-type") || cmd.Flags().Changed("source") || cmd.Flags().Changed("file-id") || cmd.Flags().Changed("artifact") || cmd.Flags().Changed("move"),
 				invoke: func(ctx context.Context, client *httpclient.Client, request models.InstallRequest) (models.InstallResult, error) {
 					request.Approved = options.yes
 					if options.tokenStdin {
@@ -69,6 +73,7 @@ func (c *CLI) newModelsInstallCommand(exitCode *int, jsonOutput *bool) *cobra.Co
 	command.Flags().StringVar(&options.sourceType, "source-type", "", "model source type (starter, url, huggingface, civitai, or path)")
 	command.Flags().StringVar(&options.source, "source", "", "exact source identifier, artifact URL, Hugging Face org/repo reference, Civitai version or model page, or server path")
 	command.Flags().IntVar(&options.fileID, "file-id", 0, "exact Civitai file ID within the selected version")
+	command.Flags().StringVar(&options.artifact, "artifact", "", "exact Hugging Face artifact URL chosen from a huggingface_artifact selection")
 	command.Flags().BoolVar(&options.move, "move", false, "move a server path model into InvokeAI-managed storage")
 	command.Flags().BoolVar(&options.yes, "yes", false, "approve moving a server path model")
 	command.Flags().BoolVar(&options.tokenStdin, "token-stdin", false, "read a temporary source access token from standard input")

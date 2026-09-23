@@ -27,6 +27,7 @@ type InstallSource struct {
 	Type      string `json:"type"`
 	Reference string `json:"reference"`
 	FileID    *int   `json:"file_id,omitempty"`
+	Artifact  string `json:"artifact,omitempty"`
 }
 
 type InstallRequest struct {
@@ -121,6 +122,9 @@ func (installer Installer) Install(ctx context.Context, request InstallRequest) 
 	if request.Source.FileID != nil && request.Source.Type != "civitai" {
 		return InstallResult{}, operation.InvalidRequest("file_id applies only to a Civitai source")
 	}
+	if request.Source.Artifact != "" && request.Source.Type != "huggingface" {
+		return InstallResult{}, operation.InvalidRequest("artifact applies only to a Hugging Face source")
+	}
 	if request.Source.Type == "path" {
 		if request.SourceToken != "" {
 			return InstallResult{}, operation.InvalidRequest("source token does not apply to a server path source")
@@ -164,7 +168,9 @@ func (installer Installer) Install(ctx context.Context, request InstallRequest) 
 		return InstallResult{}, err
 	}
 	if request.Source.Type == "huggingface" {
-		if err := installer.preflightRepository(ctx, source, request.SourceToken); err != nil {
+		var err error
+		source, err = installer.preflightRepository(ctx, source, request.Source.Artifact, request.SourceToken)
+		if err != nil {
 			return InstallResult{}, err
 		}
 	}
@@ -208,6 +214,8 @@ type starterInstallEntry struct {
 	Role            string
 	DependencyIndex *int
 	Repository      bool
+	// ArtifactRepository is the canonical repository of an exact Hugging Face artifact entry.
+	ArtifactRepository string
 }
 
 func (installer Installer) installStarter(ctx context.Context, request InstallRequest) (InstallResult, error) {
@@ -256,9 +264,12 @@ func (installer Installer) installStarter(ctx context.Context, request InstallRe
 				return operation.UnsupportedCapability("starter catalog entry has an unsupported source reference")
 			}
 			source = entry.Source
-			if !validStarterArtifactSource(source) {
+			repository, ok := starterArtifactRepository(source)
+			if !ok {
 				return operation.UnsupportedCapability("starter catalog entry has an unsupported Hugging Face reference")
 			}
+			toInstall = append(toInstall, starterInstallEntry{Source: source, Role: role, DependencyIndex: index, ArtifactRepository: repository})
+			return nil
 		}
 		toInstall = append(toInstall, starterInstallEntry{Source: source, Role: role, DependencyIndex: index, Repository: isRepository})
 		return nil
@@ -285,14 +296,22 @@ func (installer Installer) installStarter(ctx context.Context, request InstallRe
 			origin = entryOrigin
 		}
 	}
-	for _, entry := range toInstall {
-		if !entry.Repository {
-			continue
-		}
+	if slices.ContainsFunc(toInstall, func(entry starterInstallEntry) bool { return entry.Repository }) {
 		if err := checkInstallCompatibility(ctx, client, request.SourceToken != "", "huggingface"); err != nil {
 			return InstallResult{}, err
 		}
-		if err := installer.preflightRepository(ctx, entry.Source, request.SourceToken); err != nil {
+	}
+	for _, entry := range toInstall {
+		var err error
+		switch {
+		case entry.Repository:
+			_, err = installer.preflightRepository(ctx, entry.Source, "", request.SourceToken)
+		case entry.ArtifactRepository != "":
+			err = installer.checkRepositoryAccess(ctx, entry.ArtifactRepository, request.SourceToken, false)
+		default:
+			continue
+		}
+		if err != nil {
 			if _, ok := errors.AsType[*operation.AuthenticationRequiredError](err); ok {
 				return InstallResult{}, operation.UnsupportedCapability("starter catalog entry requires unavailable Hugging Face authentication inputs")
 			}
@@ -315,44 +334,70 @@ func (installer Installer) installStarter(ctx context.Context, request InstallRe
 	return result, nil
 }
 
-func validStarterArtifactSource(source string) bool {
+// starterArtifactRepository validates a starter artifact source. For an exact
+// Hugging Face artifact it also returns the canonical repository URL whose
+// access governs the download; other origins return an empty repository.
+func starterArtifactRepository(source string) (string, bool) {
 	parsed, err := url.Parse(source)
 	if err != nil || !strings.EqualFold(parsed.Hostname(), "huggingface.co") {
-		return true
+		return "", true
 	}
 	if parsed.Scheme != "https" || !strings.EqualFold(parsed.Host, "huggingface.co") || path.Clean(parsed.Path) != parsed.Path || strings.Contains(strings.ToLower(parsed.EscapedPath()), "%2f") {
-		return false
+		return "", false
 	}
 	parts := strings.Split(strings.TrimPrefix(parsed.Path, "/"), "/")
 	if len(parts) < 5 || parts[2] != "resolve" {
-		return false
+		return "", false
 	}
 	for _, part := range parts {
 		if part == "" {
-			return false
+			return "", false
 		}
 	}
-	return true
+	repository, err := normalizeHuggingFaceReference(parts[0] + "/" + parts[1])
+	if err != nil {
+		return "", false
+	}
+	return repository, true
 }
 
-func (installer Installer) preflightRepository(ctx context.Context, source, sourceToken string) error {
-	public, err := installer.publicRepository(ctx, strings.TrimPrefix(source, "https://huggingface.co/"))
+// preflightRepository returns the source to submit: the canonical repository,
+// or the selected artifact when it is one of the repository's candidates.
+func (installer Installer) preflightRepository(ctx context.Context, canonical, artifact, sourceToken string) (string, error) {
+	if err := installer.checkRepositoryAccess(ctx, canonical, sourceToken, true); err != nil {
+		return "", err
+	}
+	return checkHuggingFaceRepository(ctx, installer.Backend, canonical, artifact)
+}
+
+// checkRepositoryAccess requires a download token for a repository that is not
+// verifiably public. needsLogin additionally requires a valid InvokeAI login,
+// which InvokeAI uses for protected repository metadata.
+func (installer Installer) checkRepositoryAccess(ctx context.Context, canonical, sourceToken string, needsLogin bool) error {
+	public, err := installer.publicRepository(ctx, strings.TrimPrefix(canonical, "https://huggingface.co/"))
 	if err != nil {
 		return err
 	}
-	if !public && sourceToken == "" {
-		return &operation.AuthenticationRequiredError{Message: "protected Hugging Face repository requires --token-stdin and a valid InvokeAI Hugging Face login"}
+	if public {
+		return nil
 	}
-	if !public {
-		status, err := huggingface.Status(ctx, installer.Backend)
-		if err != nil {
-			return err
+	if sourceToken == "" {
+		if needsLogin {
+			return &operation.AuthenticationRequiredError{Message: "protected Hugging Face repository requires --token-stdin and a valid InvokeAI Hugging Face login"}
 		}
-		if status.Status != "valid" {
-			return &operation.AuthenticationRequiredError{Message: "protected Hugging Face repository requires a valid InvokeAI Hugging Face login"}
-		}
+		return &operation.AuthenticationRequiredError{Message: "protected Hugging Face artifact requires --token-stdin"}
 	}
-	return checkHuggingFaceRepository(ctx, installer.Backend, source)
+	if !needsLogin {
+		return nil
+	}
+	status, err := huggingface.Status(ctx, installer.Backend)
+	if err != nil {
+		return err
+	}
+	if status.Status != "valid" {
+		return &operation.AuthenticationRequiredError{Message: "protected Hugging Face repository requires a valid InvokeAI Hugging Face login"}
+	}
+	return nil
 }
 
 func (installer Installer) publicRepository(ctx context.Context, id string) (bool, error) {
@@ -415,34 +460,40 @@ func normalizeHuggingFaceReference(reference string) (string, error) {
 	return "https://huggingface.co/" + id, nil
 }
 
-func checkHuggingFaceRepository(ctx context.Context, client *httpclient.Client, canonical string) error {
+func checkHuggingFaceRepository(ctx context.Context, client *httpclient.Client, canonical, artifact string) (string, error) {
 	id := strings.TrimPrefix(canonical, "https://huggingface.co/")
 	var metadata struct {
 		URLs        []string `json:"urls"`
 		IsDiffusers bool     `json:"is_diffusers"`
 	}
 	if err := client.GetJSON(ctx, "/api/v2/models/hugging_face?"+url.Values{"hugging_face_repo": {id}}.Encode(), &metadata); err != nil {
-		return err
+		return "", err
 	}
 	candidates := make([]operation.SelectionCandidate, 0, len(metadata.URLs))
 	for _, artifact := range metadata.URLs {
 		if !strings.HasPrefix(artifact, canonical+"/resolve/") || validateArtifactURL(artifact) != nil {
-			return &httpclient.InvalidResponseError{Err: errors.New("Hugging Face metadata contains an unsafe artifact URL")}
+			return "", &httpclient.InvalidResponseError{Err: errors.New("Hugging Face metadata contains an unsafe artifact URL")}
 		}
 		parsed, _ := url.Parse(artifact)
 		if path.Clean(parsed.Path) != parsed.Path || strings.Contains(strings.ToLower(parsed.EscapedPath()), "%2f") {
-			return &httpclient.InvalidResponseError{Err: errors.New("Hugging Face metadata contains an unsafe artifact URL")}
+			return "", &httpclient.InvalidResponseError{Err: errors.New("Hugging Face metadata contains an unsafe artifact URL")}
 		}
 		candidates = append(candidates, operation.SelectionCandidate{Key: artifact, Name: path.Base(parsed.Path)})
 	}
 	if len(metadata.URLs) == 0 && !metadata.IsDiffusers {
-		return operation.InvalidRequest("Hugging Face repository contains no supported model artifact")
+		return "", operation.InvalidRequest("Hugging Face repository contains no supported model artifact")
+	}
+	if artifact != "" {
+		if metadata.IsDiffusers || !slices.Contains(metadata.URLs, artifact) {
+			return "", operation.InvalidRequest("artifact is not a candidate of the Hugging Face repository")
+		}
+		return artifact, nil
 	}
 	if !metadata.IsDiffusers && len(metadata.URLs) > 1 {
 		slices.SortFunc(candidates, func(a, b operation.SelectionCandidate) int { return cmp.Compare(a.Key, b.Key) })
-		return operation.SelectionRequired("huggingface_artifact", canonical, candidates)
+		return "", operation.SelectionRequired("huggingface_artifact", canonical, candidates)
 	}
-	return nil
+	return canonical, nil
 }
 
 func Status(ctx context.Context, client *httpclient.Client, request StatusRequest) (StatusResult, error) {

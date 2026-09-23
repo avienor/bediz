@@ -300,7 +300,7 @@ func TestLiveGate(t *testing.T) {
 				t.Errorf("doctor returned an unsatisfied or incomplete model requirement: %#v", requirement)
 			}
 		}
-		wantOperations := []string{"generate", "images.get", "images.list", "images.upload", "models.install", "models.list", "models.status", "queue.get", "queue.list", "recall"}
+		wantOperations := []string{"auth.huggingface.login", "auth.huggingface.logout", "auth.huggingface.status", "generate", "images.get", "images.list", "images.upload", "models.install", "models.install", "models.list", "models.status", "queue.get", "queue.list", "recall"}
 		operations := make([]string, 0, len(data.Capabilities))
 		var generateFound bool
 		for _, capability := range data.Capabilities {

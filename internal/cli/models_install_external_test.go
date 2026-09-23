@@ -310,6 +310,50 @@ func TestModelsInstallCivitaiMetadataOutageIsSafeConnectionFailure(t *testing.T)
 	}
 }
 
+func TestHuggingFaceArtifactFlagAndDocumentSubmitSameSelectedArtifact(t *testing.T) {
+	isolateUserConfigDir(t)
+	mockPublicHuggingFaceRepository(t, `false`)
+	const artifact = "https://huggingface.co/sample/model/resolve/main/b.safetensors"
+	var posts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(huggingFaceInstallOpenAPI))
+		case "/api/v2/models/hugging_face":
+			_, _ = w.Write([]byte(`{"urls":["https://huggingface.co/sample/model/resolve/main/a.safetensors","` + artifact + `"],"is_diffusers":false}`))
+		case "/api/v2/models/install":
+			posts.Add(1)
+			if r.Method != http.MethodPost || r.URL.Query().Get("source") != artifact {
+				t.Errorf("unexpected installation: %s %s", r.Method, r.URL)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":4,"status":"waiting"}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+		}
+	}))
+	t.Cleanup(server.Close)
+	for _, input := range []struct {
+		stdin string
+		args  []string
+	}{
+		{"", []string{"--source-type", "huggingface", "--source", "sample/model", "--artifact", artifact}},
+		{`{"schema_version":1,"source":{"type":"huggingface","reference":"sample/model","artifact":"` + artifact + `"}}`, []string{"--request", "-"}},
+	} {
+		args := append([]string{"models", "install"}, input.args...)
+		args = append(args, "--url", server.URL, "--json")
+		code, stdout, stderr := runModelCommand(t, input.stdin, args...)
+		if code != result.ExitSuccess || stderr != "" || !strings.Contains(stdout, `"job_id":4`) || strings.Contains(stdout, "sample/model") {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+		}
+	}
+	if posts.Load() != 2 {
+		t.Fatalf("posts=%d", posts.Load())
+	}
+}
+
 func TestHuggingFaceInstallFlagsAndDocumentProduceSameCanonicalJob(t *testing.T) {
 	isolateUserConfigDir(t)
 	mockPublicHuggingFaceRepository(t, `false`)
@@ -826,6 +870,22 @@ func TestModelsStatusRejectsUnknownDocumentFieldAndMixedFlags(t *testing.T) {
 		code, stdout, _ := runModelCommand(t, input.document, args...)
 		if code != result.ExitInvalidRequest || !strings.Contains(stdout, `"code":"invalid_request"`) {
 			t.Fatalf("code=%d stdout=%q", code, stdout)
+		}
+	}
+}
+
+func TestInstallArgumentErrorsDoNotEchoAccidentalTokens(t *testing.T) {
+	isolateUserConfigDir(t)
+	const token = "hf_accidental_secret"
+	for _, args := range [][]string{
+		{"models", "install", token, "--json"},
+		{"models", "install", "--token-stdin=" + token, "--json"},
+		{"models", "install", token},
+		{"models", "install", "--token-stdin=" + token},
+	} {
+		code, stdout, stderr := runModelCommand(t, "", args...)
+		if code != result.ExitInvalidRequest || strings.Contains(stdout+stderr, token) {
+			t.Errorf("args=%q code=%d stdout=%q stderr=%q", args, code, stdout, stderr)
 		}
 	}
 }

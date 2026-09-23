@@ -249,6 +249,7 @@ func TestStarterInstallRejectsTokenAcrossDifferentOriginsBeforeMutation(t *testi
 
 func TestStarterInstallAcceptsExactHuggingFaceArtifactInSubdirectory(t *testing.T) {
 	isolateUserConfigDir(t)
+	mockPublicHuggingFaceRepository(t, "false")
 	const source = "https://huggingface.co/sample/model/resolve/main/split_files/model.safetensors"
 	var submitted string
 	var submittedMu sync.Mutex

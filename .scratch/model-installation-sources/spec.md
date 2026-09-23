@@ -10,7 +10,7 @@ Step 5 delivers `models install`, `models status`, `auth huggingface status|logi
 
 ## Public operation shape
 
-- The schema-version-1 install Request Document has one typed `source` with `type` (`url`, `starter`, `huggingface`, `path`, or `civitai`) and `reference`. Matching source flags compile to that same operation. Unknown and inapplicable fields fail validation. For Civitai only, `source.file_id` is an optional positive integer; for paths, `move` is an operation setting.
+- The schema-version-1 install Request Document has one typed `source` with `type` (`url`, `starter`, `huggingface`, `path`, or `civitai`) and `reference`. Matching source flags compile to that same operation. Unknown and inapplicable fields fail validation. For Civitai only, `source.file_id` is an optional positive integer; for Hugging Face only, `source.artifact` resubmits one exact candidate from a `huggingface_artifact` selection after the same access checks; for paths, `move` is an operation setting.
 - The status Request Document has a non-negative integer `job_id` (including zero); the matching flag is `--job-id`. The status result projects only verified ID, normalized status, optional progress bytes, and an installed Model Key when one is verified. InvokeAI 6.14.1 job IDs are scoped to the current server install-job registry; a restart can remove or reuse an ID. Bediz does not represent an ID as a durable receipt. It never returns raw backend source, access token, error text, or traceback.
 - The install result's `jobs` array contains accepted integer job IDs, normalized statuses, source types, and roles, not raw source references. Starter dependency jobs have a zero-based dependency index into the returned catalog dependency list. Starter entries present in that list and marked installed are omitted from `jobs` and recorded in `skipped` with role, index where applicable, and `already_installed` reason. InvokeAI 6.14.1 omits installed dependencies from its returned list, so Bediz cannot report those omitted entries. An all-installed returned starter request succeeds with empty `jobs` and explicit `skipped` for entries actually returned.
 - Installation uses the tested generic POST endpoint, including Hugging Face sources. The Hugging Face-specific GET installation endpoint is a mutation and must not be used. An install mutation is sent once. An inconclusive response is `outcome_unknown`; partial starter acceptance preserves accepted job IDs and skips in structured error details.
@@ -26,11 +26,11 @@ Step 5 delivers `models install`, `models status`, `auth huggingface status|logi
 - Civitai exact versions are positive decimal version IDs or model page URLs with one explicit positive `modelVersionId`. With one file, choose it; with multiple files, choose only when exactly one is primary. Otherwise return `selection_required` with `kind: civitai_file`, a numeric version-ID selector, and candidates sorted by numeric file ID. Each candidate has integer `id`, `name`, and `primary`; resubmitted `file_id` must belong to that exact version.
 - A Civitai model page with no version returns `selection_required` with `kind: civitai_version`, a numeric model-ID selector, and candidates sorted by numeric version ID. Each candidate has integer `id` and `name`. Even one available version requires an explicit new request. A direct Civitai download URL follows the generic URL path.
 
-The dependency and review gates are recorded in the eight issue files under this feature directory. Worker tickets remain open while awaiting independent fixed-diff review.
+The dependency and review gates are recorded in the eight issue files under this feature directory. Independent fixed-diff review is complete for all eight tickets.
 
 ## Initial independent-review findings and decisions (before implementation)
 
-Inspection of the installed InvokeAI 6.14.1 implementation found three behaviors that the initial ticket plan did not account for:
+Inspection of the installed InvokeAI 6.14.1 implementation found seven behaviors that the initial ticket plan did not account for:
 
 1. InvokeAI writes source access tokens in plaintext to temporary install markers. The accepted V1 contract distinguishes Bediz's no-storage guarantee from InvokeAI's resumable installation state. V1 section 14 and ADR 0018 now record this boundary; tickets 02 and 07 require lifecycle and redaction evidence. No Bediz implementation exists to change yet.
 2. InvokeAI logs and records exact source URLs. User-supplied direct artifact URLs containing userinfo, query, or fragment are now rejected before mutation. V1 sections 14 and 20, ADR 0018, and tickets 01, 02, and 07 record the validation and redaction boundary. No Bediz implementation exists to change yet.
@@ -40,4 +40,4 @@ Inspection of the installed InvokeAI 6.14.1 implementation found three behaviors
 6. Installed starter catalog entries are skipped before source normalization; unsupported source forms block only entries that would be installed. V1 section 14 and ticket 05 require this order, including an all-installed fixture.
 7. The Civitai download exception is pinned to one canonical URL shape constructed from verified IDs; Hugging Face login receives the same non-loopback plain-HTTP credential guard as protected installation. V1 section 14, ADR 0018, and tickets 03 and 07 record those boundaries.
 
-Tickets 01–07 are marked done and ticket 08 remains `ready-for-agent` subject to its blocking edge. The evidence requirements in each ticket, including live limitations, still govern acceptance.
+Tickets 01–08 are done. The evidence requirements in each ticket, including live limitations, still govern acceptance.

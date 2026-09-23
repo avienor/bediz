@@ -10,8 +10,9 @@ The current implementation includes these V1 capabilities:
 - `version`, with concise human output and a stable V1 JSON result envelope;
 - `doctor`, which checks InvokeAI version compatibility (`>= 6.14.1, < 6.15.0`), the OpenAPI endpoints and schemas required by implemented capabilities, and separate readiness for Anima Direct Execution and Parameter Recall;
 - safe installed-model, gallery-image, and queue inspection;
-- exact public URL model installation through one InvokeAI job, plus current install-job status inspection;
-- exact Civitai version resolution with explicit version and file choices and a verified artifact URL;
+- model installation through InvokeAI jobs from exact URLs, Hugging Face repositories with explicit artifact choices, Civitai versions with explicit version and file choices, server paths (in-place registration, or `--move --yes`), and starter models whose catalog dependencies are submitted as separate jobs and skipped when already installed, plus current install-job status inspection;
+- protected URL, Civitai, and Hugging Face installs with a temporary `--token-stdin` source token that Bediz never stores or prints;
+- Hugging Face authentication through InvokeAI with `auth huggingface status`, `login --token-stdin`, and `logout`;
 - single-file image upload with supported-version validation, no automatic mutation retry, and `outcome_unknown` reporting when the transport result is inconclusive;
 - Anima text-to-image Direct Execution with deterministic model and component resolution, ordered multi-output seed resolution, graph compilation targeting the tested InvokeAI 6.14.x baseline, safe queue-polling to an Execution Receipt, and `--no-wait` support;
 - manual Anima Parameter Recall and automatic generation UI Synchronization after enqueue, with the verified `partial` level on stock InvokeAI 6.14.x.
@@ -33,12 +34,17 @@ go build -o bediz ./cmd/bediz
 ./bediz models list --json
 ./bediz models install --source-type url --source https://example.org/model.safetensors --json
 ./bediz models install --source-type huggingface --source org/repo --json
+./bediz models install --source-type huggingface --source org/repo --artifact https://huggingface.co/org/repo/resolve/main/model.safetensors --json
+./bediz models install --source-type starter --source STARTER_SOURCE --json
 ./bediz models install --source-type civitai --source 'https://civitai.com/models/MODEL_ID?modelVersionId=VERSION_ID' --json
 ./bediz models install --source-type civitai --source 'https://civitai.com/models/MODEL_ID' --json
 ./bediz models install --source-type civitai --source VERSION_ID --file-id FILE_ID --json
 ./bediz models install --source-type path --source /server/models/model.safetensors --json
 ./bediz models install --source-type path --source /server/models/model.safetensors --move --yes --json
 ./bediz models status --job-id 0 --json
+./bediz auth huggingface status --json
+printf '%s' "$HF_TOKEN" | ./bediz auth huggingface login --token-stdin --json
+./bediz auth huggingface logout --json
 ./bediz images list --json
 ./bediz images get IMAGE_NAME --json
 ./bediz images upload /absolute/path/to/image.png --json
