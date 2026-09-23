@@ -71,8 +71,19 @@
 - Tests.
 - No new terminology: a Model Source Reference and Source Resolution already cover it.
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] Starter entries with a single-subfolder `org/repo::path` source install through one exact submission each, after shape, existence, and access checks, with no job submitted when any entry fails preflight.
-- [ ] Entries in protected repositories rely only on InvokeAI's stored Hugging Face login; Bediz never sends or reads a token for them, and the resulting credential boundary is recorded.
-- [ ] The FLUX.1 schnell and dev quantized starters and their dependencies install live through Bediz, or the unavailable live step is reported.
+- [x] Starter entries with a single-subfolder `org/repo::path` source install through one exact submission each, after shape, existence, and access checks, with no job submitted when any entry fails preflight.
+- [x] Entries in protected repositories rely only on InvokeAI's stored Hugging Face login; Bediz never sends or reads a token for them, and the resulting credential boundary is recorded.
+- [x] The FLUX.1 schnell and dev quantized starters and their dependencies install live through Bediz, or the unavailable live step is reported.
+
+## Comments
+
+### 2026-09-23: implementation and live verification
+
+- `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify` passed after the public-seam tests were extended to both folder/file role combinations and a Diffusers `urls: null` fixture.
+- `bediz auth huggingface status --url http://127.0.0.1:9090 --json` reported `valid`. `bediz doctor --url http://127.0.0.1:9090 --json` reported `models.install` / `starter` compatible.
+- `bediz models install --source-type starter --source 'InvokeAI/flux_schnell::transformer/bnb_nf4/flux1-schnell-bnb_nf4.safetensors' --url http://127.0.0.1:9090 --json` submitted jobs 10 (T5), 11 (FLUX VAE), 12 (CLIP Embed), and 13 (schnell main) in catalog order. Job 10 ended in `error` after an incomplete network read; jobs 11 and 12 completed with Model Keys. The model inventory had no T5 key after job 10 failed.
+- After that conclusive failure and inventory check, `bediz models install --source-type starter --source 'InvokeAI/t5-v1_1-xxl::bnb_llm_int8' --url http://127.0.0.1:9090 --json` submitted a new T5 job 14. Jobs 13 and 14 completed with Model Keys. `models list --json` confirmed all four schnell components in the inventory: T5, FLUX VAE, CLIP Embed, and the quantized schnell main.
+- While downloads were active, temporary InvokeAI install markers contained its stored login token (checked as a Boolean without printing its value). Markers for the failed T5 job and completed jobs 11–14 were removed; after job 14 completed, the marker count was zero. Inspection of the installed InvokeAI 6.14.1 source showed that it attaches a stored login token to public Hugging Face sources as well as protected ones; ADR-0019 and V1 §20 now record this broader server-side behavior.
+- `bediz models install --source-type starter --source 'InvokeAI/flux_dev::transformer/bnb_nf4/flux1-dev-bnb_nf4.safetensors' --url http://127.0.0.1:9090 --json` submitted job 15 for the dev main only. InvokeAI omitted the already installed shared dependencies from its returned catalog list, so `skipped` was empty as the V1 specification allows. Job 15 completed with a Model Key; `models list --json` confirmed the quantized dev main in the inventory. After completion, there were zero temporary install markers, and `doctor --json` still reported `models.install` / `starter` compatible.

@@ -3,6 +3,7 @@ package cli_test
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -193,7 +194,7 @@ func TestStarterInstallPartialSubmissionsPreserveAcceptedJobsAndSkips(t *testing
 
 func TestStarterInstallPreflightsEveryMissingDependencyBeforeMutation(t *testing.T) {
 	for _, unsafeSource := range []string{
-		"sample/dep::fp16", "sample/dep/subfolder", "https://huggingface.co/sample/dep/tree/main", "https://huggingface.co/sample/dep/tree/main/resolve/file.safetensors", "https://huggingface.co/sample/dep/resolve/", "https://example.org/file?token=secret",
+		"sample/dep:fp16::file", "sample/dep/subfolder", "https://huggingface.co/sample/dep/tree/main", "https://huggingface.co/sample/dep/tree/main/resolve/file.safetensors", "https://huggingface.co/sample/dep/resolve/", "https://example.org/file?token=secret",
 	} {
 		t.Run(unsafeSource, func(t *testing.T) {
 			isolateUserConfigDir(t)
@@ -219,6 +220,57 @@ func TestStarterInstallPreflightsEveryMissingDependencyBeforeMutation(t *testing
 				t.Fatalf("code=%d stdout=%q stderr=%q posts=%d", code, stdout, stderr, posts)
 			}
 		})
+	}
+}
+
+func TestStarterSubfolderCLIReportsJobsWithoutSourceReference(t *testing.T) {
+	isolateUserConfigDir(t)
+	const source = "sample/model::model.safetensors"
+	previous := http.DefaultTransport
+	http.DefaultTransport = huggingFaceTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "huggingface.co" {
+			return previous.RoundTrip(r)
+		}
+		if r.Header.Get("Authorization") != "" {
+			t.Error("anonymous Hugging Face request had authorization")
+		}
+		body := ""
+		switch r.URL.String() {
+		case "https://huggingface.co/api/models/sample/model/tree/main":
+			body = `[{"path":"model.safetensors","type":"file"}]`
+		case "https://huggingface.co/api/models/sample/model":
+			body = `{"gated":false,"private":false}`
+		default:
+			t.Errorf("unexpected Hugging Face request: %s", r.URL)
+			return &http.Response{StatusCode: http.StatusNotFound, Body: http.NoBody, Header: make(http.Header)}, nil
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = previous })
+	var posts int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(starterOpenAPI))
+		case "/api/v2/models/starter_models":
+			_, _ = w.Write([]byte(`{"starter_models":[{"source":"` + source + `","is_installed":false}]}`))
+		case "/api/v2/models/install":
+			posts++
+			if r.URL.Query().Get("source") != source || r.URL.Query().Get("access_token") != "" {
+				t.Errorf("unexpected install request: %s", r.URL)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":22,"status":"waiting"}`))
+		default:
+			t.Errorf("unexpected backend request: %s %s", r.Method, r.URL)
+		}
+	}))
+	t.Cleanup(server.Close)
+	code, stdout, stderr := runModelCommand(t, "", "models", "install", "--source-type", "starter", "--source", source, "--url", server.URL, "--json")
+	if code != result.ExitSuccess || stderr != "" || posts != 1 || !strings.Contains(stdout, `"job_id":22`) || !strings.Contains(stdout, `"source_type":"starter"`) || strings.Contains(stdout, source) {
+		t.Fatalf("code=%d stdout=%q stderr=%q posts=%d", code, stdout, stderr, posts)
 	}
 }
 

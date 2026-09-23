@@ -23,7 +23,7 @@ The installed package at `/home/nyx/Workspace/image-studio/invokeai/.venv/lib/py
 - Install only models that a ticket or feature spec records as consented. Anything else needs new Installation Consent from the user. Prefer installing through Bediz, which also exercises Bediz.
 - Hugging Face credentials belong to the user. When a gated download is needed, ask the user to log in to InvokeAI's Hugging Face integration and accept the repository terms, then confirm with `bediz auth huggingface status` (`valid`). Every token stays in the user's terminal and out of chat, files, and logs.
 - Install job IDs belong to the current InvokeAI process. After a restart, reinspect `models list` and the job list before trusting an old ID or resubmitting.
-- Starter entries whose `source` uses `org/repo::subfolder` (every FLUX.1 starter and its dependencies) fail preflight until ticket `sdxl-flux1-generation/03` lands.
+- Starter entries whose `source` uses `org/repo::subfolder` are supported after anonymous tree and access checks. A protected repository needs a valid InvokeAI Hugging Face login before any install job is submitted.
 
 ## Live E2E gate
 
