@@ -15,12 +15,14 @@ The current implementation includes these V1 capabilities:
 - Hugging Face authentication through InvokeAI with `auth huggingface status`, `login --token-stdin`, and `logout`;
 - single-file image upload with supported-version validation, no automatic mutation retry, and `outcome_unknown` reporting when the transport result is inconclusive;
 - Anima text-to-image Direct Execution with deterministic model and component resolution, ordered multi-output seed resolution, graph compilation targeting the tested InvokeAI 6.14.x baseline, safe queue-polling to an Execution Receipt, and `--no-wait` support;
-- SD1.5 and SDXL Generative Upscale from an existing InvokeAI image, with explicit Tile ControlNet selection, single enqueue, output-dimension verification, and an Execution Receipt;
-- manual Anima Parameter Recall and automatic generation UI Synchronization after enqueue, with the verified `partial` level on stock InvokeAI 6.14.x.
+- SD1.5 and SDXL Generative Upscale from an existing InvokeAI image or an absolute local file uploaded once before enqueue, with explicit Tile ControlNet selection, single enqueue, output-dimension verification, and an Execution Receipt;
+- manual Anima Parameter Recall and automatic generation and upscale UI Synchronization after enqueue, with the verified `partial` level on stock InvokeAI 6.14.x.
 
-On a compatible 6.14.x installation, `doctor --json` reports `generate` as compatible and `ui_sync.generate` as `partial` when the tested Recall endpoint and patch schema are present. Missing Recall requirements appear under the separate `recall` capability; they do not make Direct Execution incompatible. An unsupported InvokeAI version is not advertised as ready for generation or Recall.
+On a compatible 6.14.x installation, `doctor --json` reports `generate` and `upscale` as compatible and `ui_sync.generate` and `ui_sync.upscale` as `partial` when the tested Recall endpoint and patch schema are present. Missing Recall requirements appear under the separate `recall` capability; they do not make Direct Execution incompatible. An unsupported InvokeAI version is not advertised as ready for generation or Recall.
 
 The partial Handoff restores positive and negative prompts, the exact Anima main model, dimensions, steps, and the first output seed in an open InvokeAI browser after Recall is accepted. It does not restore scheduler, guidance, VAE, Qwen3 encoder, output count, or Output Board controls. The visible queue item, result image, metadata, and complete Execution Receipt retain the resolved settings and every output seed. A successful generation carries `ui_sync_partial`; if the Recall patch fails, generation still succeeds with `ui_sync_failed`. Recall API acceptance does not prove that a browser was open to receive the event. V1 does not support `recall --replace` or claim `full` UI Synchronization.
+
+After an accepted upscale enqueue, including `--no-wait`, Bediz sends one Recall patch with the resolved prompts, exact main model, steps, and seed. It does not restore the source image, Spandrel model, scale, creativity, structure, Tile ControlNet, tile size, tile overlap, scheduler, guidance, VAE, or Output Board in the Upscale panel. A successful patch carries `ui_sync_partial`; if Recall fails, the upscale outcome and its Execution Receipt are unchanged and carry `ui_sync_failed`.
 
 Additional management commands will be added in later V1 slices described by the specification.
 
