@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"sync"
 	"testing"
@@ -292,7 +293,7 @@ func TestUpscaleLocalPathRejectedBeforeNetwork(t *testing.T) {
 		{"both sources", []string{"--image", "source.png", "--image-path", writeUploadSource(t)}},
 		{"no source", nil},
 	}
-	if os.Geteuid() != 0 {
+	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
 		cases = append(cases, struct {
 			name string
 			args []string
