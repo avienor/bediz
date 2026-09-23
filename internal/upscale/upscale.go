@@ -174,24 +174,33 @@ func ValidateRequest(request Request) error {
 	return nil
 }
 
+// ResolveMain selects an installed normal main model of a registered upscale family.
+func ResolveMain(inventory []graphops.ModelIdentifier, selector string) (graphops.ModelIdentifier, error) {
+	main, err := graphops.ResolveMain(inventory, selector)
+	if err != nil {
+		return graphops.ModelIdentifier{}, err
+	}
+	main, err = graphops.CompleteModelIdentifier(main)
+	if err != nil {
+		return graphops.ModelIdentifier{}, err
+	}
+	if _, ok := familyFor(main.Base); !ok || main.Variant != "normal" {
+		return graphops.ModelIdentifier{}, operation.UnsupportedCapability(fmt.Sprintf("model %q must be a normal %s main model for upscale", main.Key, familyLabels()))
+	}
+	return main, nil
+}
+
 // Resolve accepts a main model of a registered upscale family and selects its
 // complete Upscale Component Set after local validation.
 func Resolve(request Request, inventory []graphops.ModelIdentifier, random io.Reader) (Resolution, error) {
 	if err := ValidateRequest(request); err != nil {
 		return Resolution{}, err
 	}
-	main, err := graphops.ResolveMain(inventory, request.Model)
+	main, err := ResolveMain(inventory, request.Model)
 	if err != nil {
 		return Resolution{}, err
 	}
-	main, err = graphops.CompleteModelIdentifier(main)
-	if err != nil {
-		return Resolution{}, err
-	}
-	family, ok := familyFor(main.Base)
-	if !ok || main.Variant != "normal" {
-		return Resolution{}, operation.UnsupportedCapability(fmt.Sprintf("model %q must be a normal %s main model for upscale", main.Key, familyLabels()))
-	}
+	family, _ := familyFor(main.Base)
 	upscaleSelector, tileSelector, vaeSelector := "", "", ""
 	if request.Components != nil {
 		if request.Components.UpscaleModel != nil {

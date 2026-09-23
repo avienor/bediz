@@ -312,7 +312,7 @@ func upscaleEntry(base, label string, conditioning []InvocationRequirement) Entr
 		InvocationRequirement{Schema: "CoreMetadataInvocation", Type: "core_metadata", Properties: []string{"id", "is_intermediate", "use_cache", "type", "positive_prompt", "negative_prompt", "seed", "width", "height", "steps", "scheduler", "cfg_scale", "model", "vae"}, RequiresAdditionalProperties: true},
 	)
 	return Entry{
-		Operation: result.OperationUpscale, Family: base, VersionPolicy: VersionPolicySupportedRange,
+		Operation: result.OperationUpscale, Family: base, UISync: "partial", VersionPolicy: VersionPolicySupportedRange,
 		Endpoints:   append(slices.Clone(AnimaGenerationEntry().Endpoints), EndpointRequirement{Method: "POST", Path: "/api/v1/images/upload"}),
 		Invocations: invocations,
 		Models: []ModelRequirement{

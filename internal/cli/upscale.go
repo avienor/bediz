@@ -8,6 +8,7 @@ import (
 
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/result"
+	"github.com/avienor/bediz/internal/synchronization"
 	"github.com/avienor/bediz/internal/upscale"
 	"github.com/spf13/cobra"
 )
@@ -154,6 +155,7 @@ func (c *CLI) executeUpscale(ctx context.Context, jsonOutput bool, command *cobr
 			if err != nil {
 				return accepted, err
 			}
+			accepted = synchronization.SynchronizeUpscale(ctx, client, accepted)
 			if options.noWait {
 				return accepted, nil
 			}

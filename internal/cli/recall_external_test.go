@@ -173,6 +173,7 @@ func TestRecallRejectsUnsafeModelsAndUnsupportedContract(t *testing.T) {
 	}{
 		{"ambiguous selector", "6.14.1", append(animaModelInventory(), map[string]any{"key": "other", "hash": "h", "name": "Anima Main", "base": "anima", "type": "main"}), recallOpenAPI(), []string{"--model", "Anima Main"}, "selection_required"},
 		{"duplicate display name", "6.14.1", append(animaModelInventory(), map[string]any{"key": "other", "hash": "h", "name": "Anima Main", "base": "sdxl", "type": "main"}), recallOpenAPI(), []string{"--model", "main-key"}, "unsupported_capability"},
+		{"SD1.5 main model", "6.14.1", append(animaModelInventory(), map[string]any{"key": "sd1-main", "hash": "h", "name": "Dreamshaper 8", "base": "sd-1", "type": "main", "variant": "normal"}), recallOpenAPI(), []string{"--model", "sd1-main", "--seed", "1"}, "unsupported_capability"},
 		{"unsupported version", "6.15.0", animaModelInventory(), recallOpenAPI(), []string{"--seed", "1"}, "unsupported_capability"},
 		{"missing recall schema", "6.14.1", animaModelInventory(), map[string]any{}, []string{"--seed", "1"}, "unsupported_capability"},
 		{"wrong recall field type", "6.14.1", animaModelInventory(), wrongSchema, []string{"--seed", "1"}, "unsupported_capability"},

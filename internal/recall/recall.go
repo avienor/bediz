@@ -7,6 +7,7 @@ import (
 
 	"github.com/avienor/bediz/internal/capability"
 	"github.com/avienor/bediz/internal/generation"
+	"github.com/avienor/bediz/internal/graphops"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/operation"
 )
@@ -55,6 +56,25 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Re
 // SubmitWithFields submits the common typed patch plus adapter-owned fields.
 // Each additional field must match the live InvokeAI Recall schema.
 func SubmitWithFields(ctx context.Context, client *httpclient.Client, request Request, additional []capability.RecallPatchField) (Result, error) {
+	return submit(ctx, client, request, additional, func(inventory []generation.ModelIdentifier, selector string) (generation.ModelIdentifier, error) {
+		model, err := generation.ResolveFamilyMain(inventory, selector)
+		if err != nil {
+			return model, err
+		}
+		return model, generation.ValidateRecall(model, request.Width, request.Height, request.Steps)
+	})
+}
+
+// MainResolver selects the main model named by a Recall patch.
+type MainResolver func(inventory []graphops.ModelIdentifier, selector string) (graphops.ModelIdentifier, error)
+
+// SubmitWithMainResolver submits the common typed patch for an operation that owns its
+// main-model rules, such as upscale, instead of the generation family registry.
+func SubmitWithMainResolver(ctx context.Context, client *httpclient.Client, request Request, resolveMain MainResolver) (Result, error) {
+	return submit(ctx, client, request, nil, resolveMain)
+}
+
+func submit(ctx context.Context, client *httpclient.Client, request Request, additional []capability.RecallPatchField, resolveMain MainResolver) (Result, error) {
 	if err := validate(request); err != nil {
 		return Result{}, err
 	}
@@ -105,11 +125,8 @@ func SubmitWithFields(ctx context.Context, client *httpclient.Client, request Re
 		if err := client.GetJSON(ctx, "/api/v2/models/", &inventory); err != nil {
 			return Result{}, err
 		}
-		model, err := generation.ResolveFamilyMain(inventory.Models, *request.Model)
+		model, err := resolveMain(inventory.Models, *request.Model)
 		if err != nil {
-			return Result{}, err
-		}
-		if err := generation.ValidateRecall(model, request.Width, request.Height, request.Steps); err != nil {
 			return Result{}, err
 		}
 		for _, candidate := range inventory.Models {

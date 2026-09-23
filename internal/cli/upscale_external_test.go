@@ -117,9 +117,11 @@ func TestUpscaleDefaultsNoWaitAndRequestEquivalence(t *testing.T) {
 		t.Fatalf("flags: code=%d receipt=%#v enqueues=%d", code, fromFlags, enqueues.Load())
 	}
 	s := fromFlags.Data.ResolvedSettings
-	if s.Scale != 4 || s.Creativity != 0 || s.Structure != 0 || s.Steps != 30 || s.Scheduler != "kdpm_2" || s.Guidance != 2 || s.TileSize != 1024 || s.TileOverlap != 128 || s.OutputWidth != 2048 || s.OutputHeight != 2048 || s.ModelKey != "sdxl-main" || !reflect.DeepEqual(s.ComponentKeys, map[string]string{"upscale_model": "spandrel", "tile_controlnet": "tile"}) || !slices.Equal(s.Seeds, []uint32{42}) || len(fromFlags.Data.Outputs) != 0 || len(fromFlags.Data.Warnings) != 0 || len(fromFlags.Warnings) != 0 || fromFlags.Data.SourceUploaded || fromFlags.Data.SourceImage.ImageName != "source.png" {
+	if s.Scale != 4 || s.Creativity != 0 || s.Structure != 0 || s.Steps != 30 || s.Scheduler != "kdpm_2" || s.Guidance != 2 || s.TileSize != 1024 || s.TileOverlap != 128 || s.OutputWidth != 2048 || s.OutputHeight != 2048 || s.ModelKey != "sdxl-main" || !reflect.DeepEqual(s.ComponentKeys, map[string]string{"upscale_model": "spandrel", "tile_controlnet": "tile"}) || !slices.Equal(s.Seeds, []uint32{42}) || len(fromFlags.Data.Outputs) != 0 || fromFlags.Data.SourceUploaded || fromFlags.Data.SourceImage.ImageName != "source.png" {
 		t.Fatalf("default receipt = %#v", fromFlags.Data)
 	}
+	// This server does not expose Recall, so the accepted upscale reports only a synchronization failure.
+	assertUpscaleSyncWarning(t, fromFlags, "ui_sync_failed")
 	document := `{"schema_version":1,"source":{"type":"image","reference":"source.png"},"model":"sdxl-main","components":{"tile_controlnet":"tile"},"seed":42}`
 	path := t.TempDir() + "/upscale.json"
 	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {

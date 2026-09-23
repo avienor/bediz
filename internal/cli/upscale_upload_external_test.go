@@ -95,6 +95,8 @@ func newUpscaleUploadServer(t *testing.T, handlers upscaleUploadHandlers) *upsca
 			handlers.item(w, r)
 		case "/api/v1/images/i/output.png":
 			handlers.output(w, r)
+		case "/api/v1/recall/default":
+			_, _ = w.Write([]byte(`{"status":"success"}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -122,7 +124,12 @@ func (s *upscaleUploadServer) count(request string) int {
 const (
 	uploadRequest  = "POST /api/v1/images/upload"
 	enqueueRequest = "POST /api/v1/queue/default/enqueue_batch"
+	recallRequest  = "POST /api/v1/recall/default"
 )
+
+// recallRequests are the read-only Recall checks and the single patch that
+// follow a conclusive enqueue.
+var recallRequests = []string{"GET /api/v1/app/version", "GET /openapi.json", "GET /api/v2/models/", recallRequest}
 
 // preflightRequests are the read-only validation and resolution requests that
 // must all complete, in any order, before the local source is uploaded.
@@ -225,7 +232,8 @@ func TestUpscaleLocalPathUploadsOnceAfterResolutionThenEnqueuesOnce(t *testing.T
 	if code != 0 || !envelope.OK {
 		t.Fatalf("code=%d envelope=%#v", code, envelope)
 	}
-	assertUploadFollowsPreflight(t, server.sequence(), uploadRequest, enqueueRequest, "GET /api/v1/queue/default/i/19", "GET /api/v1/images/i/output.png")
+	assertUploadFollowsPreflight(t, server.sequence(), slices.Concat([]string{uploadRequest, enqueueRequest}, recallRequests, []string{"GET /api/v1/queue/default/i/19", "GET /api/v1/images/i/output.png"})...)
+	assertUpscaleSyncWarning(t, envelope, "ui_sync_partial")
 	data := envelope.Data
 	if !data.SourceUploaded || data.SourceImage.ImageName != "uploaded.png" || data.SourceImage.Width != 513 || data.SourceImage.Height != 257 {
 		t.Fatalf("source = %#v uploaded=%v", data.SourceImage, data.SourceUploaded)
@@ -439,15 +447,15 @@ func TestUpscaleLocalPathPostUploadFailuresReportUploadedSource(t *testing.T) {
 				t.Fatalf("reason = %#v", envelope.Error.Details["reason"])
 			}
 			sequence := server.sequence()
-			if server.count(uploadRequest) != 1 || server.count(enqueueRequest) != 1 {
+			if server.count(uploadRequest) != 1 || server.count(enqueueRequest) != 1 || server.count(recallRequest) > 1 {
 				t.Fatalf("sequence = %q", sequence)
 			}
 			for _, request := range sequence {
-				if !slices.Contains([]string{uploadRequest, enqueueRequest}, request) && request[:4] != "GET " {
+				if !slices.Contains([]string{uploadRequest, enqueueRequest, recallRequest}, request) && request[:4] != "GET " {
 					t.Fatalf("unexpected mutation %q in sequence %q", request, sequence)
 				}
 			}
-			// Everything after the enqueue is read-only waiting, checked above.
+			// Everything after the enqueue is the single Recall patch and read-only waiting, checked above.
 			assertUploadFollowsPreflight(t, sequence[:len(preflightRequests)+2], uploadRequest, enqueueRequest)
 		})
 	}

@@ -399,7 +399,7 @@ func buildCapabilities(report Report, document openAPIDocument) []CapabilityRepo
 	}
 	if recallReady {
 		for i := range capabilities {
-			if capabilities[i].Operation == result.OperationGenerate && capabilities[i].Compatible {
+			if capabilities[i].Compatible && capability.Matrix[i].UISync != "" {
 				capabilities[i].UISync = capability.Matrix[i].UISync
 			}
 		}

@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"cmp"
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
 	"maps"
@@ -876,44 +877,59 @@ func TestDoctorReportsSDXLUpscaleOnlyWithTestedRequirements(t *testing.T) {
 		name    string
 		edit    func(map[string]any, *[]map[string]string)
 		failure string
+		// entrySync is upscale/sdxl's ui_sync; reportSync is ui_sync.upscale,
+		// which upscale/sd-1 keeps partial when only SDXL requirements fail.
+		entrySync, reportSync string
+		version               string
 	}{
-		{"ready", func(map[string]any, *[]map[string]string) {}, ""},
-		{"non-normal main", func(_ map[string]any, models *[]map[string]string) {
+		{name: "ready", edit: func(map[string]any, *[]map[string]string) {}, entrySync: "partial", reportSync: "partial"},
+		{name: "missing Recall endpoint", edit: func(document map[string]any, _ *[]map[string]string) {
+			delete(document["paths"].(map[string]any), "/api/v1/recall/{queue_id}")
+		}},
+		{name: "incompatible Recall seed", edit: func(document map[string]any, _ *[]map[string]string) {
+			delete(document["components"].(map[string]any)["schemas"].(map[string]any)["RecallParameter"].(map[string]any)["properties"].(map[string]any), "seed")
+		}},
+		{name: "unsupported version", edit: func(map[string]any, *[]map[string]string) {}, failure: "unsupported_version", version: "6.15.0"},
+		{name: "non-normal main", reportSync: "partial", edit: func(_ map[string]any, models *[]map[string]string) {
 			(*models)[7] = maps.Clone((*models)[7])
 			(*models)[7]["variant"] = "inpaint"
-		}, "missing_component:SDXL normal main model"},
-		{"missing Spandrel", func(_ map[string]any, models *[]map[string]string) {
+		}, failure: "missing_component:SDXL normal main model"},
+		{name: "missing Spandrel", edit: func(_ map[string]any, models *[]map[string]string) {
 			*models = slices.DeleteFunc(*models, func(model map[string]string) bool { return model["key"] == "upscale" })
-		}, "missing_component:Spandrel upscale model"},
-		{"missing ControlNet", func(_ map[string]any, models *[]map[string]string) {
+		}, failure: "missing_component:Spandrel upscale model"},
+		{name: "missing ControlNet", reportSync: "partial", edit: func(_ map[string]any, models *[]map[string]string) {
 			*models = slices.DeleteFunc(*models, func(model map[string]string) bool { return model["key"] == "tile" })
-		}, "missing_component:SDXL ControlNet"},
-		{"missing tiled denoiser", func(document map[string]any, _ *[]map[string]string) {
+		}, failure: "missing_component:SDXL ControlNet"},
+		{name: "missing tiled denoiser", edit: func(document map[string]any, _ *[]map[string]string) {
 			delete(document["components"].(map[string]any)["schemas"].(map[string]any), "TiledMultiDiffusionDenoiseLatents")
-		}, "incompatible_invocation:tiled_multi_diffusion_denoise_latents"},
-		{"metadata rejects upscale fields", func(document map[string]any, _ *[]map[string]string) {
+		}, failure: "incompatible_invocation:tiled_multi_diffusion_denoise_latents"},
+		{name: "metadata rejects upscale fields", edit: func(document map[string]any, _ *[]map[string]string) {
 			delete(document["components"].(map[string]any)["schemas"].(map[string]any)["CoreMetadataInvocation"].(map[string]any), "additionalProperties")
-		}, "incompatible_invocation:core_metadata"},
-		{"missing upload endpoint", func(document map[string]any, _ *[]map[string]string) {
+		}, failure: "incompatible_invocation:core_metadata"},
+		{name: "missing upload endpoint", edit: func(document map[string]any, _ *[]map[string]string) {
 			delete(document["paths"].(map[string]any), "/api/v1/images/upload")
-		}, "missing_endpoint:POST /api/v1/images/upload"},
+		}, failure: "missing_endpoint:POST /api/v1/images/upload"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			document := openAPIFixture(t)
 			models := slices.Clone(baselineModels)
 			test.edit(document, &models)
-			server := newCustomInvokeAIServer(t, "6.14.1", document, models)
+			invokeAIVersion := cmp.Or(test.version, "6.14.1")
+			server := newCustomInvokeAIServer(t, invokeAIVersion, document, models)
 			defer server.Close()
 			client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
 			if err != nil {
 				t.Fatal(err)
 			}
 			report := Run(t.Context(), client, version.Info{Version: "test"})
+			if report.UISync[result.OperationUpscale] != test.reportSync {
+				t.Fatalf("report.UISync = %#v, want upscale %q", report.UISync, test.reportSync)
+			}
 			for _, entry := range report.Capabilities {
 				if entry.Operation != result.OperationUpscale || entry.Family != "sdxl" {
 					continue
 				}
-				if entry.Compatible != (test.failure == "") || entry.UISync != "" || (test.failure != "" && !slices.Contains(entry.Failures, test.failure)) {
+				if entry.Compatible != (test.failure == "") || entry.UISync != test.entrySync || (test.failure != "" && !slices.Contains(entry.Failures, test.failure)) {
 					t.Fatalf("upscale capability = %#v", entry)
 				}
 				return
@@ -974,7 +990,11 @@ func TestDoctorReportsSD1UpscaleOnlyWithTestedRequirements(t *testing.T) {
 					sdxl = &report.Capabilities[index]
 				}
 			}
-			if sd1 == nil || sd1.Compatible != (test.failure == "") || sd1.UISync != "" || (test.failure != "" && !slices.Contains(sd1.Failures, test.failure)) {
+			wantSync := ""
+			if test.failure == "" {
+				wantSync = "partial"
+			}
+			if sd1 == nil || sd1.Compatible != (test.failure == "") || sd1.UISync != wantSync || (test.failure != "" && !slices.Contains(sd1.Failures, test.failure)) {
 				t.Fatalf("upscale/sd-1 capability = %#v", sd1)
 			}
 			sdxlAffected := test.name == "missing Spandrel" || test.name == "missing upload endpoint"
@@ -1023,12 +1043,12 @@ func TestDoctorReportsMissingRecallRequirementsSeparatelyFromDirectExecution(t *
 			if report.Ready {
 				t.Fatal("doctor should report missing Recall readiness")
 			}
-			if report.UISync["generate"] != "" {
+			if len(report.UISync) != 0 {
 				t.Fatalf("unverified UI synchronization: %#v", report.UISync)
 			}
 			for _, entry := range report.Capabilities {
 				switch entry.Operation {
-				case "generate":
+				case "generate", "upscale":
 					if !entry.Compatible || entry.UISync != "" {
 						t.Fatalf("Direct Execution should remain compatible: %#v", entry)
 					}

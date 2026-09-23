@@ -269,7 +269,7 @@ type upscaleExecutionReceiptData struct {
 		Seed   uint32         `json:"seed"`
 		Image  imageReference `json:"image"`
 	} `json:"outputs"`
-	Warnings []jsontext.Value `json:"warnings"`
+	Warnings []uiSyncWarning `json:"warnings"`
 }
 
 type uiSyncWarning struct {
@@ -384,8 +384,8 @@ func TestLiveGate(t *testing.T) {
 			}
 			if capability.Operation == "upscale" {
 				upscaleFamilies[capability.Family] = true
-				if capability.UISync != "" {
-					t.Errorf("upscale capability = %#v, want no UI synchronization", capability)
+				if capability.UISync != "partial" {
+					t.Errorf("upscale ui_sync = %q, want partial", capability.UISync)
 				}
 			}
 		}
@@ -395,8 +395,8 @@ func TestLiveGate(t *testing.T) {
 		if !generateFamilies["anima"] || !generateFamilies["sdxl"] || !generateFamilies["flux"] || len(generateFamilies) != 3 {
 			t.Errorf("doctor generate families = %#v, want Anima, SDXL, and FLUX.1", generateFamilies)
 		}
-		if data.UISync["generate"] != "partial" {
-			t.Errorf("doctor UI synchronization = %#v, want partial generation", data.UISync)
+		if data.UISync["generate"] != "partial" || data.UISync["upscale"] != "partial" {
+			t.Errorf("doctor UI synchronization = %#v, want partial generation and upscale", data.UISync)
 		}
 		slices.Sort(operations)
 		if !slices.Equal(operations, wantOperations) {
@@ -796,14 +796,15 @@ func runLiveUpscale(t *testing.T, binary, target, mainModel, upscaleModel, tileC
 		"--model", mainModel, "--upscale-model", upscaleModel, "--tile-controlnet", tileControlNet,
 		"--scale", "2", "--steps", "4", "--tile-size", "512", "--seed", strconv.FormatUint(uint64(testSeed), 10), "--timeout", "10m")
 	registerGeneratedImageCleanup(t, binary, target, envelope.Data)
-	assertSuccessEnvelope(t, envelope, "upscale")
+	assertSuccessEnvelope(t, envelope, "upscale", "ui_sync_partial")
 	var receipt upscaleExecutionReceiptData
 	unmarshalData(t, envelope.Data, &receipt)
 	if receipt.SourceUploaded || receipt.SourceImage.ImageName != source.Image.ImageName ||
 		receipt.ResolvedSettings.Scale != 2 || receipt.ResolvedSettings.OutputWidth != 1024 || receipt.ResolvedSettings.OutputHeight != 1024 ||
 		receipt.ResolvedSettings.ModelKey != mainModel || !reflect.DeepEqual(receipt.ResolvedSettings.ComponentKeys, map[string]string{"upscale_model": upscaleModel, "tile_controlnet": tileControlNet}) ||
 		!slices.Equal(receipt.ResolvedSettings.Seeds, []uint32{testSeed}) || receipt.Queue.QueueID != "default" || receipt.Queue.BatchID == "" || len(receipt.Queue.ItemIDs) != 1 ||
-		len(receipt.Outputs) != 1 || receipt.Outputs[0].ItemID != receipt.Queue.ItemIDs[0] || receipt.Outputs[0].Seed != testSeed || len(receipt.Warnings) != 0 {
+		len(receipt.Outputs) != 1 || receipt.Outputs[0].ItemID != receipt.Queue.ItemIDs[0] || receipt.Outputs[0].Seed != testSeed || len(receipt.Warnings) != 1 ||
+		!slices.Equal(receipt.Warnings[0].Details.NotRestored, []string{"source_image", "upscale_model", "scale", "creativity", "structure", "tile_controlnet", "tile_size", "tile_overlap", "scheduler", "guidance", "vae", "board_id"}) {
 		t.Fatalf("upscale receipt = %#v", receipt)
 	}
 	assertGeneratedImageReference(t, target, receipt.Outputs[0].Image, 1024, 1024)
