@@ -3,12 +3,10 @@ package upscale
 
 import (
 	"encoding/binary"
-	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"math"
 	"path/filepath"
 	"slices"
@@ -47,45 +45,16 @@ type Request struct {
 	Components     *Components `json:"components,omitempty"`
 }
 
-// UnmarshalJSON rejects explicit nulls, which otherwise become absent optional
-// fields and silently acquire defaults. Member names are matched exactly, and
-// duplicate or unknown members are rejected at every level.
+// UnmarshalJSON decodes with v2 semantics, which also reject invalid UTF-8
+// strings. Member names are matched exactly, and duplicate or unknown members
+// are rejected at every level.
 func (request *Request) UnmarshalJSON(data []byte) error {
-	var fields map[string]jsontext.Value
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return err
-	}
-	if err := rejectNullFields(fields); err != nil {
-		return err
-	}
-	for _, nested := range []string{"source", "components"} {
-		raw, ok := fields[nested]
-		if !ok {
-			continue
-		}
-		var children map[string]jsontext.Value
-		if err := json.Unmarshal(raw, &children); err != nil {
-			return fmt.Errorf("%s: %w", nested, err)
-		}
-		if err := rejectNullFields(children); err != nil {
-			return fmt.Errorf("%s: %w", nested, err)
-		}
-	}
 	type plainRequest Request
 	var decoded plainRequest
 	if err := json.Unmarshal(data, &decoded, json.RejectUnknownMembers(true)); err != nil {
 		return err
 	}
 	*request = Request(decoded)
-	return nil
-}
-
-func rejectNullFields(fields map[string]jsontext.Value) error {
-	for _, name := range slices.Sorted(maps.Keys(fields)) {
-		if fields[name].Kind() == 'n' {
-			return fmt.Errorf("field %q cannot be null", name)
-		}
-	}
 	return nil
 }
 
