@@ -9,7 +9,8 @@
 **Verification gate:**
 - Public-seam CLI tests for `generate`, `recall`, and `models install` prove:
   - a top-level null (for example `seed`, `model`, or `move`) → exit 2, `invalid_request`, zero network requests;
-  - a nested null (for example `components.vae` or `source.file_id`) → the same.
+  - a nested null (for example `components.vae` or `source.file_id`) → the same;
+  - a document with several nulls names the same field on every run.
 - The existing `upscale` null tests still pass unchanged.
 - `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify` pass.
 - No live InvokeAI check is required: every new rejection happens before network access. State this in the pull request.
@@ -18,7 +19,7 @@
 - Scope: a fixed base/head diff.
 - The reviewer independently checks every Request Document field of the four commands and confirms that no field gives `null` a documented meaning.
 - The reviewer confirms that the V1 spec text, the tests, and the four commands agree, and that the `upscale` rule in §13 now refers to the general rule without changing it.
-- Blocking findings: any command accepting a null at any depth; a rejection after a network request; a changed error code or exit status; spec text that disagrees with the tests.
+- Blocking findings: any command accepting a null at any depth; an error that names a different field between runs of the same document; a rejection after a network request; a changed error code or exit status; spec text that disagrees with the tests.
 
 **Escalate when:** A Request Document field needs `null` as a meaningful value. Rejecting nulls changes the behavior of an operation flag. Repeated repair loops fail.
 
@@ -27,5 +28,6 @@
 **Status:** ready-for-agent
 
 - [ ] Explicit nulls are rejected before network access for `generate`, `recall`, and `models install`, at every depth
+- [ ] A document with several nulls reports the same field on every run
 - [ ] `upscale` null behavior is unchanged
 - [ ] V1 §8.1 records the general rule and §13 refers to it
