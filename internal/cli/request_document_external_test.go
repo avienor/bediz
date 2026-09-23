@@ -208,3 +208,24 @@ func TestRequestDocumentsRejectNullListElements(t *testing.T) {
 		})
 	}
 }
+
+// A Request Document is a JSON object. A bare null would otherwise decode as an
+// empty request and silently run an unfiltered query.
+func TestRequestDocumentsMustBeObjects(t *testing.T) {
+	for _, command := range [][]string{{"models", "list"}, {"queue", "list"}, {"images", "list"}} {
+		name := strings.Join(command, " ")
+		t.Run(name+"/object document reaches InvokeAI", func(t *testing.T) {
+			if requests, _, _ := runRequestDocument(t, command, `{"schema_version":1}`); requests == 0 {
+				t.Fatal("object document sent no request; the rejection cases would prove nothing")
+			}
+		})
+		for _, document := range []string{`null`, `[]`, `"request"`, `1`} {
+			t.Run(name+"/"+document, func(t *testing.T) {
+				requests, exitCode, stdout := runRequestDocument(t, command, document)
+				if exitCode != result.ExitInvalidRequest || requests != 0 || requestDocumentError(t, stdout).Code != result.CodeInvalidRequest {
+					t.Fatalf("exit code = %d, requests = %d, stdout = %q", exitCode, requests, stdout)
+				}
+			})
+		}
+	}
+}

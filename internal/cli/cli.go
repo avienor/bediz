@@ -130,6 +130,9 @@ func (c *CLI) loadRequestDocument(path string, target any) error {
 	if err != nil {
 		return fmt.Errorf("decode request document: %w", err)
 	}
+	if document.Kind() != '{' {
+		return errors.New("request document must be a JSON object")
+	}
 	document = document.Clone()
 	if _, err := decoder.ReadToken(); !errors.Is(err, io.EOF) {
 		if err != nil {

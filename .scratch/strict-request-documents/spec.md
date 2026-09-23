@@ -18,6 +18,7 @@ The following applies to every Request Document, at every nesting depth:
 - A repeated member name is `invalid_request`.
 - An explicit `null` member value or list element is `invalid_request`. An optional field is omitted, never null.
 - A document that is not exactly one JSON value remains `invalid_request`.
+- A document that is not a JSON object, including a bare `null`, is `invalid_request`.
 
 All of these checks fail with `invalid_request` (exit status 2) before any network request. Valid documents keep their current meaning. Operation flags are not affected.
 
@@ -31,5 +32,6 @@ All of these checks fail with `invalid_request` (exit status 2) before any netwo
 1. `issues/01-exact-request-document-members.md`
 2. `issues/02-reject-explicit-null-request-values.md`
 3. `issues/03-reject-null-list-elements.md`
+4. `issues/04-request-documents-are-objects.md`
 
 Both tickets start after the `generative-upscale` pull request is merged and this branch is rebased onto `master`, so the `upscale` path is covered.
