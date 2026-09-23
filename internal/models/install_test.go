@@ -684,6 +684,39 @@ func TestProtectedStarterArtifactDependencyNeedsDownloadTokenBeforeMutation(t *t
 	}
 }
 
+func TestProtectedStarterArtifactDependencyWithDownloadTokenDoesNotNeedInvokeAILogin(t *testing.T) {
+	var posts atomic.Int32
+	client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}},"/api/v2/models/starter_models":{"get":{"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/StarterModelResponse"}}}}}}},"/api/v2/models/hugging_face":{"get":{}}}}`))
+		case "/api/v2/models/starter_models":
+			_, _ = w.Write([]byte(`{"starter_models":[{"source":"https://huggingface.co/sample/main/resolve/main/main.safetensors","is_installed":false,"dependencies":[{"source":"https://huggingface.co/sample/gated/resolve/main/dep.safetensors","is_installed":false}]}],"starter_bundles":{}}`))
+		case "/api/v2/models/install":
+			if r.URL.Query().Get("access_token") != "download-secret" {
+				t.Errorf("install request did not carry the download token")
+			}
+			posts.Add(1)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":7,"status":"waiting"}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	})
+	installer := models.Installer{Backend: client, PublicRepositoryClient: &http.Client{Transport: installTransportFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() == "https://huggingface.co/api/models/sample/gated" {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"gated":"manual","private":false}`)), Header: make(http.Header)}, nil
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"gated":false,"private":false}`)), Header: make(http.Header)}, nil
+	})}}
+	got, err := installer.Install(t.Context(), models.InstallRequest{SchemaVersion: 1, Source: models.InstallSource{Type: "starter", Reference: "https://huggingface.co/sample/main/resolve/main/main.safetensors"}, SourceToken: "download-secret"})
+	if err != nil || posts.Load() != 2 || len(got.Jobs) != 2 || got.Jobs[0].Role != "dependency" || got.Jobs[1].Role != "starter" {
+		t.Fatalf("error=%v posts=%d result=%#v", err, posts.Load(), got)
+	}
+}
+
 func TestStarterRepositoryWithoutOneSupportedArtifactFailsBeforeMutation(t *testing.T) {
 	var posts atomic.Int32
 	client := installClient(t, func(w http.ResponseWriter, r *http.Request) {
