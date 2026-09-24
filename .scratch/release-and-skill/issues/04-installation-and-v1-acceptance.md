@@ -22,7 +22,7 @@
 
 **Permanent records:** V1 spec §19 and §21 record the supported installation paths. README and `INSTALLATION.md` are added or updated. Any finding from the acceptance run is recorded by reopening ticket 02 or updating the spec.
 
-**Status:** ready-for-agent
+**Status:** in-progress (fresh-agent walkthrough and acceptance run left to the user)
 
 ## Accepted behavior
 
@@ -32,8 +32,32 @@
 
 - [ ] README installation section is verified on Linux
 - [ ] `INSTALLATION.md` passes a fresh-agent walkthrough
-- [ ] Tag-pinned skill installation is confirmed, and the skill and binary versions match
+- [x] Tag-pinned skill installation is confirmed, and the skill and binary versions match
 - [ ] A skill-driven end-to-end generation succeeds live
 - [ ] The consent behavior for a missing model is observed
 - [ ] `doctor` and the capability matrix agree, and the released archives are reproducible
-- [ ] Spec §19 and §21 are updated
+- [x] Spec §19 and §21 are updated
+
+## Comments
+
+**2026-09-24, documentation and release candidate:**
+
+- **Documents:** the README has an Install section. `INSTALLATION.md` is at the repository root. Spec §21 records the two supported installation paths and what `INSTALLATION.md` makes an agent do, and §19 records the `-g` global form of the tag-pinned skill command. A two-axis review led to these fixes:
+  - README uses `$TAG` in the `go install` and skill commands.
+  - `INSTALLATION.md` no longer shows a token command.
+  - It says where the `doctor` report is when `ok` is `false`: `error.details.report`.
+  - A missing Node.js no longer ends the whole installation.
+- **Release candidate:** the user approved `v1.0.0-rc.1`. Commit 85af9f3 sets `metadata.bediz-version: v1.0.0-rc.1`, and `go run ./tools/release -check v1.0.0-rc.1` passed. Workflow run 36019536669 published a prerelease that is not a draft, with exactly the three archives and `SHA256SUMS`.
+- **Checksums and reproducibility:** in a scratch directory, the README's download and verify lines for Linux ran as written with `TAG=v1.0.0-rc.1`, and `sha256sum -c` reported `OK`. The published `SHA256SUMS` is byte-identical to a local `go run ./tools/release v1.0.0-rc.1` build. The extracted binary reports `v1.0.0-rc.1`, commit `85af9f3b…`, and date `2026-09-24T15:20:58Z`.
+- **Latest release:** with only a prerelease published, `releases/latest` redirects to `/releases`. `INSTALLATION.md` step 2 stops there and asks the user to name a tag.
+- **Tag-pinned skill:** in a scratch project, `npx skills add https://github.com/avienor/bediz/tree/v1.0.0-rc.1/skills/bediz -y` (skills 1.7.0) ran. It installed `.agents/skills/bediz` and symlinked it for Claude Code. The installed `SKILL.md` has git blob `c4deea8a…`, equal to `v1.0.0-rc.1:skills/bediz/SKILL.md`. `origin/master` has no skill yet, and `skills-lock.json` records `"ref": "v1.0.0-rc.1"`. `npx skills list --json` reports the path, and `metadata.bediz-version` is `v1.0.0-rc.1`, which equals the binary's version.
+- **Live gate:** `bediz doctor --json` reports `ready: true` with no issues on InvokeAI 6.14.1. `BEDIZ_E2E_URL=http://127.0.0.1:9090 go test -count=1 -v ./e2e -run '^TestLiveGate$'` passed with `live E2E: VERIFIED`.
+- **Verification:** `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify` pass.
+- **Not run:**
+  - The user will run the fresh-agent walkthrough of `INSTALLATION.md` and the skill-driven acceptance generation, including the missing-model consent case.
+  - The README steps from `tar` onward were not run, because they install into the user's `~/.local/bin`.
+  - The macOS and Windows steps are unverified live: no such machine is available.
+- **Walkthrough prompts:** in a fresh session, in an empty project directory:
+  1. "Read https://github.com/avienor/bediz/blob/master/INSTALLATION.md and install Bediz v1.0.0-rc.1." Until the branch is merged, use the tag URL `https://github.com/avienor/bediz/blob/v1.0.0-rc.1/INSTALLATION.md`.
+  2. In a new session: "Make an image of a lighthouse on a cliff during a storm."
+  3. "Make a photo with Stable Diffusion 3.5 Large." The model is not installed. Expect the source, size, and license, and no installation without consent.
