@@ -175,6 +175,10 @@ func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
 }
 
 func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, extra map[string]any) int {
+	var warnings []result.Warning
+	if preference, ok := errors.AsType[*upscale.ProfilePreferenceError](err); ok {
+		warnings = preference.Warnings
+	}
 	fail := func(code, message string, details map[string]any) int {
 		if len(extra) > 0 {
 			details = maps.Clone(details)
@@ -183,9 +187,15 @@ func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, e
 			}
 			maps.Copy(details, extra)
 		}
-		return c.fail(operationName, jsonOutput, code, message, details)
+		return c.failWithWarnings(operationName, jsonOutput, code, message, details, warnings)
 	}
 	if profile, ok := errors.AsType[*generation.ProfileLoadError](err); ok {
+		if errors.Is(profile.Err, os.ErrNotExist) {
+			return fail(result.CodeNotFound, fmt.Sprintf("profile %q was not found", profile.Name), nil)
+		}
+		return fail(result.CodeInvalidConfiguration, profile.Error(), map[string]any{"name": profile.Name})
+	}
+	if profile, ok := errors.AsType[*upscale.ProfileLoadError](err); ok {
 		if errors.Is(profile.Err, os.ErrNotExist) {
 			return fail(result.CodeNotFound, fmt.Sprintf("profile %q was not found", profile.Name), nil)
 		}

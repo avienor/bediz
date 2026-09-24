@@ -374,8 +374,12 @@ func (c *CLI) writeResultWithWarnings(operation string, data any, warnings []res
 // mode, a diagnostic line on standard error otherwise. The exit status follows
 // from the structured error code.
 func (c *CLI) fail(operation string, jsonOutput bool, code, message string, details map[string]any) int {
+	return c.failWithWarnings(operation, jsonOutput, code, message, details, nil)
+}
+
+func (c *CLI) failWithWarnings(operation string, jsonOutput bool, code, message string, details map[string]any, warnings []result.Warning) int {
 	if jsonOutput {
-		err := result.WriteJSON(c.stdout, result.Failure(operation, result.Error{Code: code, Message: message, Details: details}, nil))
+		err := result.WriteJSON(c.stdout, result.Failure(operation, result.Error{Code: code, Message: message, Details: details}, warnings))
 		if err != nil {
 			fmt.Fprintf(c.stderr, "write JSON error: %v\n", err)
 			return result.ExitInvokeAIFailure
@@ -383,6 +387,9 @@ func (c *CLI) fail(operation string, jsonOutput bool, code, message string, deta
 		return result.ExitStatus(code)
 	}
 	fmt.Fprintf(c.stderr, "%s: %s\n", code, message)
+	for _, warning := range warnings {
+		fmt.Fprintf(c.stderr, "%s: %s\n", warning.Code, warning.Message)
+	}
 	return result.ExitStatus(code)
 }
 

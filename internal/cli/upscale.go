@@ -21,6 +21,7 @@ type upscaleOptions struct {
 	image          string
 	imagePath      string
 	model          string
+	profile        string
 	prompt         string
 	negativePrompt string
 	scale          int
@@ -57,6 +58,7 @@ func (c *CLI) newUpscaleCommand(exitCode *int, jsonOutput *bool) *cobra.Command 
 	command.Flags().StringVar(&options.image, "image", "", "existing InvokeAI image name")
 	command.Flags().StringVar(&options.imagePath, "image-path", "", "absolute local source image path to upload")
 	command.Flags().StringVar(&options.model, "model", "", "SD1.5 or SDXL main model key or unique name")
+	command.Flags().StringVar(&options.profile, "profile", "", "local Generation Profile name")
 	command.Flags().StringVar(&options.prompt, "prompt", "", "positive prompt")
 	command.Flags().StringVar(&options.negativePrompt, "negative-prompt", "", "negative prompt")
 	command.Flags().IntVar(&options.scale, "scale", 0, "upscale factor: 2, 4, or 8")
@@ -86,7 +88,7 @@ func (c *CLI) executeUpscale(ctx context.Context, jsonOutput bool, command *cobr
 		return c.fail(result.OperationUpscale, jsonOutput, result.CodeInvalidRequest, "--image and --image-path cannot be combined", nil)
 	}
 	operationFlags := []string{
-		"image", "image-path", "model", "prompt", "negative-prompt", "scale", "creativity", "structure", "steps",
+		"image", "image-path", "model", "profile", "prompt", "negative-prompt", "scale", "creativity", "structure", "steps",
 		"scheduler", "guidance", "seed", "tile-size", "tile-overlap", "board", "upscale-model", "tile-controlnet", "vae",
 	}
 	fieldsSet := false
@@ -101,6 +103,7 @@ func (c *CLI) executeUpscale(ctx context.Context, jsonOutput bool, command *cobr
 			request.Source = upscale.Source{Type: "path", Reference: options.imagePath}
 		}
 		request.Model = options.model
+		request.Profile = options.profile
 		request.PositivePrompt = options.prompt
 		request.NegativePrompt = options.negativePrompt
 		request.BoardID = options.boardID

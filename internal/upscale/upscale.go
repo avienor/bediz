@@ -29,7 +29,8 @@ type Components struct {
 type Request struct {
 	SchemaVersion  int         `json:"schema_version"`
 	Source         Source      `json:"source"`
-	Model          string      `json:"model"`
+	Model          string      `json:"model,omitempty"`
+	Profile        string      `json:"profile,omitempty"`
 	PositivePrompt string      `json:"positive_prompt,omitempty"`
 	NegativePrompt string      `json:"negative_prompt,omitempty"`
 	Scale          *int        `json:"scale,omitempty"`
@@ -73,6 +74,10 @@ type Resolution struct {
 
 // ValidateRequest performs all checks that must complete without network access.
 func ValidateRequest(request Request) error {
+	return validateRequest(request, true)
+}
+
+func validateRequest(request Request, requireModel bool) error {
 	if request.SchemaVersion != 1 {
 		return operation.InvalidRequest(fmt.Sprintf("unsupported request schema version %d", request.SchemaVersion))
 	}
@@ -88,7 +93,7 @@ func ValidateRequest(request Request) error {
 	default:
 		return operation.InvalidRequest("source requires an existing InvokeAI image or an absolute local image path")
 	}
-	if request.Model == "" {
+	if requireModel && request.Model == "" {
 		return operation.InvalidRequest("model is required")
 	}
 	if request.Scale != nil && !slices.Contains([]int{2, 4, 8}, *request.Scale) {

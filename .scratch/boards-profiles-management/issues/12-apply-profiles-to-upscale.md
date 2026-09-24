@@ -14,7 +14,7 @@
 
 **Permanent records:** V1 spec §13.1 through §13.3 record the `profile` field, the `--profile` flag, and the receipt fields. Tests record the contract.
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Accepted behavior
 
@@ -22,6 +22,12 @@
 - A compatible `tile_controlnet` preference counts as the caller's explicit Tile choice. Without a usable preference, Bediz keeps the rule of never choosing automatically (`selection_required` with kind `tile_controlnet`).
 - The profile model's base still has to be `sd-1` or `sdxl` with variant `normal`.
 
-- [ ] Upscale applies profiles with the ticket 11 contract
-- [ ] Upload ordering and the Tile ControlNet rule are preserved
-- [ ] Spec §13 is updated
+- [x] Upscale applies profiles with the ticket 11 contract
+- [x] Upload ordering and the Tile ControlNet rule are preserved
+- [x] Spec §13 is updated
+
+## Comments
+
+- 2026-09-24: CLI-seam tests cover SDXL and SD1.5 settings precedence, model selection, profile errors before network access, compatible and skipped component preferences, Tile selection after a skipped preference, receipt fields and warnings, and local source upload ordering.
+- 2026-09-24: Live InvokeAI 6.14.1 verification: `curl -fsS --max-time 5 http://127.0.0.1:9090/api/v1/app/version` returned `6.14.1`; `go run ./cmd/bediz models list --url http://127.0.0.1:9090 --json` confirmed the SD1.5 main, Spandrel upscale model, and SD1.5 Tile ControlNet. With isolated `XDG_CONFIG_HOME`, `go run ./cmd/bediz profiles create --request - --json` created `upscale_check_12` with those model keys, scale 2, steps 10, tile size 512, and overlap 32. `go run ./cmd/bediz upscale --request - --url http://127.0.0.1:9090 --timeout 5m --json` used that profile and existing source `4222e92d-6b8c-43a9-8a61-94e170fbd8ec.png` at 512×512. It completed queue item 92 with 1024×1024 image `0c2562c1-66af-4086-960c-5572ad29b3fa.png`. Both receipt profile fields were present; the sole warning was `ui_sync_partial` in receipt and envelope. The output image remains in the user's gallery.
+- 2026-09-24: `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify` passed.
