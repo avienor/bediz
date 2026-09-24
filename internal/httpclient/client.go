@@ -160,20 +160,20 @@ func (c *Client) GetJSON(ctx context.Context, path string, target any) error {
 	return c.doJSON(ctx, http.MethodGet, path, nil, target, true)
 }
 
+// DoJSON sends a JSON request. A GET or HEAD is a safe read; any other method
+// is a mutation, sent once without following redirects.
 func (c *Client) DoJSON(ctx context.Context, method, path string, requestBody, target any) error {
-	safeRead := method == http.MethodGet || method == http.MethodHead
-	return c.doJSON(ctx, method, path, requestBody, target, safeRead)
+	if method == http.MethodGet || method == http.MethodHead {
+		return c.doJSON(ctx, method, path, requestBody, target, true)
+	}
+	return c.withoutRedirects().doJSON(ctx, method, path, requestBody, target, false)
 }
 
 // DoJSONPrivate sends a mutation without exposing its URL, backend response
-// body, or transport error through any returned error. It refuses redirects so
-// a credential cannot be forwarded and the mutation cannot be replayed.
+// body, or transport error through any returned error. Like every mutation it
+// refuses redirects, so a credential cannot be forwarded either.
 func (c *Client) DoJSONPrivate(ctx context.Context, method, path string, requestBody, target any) error {
-	privateClient := *c
-	privateHTTP := *c.http
-	privateHTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	privateClient.http = &privateHTTP
-	err := privateClient.doJSON(ctx, method, path, requestBody, target, false)
+	err := c.withoutRedirects().doJSON(ctx, method, path, requestBody, target, false)
 	if err == nil {
 		return nil
 	}
@@ -193,6 +193,8 @@ func (c *Client) QueryJSON(ctx context.Context, path string, requestBody, target
 	return c.doJSON(ctx, http.MethodPost, path, requestBody, target, true)
 }
 
+// PostStream sends a streamed mutation, such as an upload, once without
+// following redirects.
 func (c *Client) PostStream(ctx context.Context, path string, body io.Reader, contentType string, target any) error {
 	requestURL, err := c.resolve(path)
 	if err != nil {
@@ -209,7 +211,7 @@ func (c *Client) PostStream(ctx context.Context, path string, body io.Reader, co
 		request.Header.Set("Authorization", "Bearer "+c.token)
 	}
 
-	response, err := c.http.Do(request)
+	response, err := c.withoutRedirects().http.Do(request)
 	if err != nil {
 		return &OutcomeUnknownError{Method: http.MethodPost, URL: requestURL, Err: err}
 	}
@@ -304,6 +306,18 @@ func (c *Client) doJSON(ctx context.Context, method, path string, requestBody, t
 		return nil
 	}
 	return errors.New("request attempts exhausted")
+}
+
+// withoutRedirects returns a copy of the client that answers a redirect with
+// the redirect response itself. Following one would resend a mutation, or turn
+// it into a GET after 301, 302, or 303, and report that GET's answer as the
+// mutation's.
+func (c *Client) withoutRedirects() *Client {
+	mutationClient := *c
+	mutationHTTP := *c.http
+	mutationHTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	mutationClient.http = &mutationHTTP
+	return &mutationClient
 }
 
 func (c *Client) do(ctx context.Context, method, requestURL string, body []byte) (*http.Response, error) {

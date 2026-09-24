@@ -317,6 +317,53 @@ func TestPrivateMutationDoesNotForwardTokenOnRedirect(t *testing.T) {
 	}
 }
 
+// Following a redirect would resend a mutation, or turn it into a GET after
+// 301, 302, or 303, so a mutation answered with a redirect is a conclusive
+// failure that names the redirect status. Safe reads still follow redirects.
+func TestMutationDoesNotFollowRedirects(t *testing.T) {
+	for _, status := range []int{http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var calls, forwarded atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/forwarded" {
+					forwarded.Add(1)
+					_, _ = w.Write([]byte(`{}`))
+					return
+				}
+				calls.Add(1)
+				w.Header().Set("Location", "/forwarded")
+				w.WriteHeader(status)
+			}))
+			defer server.Close()
+			client, err := New(server.URL, "", Options{HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			mutations := map[string]func() error{
+				"json": func() error { return client.DoJSON(t.Context(), http.MethodPut, "/mutate", nil, &struct{}{}) },
+				"stream": func() error {
+					return client.PostStream(t.Context(), "/upload", strings.NewReader("data"), "text/plain", &struct{}{})
+				},
+			}
+			for name, mutate := range mutations {
+				calls.Store(0)
+				forwarded.Store(0)
+				err := mutate()
+				httpErr, ok := errors.AsType[*HTTPError](err)
+				if !ok || httpErr.StatusCode != status || calls.Load() != 1 || forwarded.Load() != 0 {
+					t.Errorf("%s: error = %v, calls = %d, forwarded = %d, want conclusive %d without following", name, err, calls.Load(), forwarded.Load(), status)
+				}
+			}
+
+			forwarded.Store(0)
+			if err := client.GetJSON(t.Context(), "/read", &struct{}{}); err != nil || forwarded.Load() != 1 {
+				t.Fatalf("safe read error = %v, forwarded = %d, want the redirect followed", err, forwarded.Load())
+			}
+		})
+	}
+}
+
 func TestSourceTokenTargetAllowsLoopbackAndHTTPS(t *testing.T) {
 	for _, test := range []struct {
 		baseURL string
