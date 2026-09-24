@@ -1,6 +1,6 @@
 # Live verification against local InvokeAI
 
-Read this before exercising Bediz against the local InvokeAI baseline. The opt-in E2E commands and what they cover are in `README.md`; this file records the machine, its limits, and the recurring traps.
+Read this before exercising Bediz against the local InvokeAI baseline. The opt-in E2E commands and what they cover are in `CONTRIBUTING.md`; this file records the machine, its limits, and the recurring traps.
 
 ## Baseline
 
