@@ -24,9 +24,18 @@ jobs:
         with:
           persist-credentials: false
 
+      # setup-go's go-version-file reads the go directive, not the toolchain
+      # directive, so the pinned toolchain is passed explicitly.
+      - name: Read the pinned Go toolchain
+        id: toolchain
+        run: |
+          version=$(awk '$1 == "toolchain" { sub(/^go/, "", $2); print $2 }' go.mod)
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: ${{ steps.toolchain.outputs.version }}
           cache: false
 
       - name: Check the tag and the agent skill version
