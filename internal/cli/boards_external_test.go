@@ -541,7 +541,7 @@ func TestBoardsCreateSendsMutationOnceOnEveryFailure(t *testing.T) {
 			create: func(w http.ResponseWriter, _ *http.Request) {
 				http.Error(w, "unavailable", http.StatusServiceUnavailable)
 			},
-			wantCode: "invokeai_operation_failed",
+			wantCode: "outcome_unknown",
 		},
 		{
 			name: "lost response",

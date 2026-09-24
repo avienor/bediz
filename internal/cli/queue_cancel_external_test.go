@@ -243,7 +243,7 @@ func TestQueueCancelSendsCancellationOnceOnEveryFailure(t *testing.T) {
 				http.Error(w, "unavailable", http.StatusServiceUnavailable)
 			},
 			wantExit: result.ExitInvokeAIFailure,
-			wantCode: "invokeai_operation_failed",
+			wantCode: "outcome_unknown",
 		},
 		{
 			name: "lost response",

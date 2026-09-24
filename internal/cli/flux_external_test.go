@@ -245,7 +245,7 @@ func TestGenerateFLUXRecallFailureKeepsReceiptAndUnknownEnqueueIsNotRetried(t *t
 					_ = json.MarshalWrite(w, map[string]any{"queue_id": "default", "enqueued": 1, "requested": 1, "item_ids": []int{17}, "batch": map[string]any{"batch_id": "flux-batch"}})
 				case "/api/v1/recall/default":
 					recalls.Add(1)
-					http.Error(w, "unavailable", http.StatusServiceUnavailable)
+					http.Error(w, "Recall failed", http.StatusInternalServerError)
 				default:
 					http.NotFound(w, r)
 				}

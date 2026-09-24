@@ -82,11 +82,14 @@ func (e *InvalidResponseError) Unwrap() error { return e.Err }
 
 // OutcomeUnknownError means a state-changing request may have reached InvokeAI,
 // but Bediz did not receive a conclusive response. Callers must inspect remote
-// state before deciding whether to submit the operation again.
+// state before deciding whether to submit the operation again. StatusCode is
+// the gateway status that made the answer inconclusive, or zero when no status
+// was received.
 type OutcomeUnknownError struct {
-	Method string
-	URL    string
-	Err    error
+	Method     string
+	URL        string
+	StatusCode int
+	Err        error
 }
 
 func (e *OutcomeUnknownError) Error() string {
@@ -177,8 +180,8 @@ func (c *Client) DoJSONPrivate(ctx context.Context, method, path string, request
 	if httpErr, ok := errors.AsType[*HTTPError](err); ok {
 		return &HTTPError{StatusCode: httpErr.StatusCode, Status: fmt.Sprintf("%d %s", httpErr.StatusCode, http.StatusText(httpErr.StatusCode))}
 	}
-	if _, ok := errors.AsType[*OutcomeUnknownError](err); ok {
-		return &OutcomeUnknownError{Method: method, Err: errors.New("private request response was inconclusive")}
+	if unknown, ok := errors.AsType[*OutcomeUnknownError](err); ok {
+		return &OutcomeUnknownError{Method: method, StatusCode: unknown.StatusCode, Err: errors.New("private request response was inconclusive")}
 	}
 	return &InvalidResponseError{Err: errors.New("private request could not be prepared")}
 }
@@ -214,6 +217,9 @@ func (c *Client) PostStream(ctx context.Context, path string, body io.Reader, co
 	_ = response.Body.Close()
 	if readErr != nil {
 		return &OutcomeUnknownError{Method: http.MethodPost, URL: requestURL, Err: readErr}
+	}
+	if gatewayStatus(response.StatusCode) {
+		return gatewayOutcomeUnknown(http.MethodPost, requestURL, response)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return &HTTPError{StatusCode: response.StatusCode, Status: response.Status, Body: compactBody(responseBody)}
@@ -268,13 +274,16 @@ func (c *Client) doJSON(ctx context.Context, method, path string, requestBody, t
 			}
 			return &InvalidResponseError{URL: requestURL, Err: readErr}
 		}
+		if !safeRead && gatewayStatus(response.StatusCode) {
+			return gatewayOutcomeUnknown(method, requestURL, response)
+		}
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
 			httpErr := &HTTPError{
 				StatusCode: response.StatusCode,
 				Status:     response.Status,
 				Body:       compactBody(responseBody),
 			}
-			if attempt+1 < attempts && retryableStatus(response.StatusCode) {
+			if attempt+1 < attempts && gatewayStatus(response.StatusCode) {
 				if err := c.retryWait(ctx, defaultRetryWait*time.Duration(attempt+1)); err != nil {
 					return err
 				}
@@ -360,8 +369,19 @@ func compactBody(body []byte) string {
 	return value
 }
 
-func retryableStatus(status int) bool {
+// gatewayStatus reports a 502, 503, or 504 answer. InvokeAI 6.14.1 answers
+// none of the routes Bediz uses with these statuses, so they come from an
+// intermediary: a safe read may be retried, and a mutation may already have
+// been forwarded, which makes its outcome unknown.
+func gatewayStatus(status int) bool {
 	return status == http.StatusBadGateway || status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout
+}
+
+func gatewayOutcomeUnknown(method, requestURL string, response *http.Response) *OutcomeUnknownError {
+	return &OutcomeUnknownError{
+		Method: method, URL: requestURL, StatusCode: response.StatusCode,
+		Err: fmt.Errorf("gateway answered %s", response.Status),
+	}
 }
 
 func wait(ctx context.Context, duration time.Duration) error {

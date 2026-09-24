@@ -132,7 +132,7 @@ func TestUpscaleRecallFailurePreservesSuccessfulReceipt(t *testing.T) {
 						_ = connection.Close()
 						return
 					}
-					http.Error(w, "Recall unavailable", http.StatusServiceUnavailable)
+					http.Error(w, "Recall failed", http.StatusInternalServerError)
 				case "/api/v1/queue/default/i/19":
 					polls.Add(1)
 					_ = json.MarshalWrite(w, map[string]any{

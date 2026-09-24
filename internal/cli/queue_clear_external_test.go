@@ -141,7 +141,7 @@ func TestQueueClearSendsClearOnceOnEveryFailure(t *testing.T) {
 			clear: func(w http.ResponseWriter, _ *http.Request) {
 				http.Error(w, "unavailable", http.StatusServiceUnavailable)
 			},
-			wantCode: "invokeai_operation_failed",
+			wantCode: "outcome_unknown",
 		},
 		{
 			name: "lost response",

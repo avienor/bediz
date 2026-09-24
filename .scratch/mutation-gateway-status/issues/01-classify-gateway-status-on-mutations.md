@@ -4,7 +4,7 @@
 
 **Blocked by:** None.
 
-**Status:** needs-triage
+**Status:** done
 
 ## Problem
 
@@ -33,3 +33,9 @@ Options 2 and 3 change public behavior of shipped operations and need a V1 spec 
 ### 2026-09-24
 
 - Raised by the independent review of `boards create` (ticket `boards-profiles-management/02`). Deferred from that slice because it changes shipped operations; `boards create` is already safe to repeat.
+
+### 2026-09-24 decision
+
+- Decided: option 3, recorded in ADR-0020 and V1 spec §17. InvokeAI 6.14.1 answers none of the routes Bediz mutates with 502, 503, or 504. Its only 503 is on the image-move route, which Bediz does not use. So these statuses always come from an intermediary, and some proxies answer 503 after an upstream reset.
+- `httpclient` returns `OutcomeUnknownError` with the status for a gateway status on `DoJSON` and `PostStream` mutations. `DoJSONPrivate` keeps the status and nothing else. The CLI adds `details.status`.
+- CLI-seam tests cover 502, 503, and 504 for `generate`, `upscale`, `images upload`, `recall`, `models install`, and `auth huggingface login|logout`. The `boards create`, `queue cancel`, and `queue clear` failure tables have a 503 row. The Recall fixtures in the generate and upscale sync tests now answer 500, so the conclusive rejection path keeps its coverage.

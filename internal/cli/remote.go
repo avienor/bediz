@@ -186,8 +186,11 @@ func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, e
 	}
 	if submission, ok := errors.AsType[*models.StarterSubmissionError](err); ok {
 		details := map[string]any{"jobs": submission.Progress.Jobs, "skipped": submission.Progress.Skipped}
-		if _, uncertain := errors.AsType[*httpclient.OutcomeUnknownError](submission.Cause); uncertain {
+		if unknown, uncertain := errors.AsType[*httpclient.OutcomeUnknownError](submission.Cause); uncertain {
 			details["uncertain_role"] = submission.Role
+			if unknown.StatusCode != 0 {
+				details["status"] = unknown.StatusCode
+			}
 			if submission.DependencyIndex != nil {
 				details["uncertain_dependency_index"] = *submission.DependencyIndex
 			}
@@ -290,11 +293,15 @@ func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, e
 	if invalid, ok := errors.AsType[*operation.InvalidQueueResultError](err); ok {
 		return fail(result.CodeInvalidInvokeAIResponse, invalid.Error(), acceptedItemDetails(invalid.Position, invalid.ItemID, invalid.Status))
 	}
-	if _, ok := errors.AsType[*httpclient.OutcomeUnknownError](err); ok {
-		if operationName == result.OperationModelsInstall {
-			return fail(result.CodeOutcomeUnknown, "InvokeAI may have accepted the installation; inspect the current model inventory and install job list before submitting again", nil)
+	if unknown, ok := errors.AsType[*httpclient.OutcomeUnknownError](err); ok {
+		var details map[string]any
+		if unknown.StatusCode != 0 {
+			details = map[string]any{"status": unknown.StatusCode}
 		}
-		return fail(result.CodeOutcomeUnknown, "InvokeAI may have accepted the operation; inspect remote state before retrying", nil)
+		if operationName == result.OperationModelsInstall {
+			return fail(result.CodeOutcomeUnknown, "InvokeAI may have accepted the installation; inspect the current model inventory and install job list before submitting again", details)
+		}
+		return fail(result.CodeOutcomeUnknown, "InvokeAI may have accepted the operation; inspect remote state before retrying", details)
 	}
 	if errors.Is(err, context.Canceled) {
 		return fail(result.CodeInterrupted, "operation was interrupted locally", nil)

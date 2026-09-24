@@ -15,7 +15,7 @@ import (
 
 func TestFailedRecallPreservesExistingReceiptWarning(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "Recall unavailable", http.StatusServiceUnavailable)
+		http.Error(w, "Recall failed", http.StatusInternalServerError)
 	}))
 	defer server.Close()
 	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})

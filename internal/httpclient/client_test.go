@@ -189,7 +189,7 @@ func TestMutationIsNeverRetried(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
-		http.Error(w, "try again", http.StatusServiceUnavailable)
+		http.Error(w, "invalid", http.StatusUnprocessableEntity)
 	}))
 	defer server.Close()
 
@@ -198,11 +198,56 @@ func TestMutationIsNeverRetried(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = client.DoJSON(t.Context(), http.MethodPost, "/mutate", map[string]bool{"go": true}, nil)
-	if httpErr, ok := errors.AsType[*HTTPError](err); !ok || httpErr.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("error = %#v, want conclusive service unavailable failure", err)
+	if httpErr, ok := errors.AsType[*HTTPError](err); !ok || httpErr.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("error = %#v, want conclusive unprocessable entity failure", err)
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("mutation calls = %d, want 1", calls.Load())
+	}
+}
+
+// A gateway status can come from an intermediary that already forwarded the
+// mutation, so it is never conclusive for a mutation.
+func TestMutationGatewayStatusHasUnknownOutcome(t *testing.T) {
+	for _, status := range []int{http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				http.Error(w, "gateway", status)
+			}))
+			defer server.Close()
+			client, err := New(server.URL, "", Options{HTTPClient: server.Client(), Retries: 5})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			mutations := map[string]func() error{
+				"json": func() error {
+					return client.DoJSON(t.Context(), http.MethodPost, "/mutate", map[string]bool{"go": true}, nil)
+				},
+				"private": func() error {
+					return client.DoJSONPrivate(t.Context(), http.MethodPost, "/mutate", map[string]bool{"go": true}, nil)
+				},
+				"stream": func() error {
+					return client.PostStream(t.Context(), "/upload", strings.NewReader("data"), "text/plain", nil)
+				},
+			}
+			for name, mutate := range mutations {
+				calls.Store(0)
+				err := mutate()
+				unknown, ok := errors.AsType[*OutcomeUnknownError](err)
+				if !ok || unknown.StatusCode != status {
+					t.Errorf("%s: error = %#v, want OutcomeUnknownError with status %d", name, err, status)
+				}
+				if _, conclusive := errors.AsType[*HTTPError](err); conclusive {
+					t.Errorf("%s: error %v still unwraps to a conclusive HTTPError", name, err)
+				}
+				if calls.Load() != 1 {
+					t.Errorf("%s: mutation calls = %d, want 1", name, calls.Load())
+				}
+			}
+		})
 	}
 }
 
