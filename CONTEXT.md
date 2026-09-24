@@ -104,6 +104,10 @@ _Avoid_: Controller default, permission to override the user
 The user's authorization for a creative agent to download a missing model after being told its source, approximate size, and known license information. A direct request to install or use a named model already supplies this consent.
 _Avoid_: Approval for generation, blanket download permission
 
+**Execution Approval**:
+The explicit `--yes` a caller supplies for one irreversible or destructive command, such as a queue clear, a deletion, a profile replacement, or moving model files. It belongs to that execution rather than the request, so it is never a Request Document field and is still required when the request comes from a document.
+_Avoid_: Confirmation prompt, Installation Consent, approval stored in a request
+
 **Model Family**:
 A group of models that share an execution-graph shape, required component types, and compatible generation settings.
 _Avoid_: Individual checkpoint, display name
