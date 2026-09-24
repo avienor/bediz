@@ -30,38 +30,29 @@ Bediz supports InvokeAI 6.14.1 and later 6.14 releases. `bediz doctor` reports w
 
 ## Install
 
-The easiest way is to ask your agent:
+On Linux amd64 or macOS arm64 (Apple silicon):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/avienor/bediz/master/install.sh | sh
+```
+
+On Windows amd64, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/avienor/bediz/master/install.ps1 | iex
+```
+
+The script installs the latest release: it verifies the archive against the release's `SHA256SUMS`, puts `bediz` in `~/.local/bin` (`%LOCALAPPDATA%\Programs\bediz` on Windows), and installs the agent skill from the same release for your user with `npx`. Without Node.js it prints the skill command to run later. It never uses `sudo` or edits your shell profile; when the directory is not on `PATH`, it tells you what to add. Set `BEDIZ_VERSION` to install another release, such as `v1.0.0-rc.1`, and `BEDIZ_INSTALL_DIR` to use another directory.
+
+You can also ask your agent to install Bediz:
 
 > Read https://github.com/avienor/bediz/blob/master/INSTALLATION.md and install Bediz.
 
-It downloads and verifies a release, asks before changing your `PATH`, installs the agent skill, and checks your InvokeAI. The steps below are the same installation, done by hand.
-
-Choose a release tag from [GitHub Releases](https://github.com/avienor/bediz/releases). Releases exist for Linux amd64, macOS arm64, and Windows amd64. On Linux, download the archive and `SHA256SUMS`, verify the archive, and put `bediz` in `~/.local/bin`:
+With Go installed, you can build the latest release from source instead, then install the agent skill from the version `bediz version` reports:
 
 ```sh
-TAG=v1.0.0
-ARCHIVE=bediz_${TAG}_linux_amd64.tar.gz
-curl -fsSLO "https://github.com/avienor/bediz/releases/download/$TAG/$ARCHIVE"
-curl -fsSLO "https://github.com/avienor/bediz/releases/download/$TAG/SHA256SUMS"
-grep "  $ARCHIVE\$" SHA256SUMS | sha256sum -c -
-tar -xzf "$ARCHIVE" bediz
-mkdir -p ~/.local/bin
-install -m 755 bediz ~/.local/bin/bediz
-bediz version
-```
-
-Add `~/.local/bin` to `PATH` if `bediz version` is not found. On macOS, use `ARCHIVE=bediz_${TAG}_darwin_arm64.tar.gz` and `shasum -a 256 -c -` in place of `sha256sum -c -`. On Windows, download `bediz_<tag>_windows_amd64.zip` and `SHA256SUMS`, compare `Get-FileHash -Algorithm SHA256` of the zip with its line in `SHA256SUMS`, and put `bediz.exe` in a directory on `PATH`.
-
-With Go installed, you can instead build the tagged version from source:
-
-```sh
-go install "github.com/avienor/bediz/cmd/bediz@$TAG"
-```
-
-Then install the agent skill from the same tag, for the current project or, with `-g`, for your user. It needs Node.js:
-
-```sh
-npx skills add "https://github.com/avienor/bediz/tree/$TAG/skills/bediz"
+go install github.com/avienor/bediz/cmd/bediz@latest
+npx skills add https://github.com/avienor/bediz/tree/$(bediz version)/skills/bediz -g
 ```
 
 ## Usage
