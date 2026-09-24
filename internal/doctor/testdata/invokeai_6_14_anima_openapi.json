@@ -58,7 +58,8 @@
       "get": {}
     },
     "/api/v1/images/i/{image_name}": {
-      "get": {}
+      "get": {},
+      "delete": {}
     },
     "/api/v1/images/i/{image_name}/full": {
       "get": {}

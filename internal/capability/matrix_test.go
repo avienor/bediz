@@ -17,6 +17,7 @@ func TestMatrixAdvertisesOnlyImplementedOperations(t *testing.T) {
 		result.OperationImagesGet,
 		result.OperationImagesUpload,
 		result.OperationImagesDownload,
+		result.OperationImagesDelete,
 		result.OperationQueueList,
 		result.OperationQueueGet,
 		result.OperationQueueWait,

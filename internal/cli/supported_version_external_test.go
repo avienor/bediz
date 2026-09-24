@@ -31,6 +31,7 @@ func TestVersionGatedCommandsClassifyTheVersionAnswerBeforeAnyOtherRequest(t *te
 		{name: "generate", operation: "generate", args: []string{"generate", "--no-wait", "--model", "main-key", "--prompt", "test", "--seed", "7"}},
 		{name: "upscale", operation: "upscale", args: []string{"upscale", "--no-wait", "--image", "source.png", "--model", "sdxl-main", "--tile-controlnet", "tile", "--seed", "42"}},
 		{name: "images upload", operation: "images.upload", args: []string{"images", "upload", imagePath}},
+		{name: "images delete", operation: "images.delete", args: []string{"images", "delete", "one-image.png", "--yes"}},
 		{name: "recall", operation: "recall", args: []string{"recall", "--seed", "1"}},
 		{name: "models install", operation: "models.install", args: []string{"models", "install", "--source-type", "url", "--source", "https://example.org/model.safetensors"}},
 		{name: "auth huggingface login", operation: "auth.huggingface.login", stdin: "hf-version-sentinel\n", args: []string{"auth", "huggingface", "login", "--token-stdin"}},

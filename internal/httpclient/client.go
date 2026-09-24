@@ -385,11 +385,21 @@ func (c *Client) doJSON(ctx context.Context, method, path string, requestBody, t
 			return nil
 		}
 		decoder := json.NewDecoder(bytes.NewReader(responseBody))
-		if err := decoder.Decode(target); err != nil {
-			if !safeRead {
-				return &OutcomeUnknownError{Method: method, URL: requestURL, Err: fmt.Errorf("decode response: %w", err)}
+		decodeErr := decoder.Decode(target)
+		if decodeErr == nil {
+			var trailing json.RawMessage
+			if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+				decodeErr = err
+				if decodeErr == nil {
+					decodeErr = errors.New("multiple JSON values in response")
+				}
 			}
-			return &InvalidResponseError{URL: requestURL, Err: fmt.Errorf("decode response: %w", err)}
+		}
+		if decodeErr != nil {
+			if !safeRead {
+				return &OutcomeUnknownError{Method: method, URL: requestURL, Err: fmt.Errorf("decode response: %w", decodeErr)}
+			}
+			return &InvalidResponseError{URL: requestURL, Err: fmt.Errorf("decode response: %w", decodeErr)}
 		}
 		return nil
 	}

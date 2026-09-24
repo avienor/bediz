@@ -702,6 +702,12 @@ type imageDownloadOptions struct {
 	output      string
 }
 
+type imageDeleteOptions struct {
+	remoteOptions
+	requestPath string
+	yes         bool
+}
+
 func (c *CLI) newImagesCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
 	command := &cobra.Command{
 		Use:         "images",
@@ -812,6 +818,34 @@ func (c *CLI) newImagesCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
 	downloadCommand.Flags().StringVar(&downloadOptions.output, "output", "", "new local file to write; a relative path resolves against the working directory")
 	downloadCommand.Flags().StringVar(&downloadOptions.requestPath, "request", "", "read a request document from a file or standard input with -")
 	command.AddCommand(downloadCommand)
+
+	deleteOptions := imageDeleteOptions{remoteOptions: defaultRemoteOptions()}
+	deleteCommand := &cobra.Command{
+		Use:         "delete IMAGE_NAME --yes",
+		Short:       "Delete one image by its exact InvokeAI image name",
+		Args:        cobra.MaximumNArgs(1),
+		Annotations: map[string]string{operationAnnotation: result.OperationImagesDelete},
+		Run: func(cmd *cobra.Command, args []string) {
+			deleteOptions.captureRemoteFlags(cmd)
+			if deleteOptions.requestPath != "" && len(args) > 0 {
+				*exitCode = c.fail(result.OperationImagesDelete, *jsonOutput, result.CodeInvalidRequest, "image name cannot be combined with --request", nil)
+				return
+			}
+			if deleteOptions.requestPath == "" && len(args) == 0 {
+				*exitCode = c.fail(result.OperationImagesDelete, *jsonOutput, result.CodeInvalidRequest, "image name or --request is required", nil)
+				return
+			}
+			imageName := ""
+			if len(args) == 1 {
+				imageName = args[0]
+			}
+			*exitCode = c.executeImagesDelete(cmd.Context(), *jsonOutput, deleteOptions, imageName)
+		},
+	}
+	addRemoteFlags(deleteCommand, &deleteOptions.remoteOptions, requestTimeoutUsage)
+	deleteCommand.Flags().StringVar(&deleteOptions.requestPath, "request", "", "read a request document from a file or standard input with -")
+	deleteCommand.Flags().BoolVar(&deleteOptions.yes, "yes", false, "approve deleting the named image")
+	command.AddCommand(deleteCommand)
 	return command
 }
 
@@ -881,6 +915,24 @@ func (c *CLI) executeImagesDownload(ctx context.Context, jsonOutput bool, option
 		invoke:      images.Download,
 		render: func(download images.DownloadResult, w io.Writer) error {
 			_, err := fmt.Fprintf(w, "%s\t%d\t%s\n", download.Path, download.SizeBytes, download.ContentType)
+			return err
+		},
+	}
+	return execution.run(ctx, c, jsonOutput)
+}
+
+func (c *CLI) executeImagesDelete(ctx context.Context, jsonOutput bool, options imageDeleteOptions, imageName string) int {
+	execution := remoteExecution[images.DeleteRequest, images.DeleteResult]{
+		operation:   result.OperationImagesDelete,
+		connection:  options.remoteOptions,
+		request:     images.DeleteRequest{SchemaVersion: 1, ImageName: imageName},
+		requestPath: options.requestPath,
+		invoke: func(ctx context.Context, client *httpclient.Client, request images.DeleteRequest) (images.DeleteResult, error) {
+			request.Approved = options.yes
+			return images.Delete(ctx, client, request)
+		},
+		render: func(deleted images.DeleteResult, w io.Writer) error {
+			_, err := fmt.Fprintln(w, deleted.ImageName)
 			return err
 		},
 	}
