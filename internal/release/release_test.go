@@ -25,6 +25,7 @@ import (
 const commitTime = "2026-09-24T10:11:13Z"
 
 func TestBuildProducesArchivesAndChecksums(t *testing.T) {
+	requireReleaseHost(t)
 	repo := newReleaseRepo(t, runtime.Version())
 	tag(t, repo, "v1.0.0")
 	out := filepath.Join(t.TempDir(), "out")
@@ -53,6 +54,7 @@ func TestBuildProducesArchivesAndChecksums(t *testing.T) {
 }
 
 func TestBuildWritesFixedArchiveEntries(t *testing.T) {
+	requireReleaseHost(t)
 	repo := newReleaseRepo(t, runtime.Version())
 	tag(t, repo, "v1.0.0")
 	out := filepath.Join(t.TempDir(), "out")
@@ -130,6 +132,7 @@ func TestBuildWritesFixedArchiveEntries(t *testing.T) {
 }
 
 func TestBuildIsReproducibleAcrossCheckouts(t *testing.T) {
+	requireReleaseHost(t)
 	repo := newReleaseRepo(t, runtime.Version())
 	writeSkill(t, repo, "v1.0.0-rc.1")
 	commit(t, repo, "declare prerelease")
@@ -354,4 +357,15 @@ func dirNames(t *testing.T, dir string) []string {
 		names = append(names, entry.Name())
 	}
 	return names
+}
+
+// requireReleaseHost skips a successful build on a host that is not a release
+// target, because Build runs the native binary from the finished archive.
+func requireReleaseHost(t *testing.T) {
+	t.Helper()
+	switch runtime.GOOS + "/" + runtime.GOARCH {
+	case "linux/amd64", "darwin/arm64", "windows/amd64":
+	default:
+		t.Skipf("host %s/%s is not a release target", runtime.GOOS, runtime.GOARCH)
+	}
 }
