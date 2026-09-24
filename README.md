@@ -26,6 +26,44 @@ After an accepted upscale enqueue, including `--no-wait`, Bediz sends one Recall
 
 Additional management commands will be added in later V1 slices described by the specification.
 
+## Install
+
+To have an agent install Bediz, tell it: "Read https://github.com/avienor/bediz/blob/master/INSTALLATION.md and install Bediz." The steps below are the same installation, done by hand.
+
+Choose a release tag from [GitHub Releases](https://github.com/avienor/bediz/releases). Releases exist for Linux amd64, macOS arm64, and Windows amd64. On Linux, download the archive and `SHA256SUMS`, verify the archive, and put `bediz` in `~/.local/bin`:
+
+```sh
+TAG=v1.0.0
+ARCHIVE=bediz_${TAG}_linux_amd64.tar.gz
+curl -fsSLO "https://github.com/avienor/bediz/releases/download/$TAG/$ARCHIVE"
+curl -fsSLO "https://github.com/avienor/bediz/releases/download/$TAG/SHA256SUMS"
+grep "  $ARCHIVE\$" SHA256SUMS | sha256sum -c -
+tar -xzf "$ARCHIVE" bediz
+mkdir -p ~/.local/bin
+install -m 755 bediz ~/.local/bin/bediz
+bediz version
+```
+
+Add `~/.local/bin` to `PATH` if `bediz version` is not found. On macOS, use `ARCHIVE=bediz_${TAG}_darwin_arm64.tar.gz` and `shasum -a 256 -c -` in place of `sha256sum -c -`. On Windows, download `bediz_<tag>_windows_amd64.zip` and `SHA256SUMS`, compare `Get-FileHash -Algorithm SHA256` of the zip with its line in `SHA256SUMS`, and put `bediz.exe` in a directory on `PATH`.
+
+With Go installed, you can instead build the tagged version from source, with `TAG` set as above:
+
+```sh
+go install "github.com/avienor/bediz/cmd/bediz@$TAG"
+```
+
+Install the agent skill from the same tag as the binary, for the current project or, with `-g`, for your user. It needs Node.js:
+
+```sh
+npx skills add "https://github.com/avienor/bediz/tree/$TAG/skills/bediz"
+```
+
+Then check the connection to InvokeAI and what this installation supports:
+
+```sh
+bediz doctor
+```
+
 ## Build and run
 
 ```text
@@ -160,3 +198,39 @@ Empty pre-existing model, image, and queue collections are valid. The URL must n
 credentials, a query, or a fragment; an authentication requirement causes the
 gate to fail instead of accepting or printing a real token. Use `-count=1` as
 shown so a live result is never served from the Go test cache.
+
+## Release
+
+Maintainers build a release from a clean checkout of its version tag:
+
+```text
+git checkout v1.0.0
+go run ./tools/release v1.0.0
+```
+
+The command writes `bediz_<version>_linux_amd64.tar.gz`, `bediz_<version>_darwin_arm64.tar.gz`, `bediz_<version>_windows_amd64.zip`, and `SHA256SUMS` to `dist/<version>`, or to the directory given with `-out`, which must not exist yet. It refuses to run unless all of these hold:
+
+- the version has the form `vX.Y.Z` or `vX.Y.Z-<prerelease>`;
+- a tag with that exact name points to the checked-out commit;
+- the working tree has no modified files and no untracked files that Git does not ignore;
+- `metadata.bediz-version` in `skills/bediz/SKILL.md` equals the version;
+- `go env GOVERSION` equals the `toolchain` directive in `go.mod`.
+
+`go run ./tools/release -check vX.Y.Z` checks these conditions without building anything.
+
+The command must run on Linux amd64, macOS arm64, or Windows amd64. It checks the finished archive for that host by running `bediz version --json` and comparing the reported version, commit, and date with the tag. Two runs on the same tag with the pinned toolchain produce byte-identical archives, so a published release can be rebuilt and compared with `SHA256SUMS`. See [ADR-0021](docs/adr/0021-build-releases-reproducibly-with-a-repository-local-command.md) for the fixed build and archive settings.
+
+To publish a release, set `metadata.bediz-version` in `skills/bediz/SKILL.md` to the new version, commit, and push a tag with that name:
+
+```text
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Pushing a `v*` tag runs the release workflow (`.github/workflows/release.yml`). It checks the tag with `-check`, then runs `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify` with the pinned toolchain. It builds the archives with the release command and publishes them and `SHA256SUMS` as a GitHub Release for the tag. A tag with a prerelease suffix, such as `v1.0.0-rc.1`, is published as a prerelease. When any step fails, nothing is published. Merges to `master` publish nothing. The workflow never replaces an existing release. If publishing fails after the release was created, GitHub can keep a draft release for the tag; delete that draft before re-running the workflow. To check a published release, download its assets and run `sha256sum -c SHA256SUMS`. A local build of the same tag produces the same `SHA256SUMS`.
+
+A `go install github.com/avienor/bediz/cmd/bediz@vX.Y.Z` build reports `vX.Y.Z` without a commit or date. A local `go build` reports the version and VCS data that Go records, and `dev` when there is none.
+
+## License
+
+Bediz is licensed under the [Apache License 2.0](LICENSE).
