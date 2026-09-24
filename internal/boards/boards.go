@@ -21,7 +21,7 @@ type ListRequest struct {
 	IncludeArchived bool `json:"include_archived,omitempty"`
 }
 
-// Summary is the normalized Output Board. It never carries InvokeAI's owner,
+// Summary is the normalized board summary. It never carries InvokeAI's owner,
 // visibility, or other backend-only fields.
 type Summary struct {
 	BoardID        string  `json:"board_id"`
@@ -123,8 +123,11 @@ func Get(ctx context.Context, client *httpclient.Client, request GetRequest) (Ge
 		return GetResult{}, err
 	}
 
+	query := url.Values{}
+	query.Set("all", "true")
+	query.Set("include_archived", "true")
 	var visible []boardRecord
-	if err := client.GetJSON(ctx, "/api/v1/boards/?all=true&include_archived=true", &visible); err != nil {
+	if err := client.GetJSON(ctx, "/api/v1/boards/?"+query.Encode(), &visible); err != nil {
 		return GetResult{}, err
 	}
 	var matches []boardRecord
