@@ -12,7 +12,7 @@
 
 **Permanent records:** The ticket 01 ADR records publication through tagged GitHub Releases. README records the release process for maintainers.
 
-**Status:** ready-for-agent
+**Status:** awaiting-live-verification
 
 ## Accepted behavior
 
@@ -24,3 +24,29 @@
 - [ ] A tag push publishes verified archives and `SHA256SUMS`
 - [ ] Failed verification or a skill version mismatch publishes nothing
 - [ ] CI checksums match a local build
+
+## Comments
+
+**2026-09-24, implementation:** The workflow is `.github/workflows/release.yml`.
+
+- **Build job** (`contents: read`): checks out the tag without persisting credentials and installs the `go.mod` toolchain with `actions/setup-go` (`GOTOOLCHAIN=local`, no cache). It then runs `go run ./tools/release -check <tag>`, the four verification commands, and `go run ./tools/release <tag>`, verifies `sha256sum -c SHA256SUMS`, and uploads `dist/<tag>` as an artifact.
+- **Publish job** (`contents: write`, the only job that can write, runs only after a successful build): downloads the artifact, re-checks `SHA256SUMS`, and runs `gh release create <tag> --verify-tag`, adding `--prerelease` when the tag has a `-` suffix.
+- **Actions:** pinned to commit SHAs.
+- **No extra secrets:** the job needs none beyond the default token.
+
+The release command now refuses a version that differs from `metadata.bediz-version` (`ErrSkillVersionMismatch`), in `Build` and in the new `-check` mode (`release.Check`). A local build therefore enforces the same rule as CI. README, spec §21, and ADR-0021 record publication and the rule.
+
+**Local evidence** (scratch clone with a local-only tag; nothing pushed):
+- `-check v1.0.1` was refused with the skill mismatch.
+- `-check v1.0.0` passed.
+- After `go test ./...`, the tree stayed clean.
+- `go run ./tools/release v1.0.0` built all three archives, and `sha256sum -c` passed.
+- `actionlint` 1.7.12 reports no problems.
+
+**Observation:** two version tags on one commit make `go build` record the higher tag as the module version, so the build is refused. The skill-version rule prevents this for releases, because a prerelease commit and its final commit must declare different skill versions.
+
+**Pending (needs the user):** the live gate has not run.
+- Push a prerelease tag and compare its assets with a local build.
+- Confirm that a mismatched tag and a failing verification step publish nothing.
+
+Each of these pushes a tag to `avienor/bediz`, or needs a throwaway repository, and the prerelease test needs deleting afterwards.

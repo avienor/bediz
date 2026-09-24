@@ -131,11 +131,16 @@ func TestBuildWritesFixedArchiveEntries(t *testing.T) {
 
 func TestBuildIsReproducibleAcrossCheckouts(t *testing.T) {
 	repo := newReleaseRepo(t, runtime.Version())
+	writeSkill(t, repo, "v1.0.0-rc.1")
+	commit(t, repo, "declare prerelease")
 	tag(t, repo, "v1.0.0-rc.1")
 	clone := filepath.Join(t.TempDir(), "elsewhere", "clone")
 	git(t, "", "clone", "--quiet", repo, clone)
 	git(t, clone, "checkout", "--quiet", "v1.0.0-rc.1")
 
+	if err := release.Check(t.Context(), repo, "v1.0.0-rc.1"); err != nil {
+		t.Fatalf("Check() error = %v", err)
+	}
 	first := filepath.Join(t.TempDir(), "first")
 	second := filepath.Join(t.TempDir(), "second")
 	if err := release.Build(t.Context(), release.Options{Root: repo, Version: "v1.0.0-rc.1", OutDir: first}); err != nil {
@@ -183,6 +188,23 @@ func TestBuildRefusesUnreleasableState(t *testing.T) {
 			tag(t, repo, "v1.0.0")
 			writeFile(t, repo, "notes.txt", "scratch\n")
 		}, want: release.ErrDirtyTree},
+		{name: "skill declares another version", version: "v1.0.1", prepare: func(t *testing.T, repo string) { tag(t, repo, "v1.0.1") }, want: release.ErrSkillVersionMismatch},
+		{name: "skill declares the release without its prerelease suffix", version: "v1.0.0-rc.1", prepare: func(t *testing.T, repo string) { tag(t, repo, "v1.0.0-rc.1") }, want: release.ErrSkillVersionMismatch},
+		{name: "skill declares no version", version: "v1.0.0", prepare: func(t *testing.T, repo string) {
+			writeFile(t, repo, "skills/bediz/SKILL.md", "---\nname: bediz\ndescription: Drive InvokeAI.\n---\n\n# Bediz\n")
+			commit(t, repo, "drop skill version")
+			tag(t, repo, "v1.0.0")
+		}, want: release.ErrSkillVersionMismatch},
+		{name: "skill version outside metadata", version: "v1.0.0", prepare: func(t *testing.T, repo string) {
+			writeFile(t, repo, "skills/bediz/SKILL.md", "---\nname: bediz\nbediz-version: v1.0.0\n---\n\n# Bediz\n")
+			commit(t, repo, "move skill version")
+			tag(t, repo, "v1.0.0")
+		}, want: release.ErrSkillVersionMismatch},
+		{name: "missing skill", version: "v1.0.0", prepare: func(t *testing.T, repo string) {
+			git(t, repo, "rm", "--quiet", "-r", "skills")
+			commit(t, repo, "remove skill")
+			tag(t, repo, "v1.0.0")
+		}, want: release.ErrSkillVersionMismatch},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -190,6 +212,9 @@ func TestBuildRefusesUnreleasableState(t *testing.T) {
 			test.prepare(t, repo)
 			out := filepath.Join(t.TempDir(), "out")
 
+			if err := release.Check(t.Context(), repo, test.version); !errors.Is(err, test.want) {
+				t.Fatalf("Check() error = %v, want %v", err, test.want)
+			}
 			err := release.Build(t.Context(), release.Options{Root: repo, Version: test.version, OutDir: out})
 
 			if !errors.Is(err, test.want) {
@@ -206,6 +231,9 @@ func TestBuildRefusesDifferentToolchain(t *testing.T) {
 	repo := newReleaseRepo(t, "go1.99.0")
 	tag(t, repo, "v1.0.0")
 
+	if err := release.Check(t.Context(), repo, "v1.0.0"); !errors.Is(err, release.ErrToolchainMismatch) {
+		t.Fatalf("Check() error = %v, want %v", err, release.ErrToolchainMismatch)
+	}
 	err := release.Build(t.Context(), release.Options{Root: repo, Version: "v1.0.0", OutDir: filepath.Join(t.TempDir(), "out")})
 
 	if !errors.Is(err, release.ErrToolchainMismatch) {
@@ -263,9 +291,16 @@ func main() {
 	writeFile(t, repo, "LICENSE", "license text\n")
 	writeFile(t, repo, "README.md", "readme text\n")
 	writeFile(t, repo, ".gitignore", "/dist/\n")
+	writeSkill(t, repo, "v1.0.0")
 	git(t, "", "init", "--quiet", "--initial-branch=master", repo)
 	commit(t, repo, "initial")
 	return repo
+}
+
+// writeSkill writes an agent skill whose metadata declares the given Bediz version.
+func writeSkill(t *testing.T, repo, version string) {
+	t.Helper()
+	writeFile(t, repo, "skills/bediz/SKILL.md", "---\nname: bediz\ndescription: Drive InvokeAI.\nmetadata:\n  bediz-version: "+version+"\n---\n\n# Bediz\n")
 }
 
 func commit(t *testing.T, repo, message string) {

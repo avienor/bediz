@@ -175,9 +175,21 @@ The command writes `bediz_<version>_linux_amd64.tar.gz`, `bediz_<version>_darwin
 - the version has the form `vX.Y.Z` or `vX.Y.Z-<prerelease>`;
 - a tag with that exact name points to the checked-out commit;
 - the working tree has no modified files and no untracked files that Git does not ignore;
+- `metadata.bediz-version` in `skills/bediz/SKILL.md` equals the version;
 - `go env GOVERSION` equals the `toolchain` directive in `go.mod`.
 
+`go run ./tools/release -check vX.Y.Z` checks these conditions without building anything.
+
 The command must run on Linux amd64, macOS arm64, or Windows amd64. It checks the finished archive for that host by running `bediz version --json` and comparing the reported version, commit, and date with the tag. Two runs on the same tag with the pinned toolchain produce byte-identical archives, so a published release can be rebuilt and compared with `SHA256SUMS`. See [ADR-0021](docs/adr/0021-build-releases-reproducibly-with-a-repository-local-command.md) for the fixed build and archive settings.
+
+To publish a release, set `metadata.bediz-version` in `skills/bediz/SKILL.md` to the new version, commit, and push a tag with that name:
+
+```text
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Pushing a `v*` tag runs the release workflow (`.github/workflows/release.yml`). It checks the tag with `-check`, then runs `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify` with the pinned toolchain. It builds the archives with the release command and publishes them and `SHA256SUMS` as a GitHub Release for the tag. A tag with a prerelease suffix, such as `v1.0.0-rc.1`, is published as a prerelease. When any step fails, nothing is published. Merges to `master` publish nothing. The workflow never replaces an existing release. If publishing fails after the release was created, GitHub can keep a draft release for the tag; delete that draft before re-running the workflow. To check a published release, download its assets and run `sha256sum -c SHA256SUMS`. A local build of the same tag produces the same `SHA256SUMS`.
 
 A `go install github.com/avienor/bediz/cmd/bediz@vX.Y.Z` build reports `vX.Y.Z` without a commit or date. A local `go build` reports the version and VCS data that Go records, and `dev` when there is none.
 

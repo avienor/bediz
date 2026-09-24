@@ -30,14 +30,18 @@ import (
 )
 
 var (
-	ErrInvalidVersion    = errors.New("invalid release version")
-	ErrTagNotOnCommit    = errors.New("release tag does not point to the checked-out commit")
-	ErrDirtyTree         = errors.New("working tree is not clean")
-	ErrToolchainMismatch = errors.New("active Go toolchain differs from the go.mod toolchain")
-	ErrOutputExists      = errors.New("release directory already exists")
+	ErrInvalidVersion       = errors.New("invalid release version")
+	ErrTagNotOnCommit       = errors.New("release tag does not point to the checked-out commit")
+	ErrDirtyTree            = errors.New("working tree is not clean")
+	ErrToolchainMismatch    = errors.New("active Go toolchain differs from the go.mod toolchain")
+	ErrOutputExists         = errors.New("release directory already exists")
+	ErrSkillVersionMismatch = errors.New("agent skill declares a different Bediz version")
 )
 
 const versionPackage = "github.com/avienor/bediz/internal/version"
+
+// skillPath is the canonical agent skill, relative to the repository root.
+const skillPath = "skills/bediz/SKILL.md"
 
 // versionPattern accepts vX.Y.Z and vX.Y.Z-<prerelease> with semantic-version
 // identifiers and no build metadata.
@@ -87,6 +91,13 @@ type source struct {
 	time      time.Time
 	date      string // time in RFC 3339, as injected and as recorded in vcs.time
 	toolchain string
+}
+
+// Check verifies that the checkout at root can be released as version, without
+// building it. Build enforces the same preconditions.
+func Check(ctx context.Context, root, version string) error {
+	_, err := inspect(ctx, root, version)
+	return err
 }
 
 // Build verifies the checkout and writes the release archives and SHA256SUMS
@@ -166,7 +177,8 @@ func Build(ctx context.Context, opts Options) error {
 }
 
 // inspect enforces the release preconditions in order: version name, clean
-// tree, tag on the checked-out commit, and the pinned toolchain.
+// tree, tag on the checked-out commit, the agent skill's declared version, and
+// the pinned toolchain.
 func inspect(ctx context.Context, root, version string) (source, error) {
 	if !versionPattern.MatchString(version) {
 		return source{}, fmt.Errorf("%w %q: want vX.Y.Z or vX.Y.Z-<prerelease>", ErrInvalidVersion, version)
@@ -189,6 +201,13 @@ func inspect(ctx context.Context, root, version string) (source, error) {
 	if tagged != head {
 		return source{}, fmt.Errorf("%w: tag %s is %s, HEAD is %s", ErrTagNotOnCommit, version, tagged, head)
 	}
+	declared, err := skillVersion(filepath.Join(root, skillPath))
+	if err != nil {
+		return source{}, fmt.Errorf("%w: %w", ErrSkillVersionMismatch, err)
+	}
+	if declared != version {
+		return source{}, fmt.Errorf("%w: %s declares %s, release is %s", ErrSkillVersionMismatch, skillPath, declared, version)
+	}
 	seconds, err := run(ctx, root, nil, "git", "show", "--no-patch", "--format=%ct", head)
 	if err != nil {
 		return source{}, err
@@ -210,6 +229,34 @@ func inspect(ctx context.Context, root, version string) (source, error) {
 		return source{}, fmt.Errorf("%w: active %s, go.mod toolchain %s", ErrToolchainMismatch, active, pinned)
 	}
 	return source{root: root, version: version, commit: head, time: commitTime, date: commitTime.Format(time.RFC3339), toolchain: pinned}, nil
+}
+
+// skillVersion reads metadata.bediz-version from the skill's frontmatter. The
+// frontmatter is the block between the opening "---" line and the next one.
+func skillVersion(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+	if len(lines) == 0 || lines[0] != "---" {
+		return "", fmt.Errorf("%s has no frontmatter", path)
+	}
+	inMetadata := false
+	for _, line := range lines[1:] {
+		if line == "---" {
+			break
+		}
+		if !strings.HasPrefix(line, " ") {
+			inMetadata = strings.TrimSpace(line) == "metadata:"
+			continue
+		}
+		key, value, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if inMetadata && ok && key == "bediz-version" {
+			return strings.Trim(strings.TrimSpace(value), `"'`), nil
+		}
+	}
+	return "", fmt.Errorf("%s frontmatter has no metadata.bediz-version", path)
 }
 
 func pinnedToolchain(goMod string) (string, error) {
