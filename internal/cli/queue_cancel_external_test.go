@@ -26,6 +26,13 @@ type queueCancelServer struct {
 // request and every cancel request, and records any other request as an error.
 func newQueueCancelServer(t *testing.T, version string, cancel func(w http.ResponseWriter, itemID int)) *queueCancelServer {
 	t.Helper()
+	return newQueueCancelServerWithImages(t, version, cancel, nil)
+}
+
+// newQueueCancelServerWithImages is newQueueCancelServer with image detail
+// reads answered by image instead of a valid Image Reference when it is set.
+func newQueueCancelServerWithImages(t *testing.T, version string, cancel func(w http.ResponseWriter, itemID int), image http.HandlerFunc) *queueCancelServer {
+	t.Helper()
 	server := &queueCancelServer{}
 	server.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		server.requests.Add(1)
@@ -45,6 +52,10 @@ func newQueueCancelServer(t *testing.T, version string, cancel func(w http.Respo
 			}
 		}
 		if name, ok := strings.CutPrefix(r.URL.Path, "/api/v1/images/i/"); ok && r.Method == http.MethodGet {
+			if image != nil {
+				image(w, r)
+				return
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"image_name": name, "image_url": "api/v1/images/i/" + name + "/full",
 				"thumbnail_url": "api/v1/images/i/" + name + "/thumbnail",
@@ -321,5 +332,56 @@ func TestQueueCancelHumanOutputShowsNamedItem(t *testing.T) {
 	}
 	if want := "12\tcanceled\tbatch-12\n"; stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestQueueCancelReportsAppliedCancellationWhenItemProjectionFails(t *testing.T) {
+	isolateUserConfigDir(t)
+	tests := []struct {
+		name     string
+		image    http.HandlerFunc
+		wantExit int
+		wantCode string
+	}{
+		{
+			name:     "image read rejected",
+			image:    func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "boom", http.StatusInternalServerError) },
+			wantExit: result.ExitInvokeAIFailure,
+			wantCode: "invokeai_operation_failed",
+		},
+		{
+			name: "image read connection lost",
+			image: func(w http.ResponseWriter, _ *http.Request) {
+				connection, _, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					t.Errorf("hijack image connection: %v", err)
+					return
+				}
+				_ = connection.Close()
+			},
+			wantExit: result.ExitConnection,
+			wantCode: "connection_failed",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := newQueueCancelServerWithImages(t, "6.14.1",
+				canceledItem("completed", map[string]any{"session": completedItemResults("output-12.png")}), test.image)
+
+			exitCode, envelope, stderr := runBoardsJSON(t, "", "queue", "cancel", "12", "--url", server.URL)
+
+			if exitCode != test.wantExit || stderr != "" {
+				t.Fatalf("exit code = %d, stderr = %q, envelope = %#v", exitCode, stderr, envelope)
+			}
+			failure := envelope["error"].(map[string]any)
+			details, _ := failure["details"].(map[string]any)
+			if failure["code"] != test.wantCode || details["cancel_applied"] != true || details["queue_id"] != "default" ||
+				details["item_id"] != float64(12) || details["item_status"] != "completed" {
+				t.Fatalf("error = %#v, want code %q with the applied cancellation in its details", failure, test.wantCode)
+			}
+			if cancels := server.cancels.Load(); cancels != 1 {
+				t.Fatalf("sent %d cancel requests, want exactly 1", cancels)
+			}
+		})
 	}
 }

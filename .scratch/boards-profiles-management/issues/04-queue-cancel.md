@@ -47,8 +47,15 @@
 - The standards and spec reviews found no blocker. The spec review checked the send-once path in the HTTP client and the already-terminal behavior in the installed 6.14.1 source.
 - Applied: the command's short help no longer says the whole chain is canceled, and the shared queue-item projection now returns an `Item` directly.
 - Open, not changed:
-  - After a successful cancel, a failed Image Reference read for an item with image outputs reports a read failure, although the cancellation was applied. The item is usually already completed in that case.
   - A 403 for another user's item maps to `authentication_failed`, as it does for other commands.
   - The 503 gateway case follows `.scratch/mutation-gateway-status`.
-  - "workflow-call chain" has no `CONTEXT.md` entry.
   - The get and cancel argument parsing is duplicated.
+
+### 2026-09-24 follow-up
+
+- Decided with the user:
+  - Sometimes InvokeAI answers the cancellation with the named item, but reading its Image References then fails. In that case the failure keeps the code of its cause and adds `cancel_applied: true`, `queue_id`, `item_id`, and `item_status` to its details. This follows the `source_uploaded` pattern of upscale.
+  - The item status goes in `item_status` so it does not overwrite the HTTP `status` detail of a rejected read.
+  - Spec §15.1 records this behavior. CLI tests cover a rejected image read and a lost image connection.
+- `CONTEXT.md` now defines **Workflow-Call Chain**, and spec §15.1 uses the term.
+- Not verified live: a failed image read after an applied cancellation cannot be triggered safely on the local baseline, so the tests cover it.

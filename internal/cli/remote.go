@@ -153,12 +153,21 @@ func (e remoteExecution[Request, Result]) run(ctx context.Context, c *CLI, jsonO
 // the single place command failures become structured error codes; doctor
 // classifies its own diagnostic issues before it reports one. A failure after
 // an uploaded upscale source keeps the code of its cause and adds the complete
-// uploaded Image Reference to the details.
+// uploaded Image Reference to the details, and a failure after an applied queue
+// cancellation keeps the code of its cause and adds the canceled item.
 func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
 	if uploaded, ok := errors.AsType[*upscale.UploadedSourceError](err); ok {
 		return c.classifyRemote(operationName, jsonOutput, uploaded.Err, map[string]any{
 			"source_image":    uploaded.Source,
 			"source_uploaded": true,
+		})
+	}
+	if applied, ok := errors.AsType[*queueops.CancelAppliedError](err); ok {
+		return c.classifyRemote(operationName, jsonOutput, applied.Err, map[string]any{
+			"cancel_applied": true,
+			"queue_id":       applied.QueueID,
+			"item_id":        applied.ItemID,
+			"item_status":    applied.Status,
 		})
 	}
 	return c.classifyRemote(operationName, jsonOutput, err, nil)

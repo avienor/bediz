@@ -68,7 +68,23 @@ func Cancel(ctx context.Context, client *httpclient.Client, request CancelReques
 	}
 	item, err := projectItem(ctx, client, response)
 	if err != nil {
-		return CancelResult{}, err
+		return CancelResult{}, &CancelAppliedError{QueueID: response.QueueID, ItemID: response.ItemID, Status: response.Status, Err: err}
 	}
 	return CancelResult{Item: item}, nil
 }
+
+// CancelAppliedError reports a failure after InvokeAI answered the cancellation
+// with the named item: the cancellation was applied, and only building the item
+// projection failed. Status is the item status InvokeAI returned.
+type CancelAppliedError struct {
+	QueueID string
+	ItemID  int
+	Status  string
+	Err     error
+}
+
+func (e *CancelAppliedError) Error() string {
+	return fmt.Sprintf("%v (the cancellation of queue item %d was applied; inspect it with queue get)", e.Err, e.ItemID)
+}
+
+func (e *CancelAppliedError) Unwrap() error { return e.Err }

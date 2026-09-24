@@ -140,6 +140,10 @@ _Avoid_: Generic Civitai model page, Civitai search result
 The backend-executable recipe of invocation nodes and data-flow edges for one operation; it underlies Generate and Canvas as well as user-authored workflows.
 _Avoid_: Saved workflow, workflow-editor layout
 
+**Workflow-Call Chain**:
+The InvokeAI queue items linked by workflow calls: a root item and every item it calls, directly or through other called items. Canceling any item in the chain cancels the chain's non-terminal items. Bediz's own generate and upscale batches create no chains.
+_Avoid_: Batch, queue item group
+
 **Graph Compiler**:
 The deterministic component that translates a normalized operation into a model-family-specific execution graph.
 _Avoid_: Graph executor, creative agent
