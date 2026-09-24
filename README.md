@@ -26,6 +26,44 @@ After an accepted upscale enqueue, including `--no-wait`, Bediz sends one Recall
 
 Additional management commands will be added in later V1 slices described by the specification.
 
+## Install
+
+To have an agent install Bediz, tell it: "Read https://github.com/avienor/bediz/blob/master/INSTALLATION.md and install Bediz." The steps below are the same installation, done by hand.
+
+Choose a release tag from [GitHub Releases](https://github.com/avienor/bediz/releases). Releases exist for Linux amd64, macOS arm64, and Windows amd64. On Linux, download the archive and `SHA256SUMS`, verify the archive, and put `bediz` in `~/.local/bin`:
+
+```sh
+TAG=v1.0.0
+ARCHIVE=bediz_${TAG}_linux_amd64.tar.gz
+curl -fsSLO "https://github.com/avienor/bediz/releases/download/$TAG/$ARCHIVE"
+curl -fsSLO "https://github.com/avienor/bediz/releases/download/$TAG/SHA256SUMS"
+grep "  $ARCHIVE\$" SHA256SUMS | sha256sum -c -
+tar -xzf "$ARCHIVE" bediz
+mkdir -p ~/.local/bin
+install -m 755 bediz ~/.local/bin/bediz
+bediz version
+```
+
+Add `~/.local/bin` to `PATH` if `bediz version` is not found. On macOS, use `ARCHIVE=bediz_${TAG}_darwin_arm64.tar.gz` and `shasum -a 256 -c -` in place of `sha256sum -c -`. On Windows, download `bediz_<tag>_windows_amd64.zip` and `SHA256SUMS`, compare `Get-FileHash -Algorithm SHA256` of the zip with its line in `SHA256SUMS`, and put `bediz.exe` in a directory on `PATH`.
+
+With Go installed, you can instead build the tagged version from source, with `TAG` set as above:
+
+```sh
+go install "github.com/avienor/bediz/cmd/bediz@$TAG"
+```
+
+Install the agent skill from the same tag as the binary, for the current project or, with `-g`, for your user. It needs Node.js:
+
+```sh
+npx skills add "https://github.com/avienor/bediz/tree/$TAG/skills/bediz"
+```
+
+Then check the connection to InvokeAI and what this installation supports:
+
+```sh
+bediz doctor
+```
+
 ## Build and run
 
 ```text
