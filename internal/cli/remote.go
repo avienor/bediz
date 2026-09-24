@@ -228,6 +228,14 @@ func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, e
 			"reason": "board_name_exists", "board_ids": exists.BoardIDs,
 		})
 	}
+	if exists, ok := errors.AsType[*operation.OutputExistsError](err); ok {
+		return fail(result.CodeInvalidRequest, exists.Error(), map[string]any{
+			"reason": "output_exists", "path": exists.Path,
+		})
+	}
+	if failed, ok := errors.AsType[*operation.OutputWriteError](err); ok {
+		return fail(result.CodeOutputWriteFailed, failed.Error(), map[string]any{"path": failed.Path})
+	}
 	if invalid, ok := errors.AsType[*operation.InvalidRequestError](err); ok {
 		return fail(result.CodeInvalidRequest, invalid.Error(), nil)
 	}
@@ -314,6 +322,11 @@ func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, e
 	}
 	if _, ok := errors.AsType[*httpclient.NetworkError](err); ok {
 		return fail(result.CodeConnectionFailed, "could not reach InvokeAI", nil)
+	}
+	if tooLarge, ok := errors.AsType[*httpclient.ResponseTooLargeError](err); ok {
+		return fail(result.CodeInvalidInvokeAIResponse, "InvokeAI returned a response larger than the configured limit", map[string]any{
+			"reason": "response_too_large", "limit_bytes": tooLarge.Limit,
+		})
 	}
 	if _, ok := errors.AsType[*httpclient.InvalidResponseError](err); ok {
 		return fail(result.CodeInvalidInvokeAIResponse, "InvokeAI returned an invalid response", nil)
@@ -683,6 +696,12 @@ type imageUploadOptions struct {
 	requestPath string
 }
 
+type imageDownloadOptions struct {
+	remoteOptions
+	requestPath string
+	output      string
+}
+
 func (c *CLI) newImagesCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
 	command := &cobra.Command{
 		Use:         "images",
@@ -765,6 +784,34 @@ func (c *CLI) newImagesCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
 	addRemoteFlags(uploadCommand, &uploadOptions.remoteOptions, requestTimeoutUsage)
 	uploadCommand.Flags().StringVar(&uploadOptions.requestPath, "request", "", "read a request document from a file or standard input with -")
 	command.AddCommand(uploadCommand)
+
+	downloadOptions := imageDownloadOptions{remoteOptions: defaultRemoteOptions()}
+	downloadCommand := &cobra.Command{
+		Use:         "download IMAGE_NAME --output PATH",
+		Short:       "Save a full-resolution image to a new local file",
+		Args:        cobra.MaximumNArgs(1),
+		Annotations: map[string]string{operationAnnotation: result.OperationImagesDownload},
+		Run: func(cmd *cobra.Command, args []string) {
+			downloadOptions.captureRemoteFlags(cmd)
+			if downloadOptions.requestPath != "" && (len(args) > 0 || cmd.Flags().Changed("output")) {
+				*exitCode = c.fail(result.OperationImagesDownload, *jsonOutput, result.CodeInvalidRequest, "image name and --output cannot be combined with --request", nil)
+				return
+			}
+			if downloadOptions.requestPath == "" && len(args) == 0 {
+				*exitCode = c.fail(result.OperationImagesDownload, *jsonOutput, result.CodeInvalidRequest, "image name or --request is required", nil)
+				return
+			}
+			imageName := ""
+			if len(args) == 1 {
+				imageName = args[0]
+			}
+			*exitCode = c.executeImagesDownload(cmd.Context(), *jsonOutput, downloadOptions, imageName)
+		},
+	}
+	addRemoteFlags(downloadCommand, &downloadOptions.remoteOptions, requestTimeoutUsage)
+	downloadCommand.Flags().StringVar(&downloadOptions.output, "output", "", "new local file to write; a relative path resolves against the working directory")
+	downloadCommand.Flags().StringVar(&downloadOptions.requestPath, "request", "", "read a request document from a file or standard input with -")
+	command.AddCommand(downloadCommand)
 	return command
 }
 
@@ -821,6 +868,21 @@ func (c *CLI) executeImagesUpload(ctx context.Context, jsonOutput bool, options 
 		requestPath: options.requestPath,
 		invoke:      images.Upload,
 		render:      renderUploadedImage,
+	}
+	return execution.run(ctx, c, jsonOutput)
+}
+
+func (c *CLI) executeImagesDownload(ctx context.Context, jsonOutput bool, options imageDownloadOptions, imageName string) int {
+	execution := remoteExecution[images.DownloadRequest, images.DownloadResult]{
+		operation:   result.OperationImagesDownload,
+		connection:  options.remoteOptions,
+		request:     images.DownloadRequest{SchemaVersion: 1, ImageName: imageName, Output: options.output},
+		requestPath: options.requestPath,
+		invoke:      images.Download,
+		render: func(download images.DownloadResult, w io.Writer) error {
+			_, err := fmt.Fprintf(w, "%s\t%d\t%s\n", download.Path, download.SizeBytes, download.ContentType)
+			return err
+		},
 	}
 	return execution.run(ctx, c, jsonOutput)
 }

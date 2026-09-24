@@ -27,6 +27,7 @@ func TestOperationNamesMatchThePublishedValues(t *testing.T) {
 		{name: "images list", value: OperationImagesList, wire: "images.list"},
 		{name: "images get", value: OperationImagesGet, wire: "images.get"},
 		{name: "images upload", value: OperationImagesUpload, wire: "images.upload"},
+		{name: "images download", value: OperationImagesDownload, wire: "images.download"},
 		{name: "queue", value: OperationQueue, wire: "queue"},
 		{name: "queue list", value: OperationQueueList, wire: "queue.list"},
 		{name: "queue get", value: OperationQueueGet, wire: "queue.get"},

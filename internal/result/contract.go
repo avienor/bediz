@@ -20,6 +20,7 @@ const (
 	OperationImagesList      = "images.list"
 	OperationImagesGet       = "images.get"
 	OperationImagesUpload    = "images.upload"
+	OperationImagesDownload  = "images.download"
 	OperationQueue           = "queue"
 	OperationQueueList       = "queue.list"
 	OperationQueueGet        = "queue.get"

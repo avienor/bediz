@@ -14,7 +14,7 @@
 
 **Permanent records:** V1 spec §15.1 records the download contract. Tests record it.
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Accepted behavior
 
@@ -23,6 +23,17 @@
 - A test proves that a target created after the pre-check but before publishing is left untouched.
 - Download is a safe read and may be retried within the configured read-retry limit.
 
-- [ ] Download writes atomically and never overwrites
-- [ ] `doctor` registers download as read-only inspection
-- [ ] Spec §15.1 is updated
+- [x] Download writes atomically and never overwrites
+- [x] `doctor` registers download as read-only inspection
+- [x] Spec §15.1 is updated
+
+## Comments
+
+- 2026-09-24, live verification on InvokeAI 6.14.1 (`http://127.0.0.1:9090`):
+  - `bediz images download e189e208-8e64-421d-a3ed-0ded67f41567.png --output live.png --json` (a generated 768 × 768 image) succeeded with `size_bytes: 375685` and `content_type: "image/png"`. The written file was byte-identical to `curl …/api/v1/images/i/e189e208-8e64-421d-a3ed-0ded67f41567.png/full`.
+  - Repeating the same command returned `invalid_request` with `reason: "output_exists"` and exit 2. The existing file was unchanged.
+  - `bediz images download does-not-exist.png --output missing.png --json` returned `not_found` with exit 6, and no file was written.
+  - `bediz doctor --json` reported `images.download` as compatible.
+  - No temporary files were left behind. The live steps created no gallery images.
+- The full-image route is a plain GET that accepts the bearer token, so escalation was not needed. Hard-link publishing works on Linux, on macOS, and on NTFS on Windows. A file system without hard links (FAT or exFAT) makes the download fail with `output_write_failed`. It never falls back to an overwrite.
+- The download limit is the shared HTTP response-size limit, 16 MiB by default. A larger image, such as a large upscale, returns `response_too_large`.

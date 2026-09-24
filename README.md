@@ -51,6 +51,7 @@ printf '%s' "$HF_TOKEN" | ./bediz auth huggingface login --token-stdin --json
 ./bediz images list --json
 ./bediz images get IMAGE_NAME --json
 ./bediz images upload /absolute/path/to/image.png --json
+./bediz images download IMAGE_NAME --output ./image.png --json
 ./bediz queue list --json
 ./bediz queue get ITEM_ID --json
 ./bediz queue wait ITEM_ID [ITEM_ID...] --timeout 10m --json

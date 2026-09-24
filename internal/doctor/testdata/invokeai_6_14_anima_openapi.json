@@ -60,6 +60,9 @@
     "/api/v1/images/i/{image_name}": {
       "get": {}
     },
+    "/api/v1/images/i/{image_name}/full": {
+      "get": {}
+    },
     "/api/v1/images/upload": {
       "post": {}
     },

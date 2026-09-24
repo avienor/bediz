@@ -249,3 +249,26 @@ func (e *InvalidInvokeAIVersionError) Error() string {
 	}
 	return fmt.Sprintf("invalid InvokeAI version %q", e.Version)
 }
+
+// OutputExistsError reports a local output path that already names a file,
+// directory, or link. Bediz never replaces it.
+type OutputExistsError struct {
+	Path string
+}
+
+func (e *OutputExistsError) Error() string {
+	return fmt.Sprintf("output %q already exists; choose a new path", e.Path)
+}
+
+// OutputWriteError reports a local file-system failure while writing an
+// operation's output file. No partial file is left at Path.
+type OutputWriteError struct {
+	Path string
+	Err  error
+}
+
+func (e *OutputWriteError) Error() string {
+	return fmt.Sprintf("write output %q: %v", e.Path, e.Err)
+}
+
+func (e *OutputWriteError) Unwrap() error { return e.Err }

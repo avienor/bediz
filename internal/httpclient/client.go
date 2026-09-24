@@ -235,6 +235,92 @@ func (c *Client) PostStream(ctx context.Context, path string, body io.Reader, co
 	return nil
 }
 
+// ResponseTooLargeError reports a response body larger than the configured
+// response-size limit.
+type ResponseTooLargeError struct {
+	Limit int64
+}
+
+func (e *ResponseTooLargeError) Error() string {
+	return fmt.Sprintf("response body exceeds %d bytes", e.Limit)
+}
+
+// GetStream performs a safe read of a non-JSON resource, such as an image
+// file. Connection failures and gateway statuses are retried within the
+// configured limit before any body is handed to receive. The body passed to
+// receive fails with an InvalidResponseError when it cannot be read, including
+// a ResponseTooLargeError once it exceeds the configured response-size limit;
+// receive is called at most once and its error is returned unchanged.
+func (c *Client) GetStream(ctx context.Context, path, accept string, receive func(contentType string, body io.Reader) error) error {
+	requestURL, err := c.resolve(path)
+	if err != nil {
+		return err
+	}
+	attempts := 1 + c.retries
+	for attempt := range attempts {
+		response, doErr := c.do(ctx, http.MethodGet, requestURL, accept, nil)
+		if doErr != nil {
+			if attempt+1 < attempts && ctx.Err() == nil {
+				if err := c.retryWait(ctx, defaultRetryWait*time.Duration(attempt+1)); err != nil {
+					return err
+				}
+				continue
+			}
+			return &NetworkError{Method: http.MethodGet, URL: requestURL, Err: doErr}
+		}
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			responseBody, readErr := readBody(response.Body, c.maxBody)
+			response.Body.Close()
+			if readErr != nil {
+				return &InvalidResponseError{URL: requestURL, Err: readErr}
+			}
+			if attempt+1 < attempts && gatewayStatus(response.StatusCode) {
+				if err := c.retryWait(ctx, defaultRetryWait*time.Duration(attempt+1)); err != nil {
+					return err
+				}
+				continue
+			}
+			return &HTTPError{StatusCode: response.StatusCode, Status: response.Status, Body: compactBody(responseBody)}
+		}
+		defer response.Body.Close()
+		if response.ContentLength > c.maxBody {
+			return &InvalidResponseError{URL: requestURL, Err: &ResponseTooLargeError{Limit: c.maxBody}}
+		}
+		body := &limitedBody{reader: response.Body, remaining: c.maxBody, limit: c.maxBody, url: requestURL}
+		return receive(response.Header.Get("Content-Type"), body)
+	}
+	return errors.New("request attempts exhausted")
+}
+
+// limitedBody reads a response body until it ends or exceeds the limit. Every
+// failure is an InvalidResponseError so callers can tell it from a failure of
+// their own.
+type limitedBody struct {
+	reader    io.Reader
+	remaining int64
+	limit     int64
+	url       string
+}
+
+func (b *limitedBody) Read(p []byte) (int, error) {
+	if b.remaining < 0 {
+		return 0, &InvalidResponseError{URL: b.url, Err: &ResponseTooLargeError{Limit: b.limit}}
+	}
+	// Read one byte past the limit so an oversized body is detected.
+	if int64(len(p)) > b.remaining+1 {
+		p = p[:b.remaining+1]
+	}
+	n, err := b.reader.Read(p)
+	b.remaining -= int64(n)
+	if b.remaining < 0 {
+		return 0, &InvalidResponseError{URL: b.url, Err: &ResponseTooLargeError{Limit: b.limit}}
+	}
+	if err != nil && !errors.Is(err, io.EOF) {
+		return n, &InvalidResponseError{URL: b.url, Err: fmt.Errorf("read response body: %w", err)}
+	}
+	return n, err
+}
+
 func (c *Client) doJSON(ctx context.Context, method, path string, requestBody, target any, safeRead bool) error {
 	var body []byte
 	var err error
@@ -254,7 +340,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, requestBody, t
 		attempts += c.retries
 	}
 	for attempt := range attempts {
-		response, doErr := c.do(ctx, method, requestURL, body)
+		response, doErr := c.do(ctx, method, requestURL, "application/json", body)
 		if doErr != nil {
 			if attempt+1 < attempts && ctx.Err() == nil {
 				if err := c.retryWait(ctx, defaultRetryWait*time.Duration(attempt+1)); err != nil {
@@ -320,12 +406,12 @@ func (c *Client) withoutRedirects() *Client {
 	return &mutationClient
 }
 
-func (c *Client) do(ctx context.Context, method, requestURL string, body []byte) (*http.Response, error) {
+func (c *Client) do(ctx context.Context, method, requestURL, accept string, body []byte) (*http.Response, error) {
 	request, err := http.NewRequestWithContext(ctx, method, requestURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Accept", accept)
 	request.Header.Set("User-Agent", c.userAgent)
 	if len(body) > 0 {
 		request.Header.Set("Content-Type", "application/json")

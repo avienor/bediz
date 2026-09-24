@@ -3247,6 +3247,7 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 		"/api/v1/images/":                                map[string]any{"get": map[string]any{}},
 		"/api/v1/images/i/{image_name}":                  map[string]any{"get": map[string]any{}},
 		"/api/v1/images/upload":                          map[string]any{"post": map[string]any{}},
+		"/api/v1/images/i/{image_name}/full":             map[string]any{"get": map[string]any{}},
 		"/api/v1/queue/{queue_id}/item_ids":              map[string]any{"get": map[string]any{}},
 		"/api/v1/queue/{queue_id}/item_summaries_by_ids": map[string]any{"post": map[string]any{}},
 		"/api/v1/queue/{queue_id}/i/{item_id}":           map[string]any{"get": map[string]any{}},
@@ -3326,7 +3327,7 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 		}
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "queue.wait", "queue.cancel", "queue.clear", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
+	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "images.download", "queue.list", "queue.get", "queue.wait", "queue.cancel", "queue.clear", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if envelope.SchemaVersion != 1 || !envelope.OK || envelope.Operation != "doctor" || !envelope.Data.Ready ||
 		!slices.Equal(operations, wantOperations) || envelope.Data.UISync["generate"] != "partial" ||
 		len(envelope.Data.OpenAPI.Invocations) != 26 || len(envelope.Data.Models.Relevant) != 12 || len(envelope.Data.Models.Requirements) != 13 {
@@ -3509,6 +3510,7 @@ func TestImplementedRemoteCommandsReportStableOperationsAndFailures(t *testing.T
 		{name: "images list", args: []string{"images", "list"}, operation: result.OperationImagesList},
 		{name: "images get", args: []string{"images", "get", "image-1.png"}, operation: result.OperationImagesGet},
 		{name: "images upload", args: []string{"images", "upload", imagePath}, operation: result.OperationImagesUpload},
+		{name: "images download", args: []string{"images", "download", "image-1.png", "--output", filepath.Join(t.TempDir(), "image-1.png")}, operation: result.OperationImagesDownload},
 		{name: "queue list", args: []string{"queue", "list"}, operation: result.OperationQueueList},
 		{name: "queue get", args: []string{"queue", "get", "5"}, operation: result.OperationQueueGet},
 		{name: "queue wait", args: []string{"queue", "wait", "5"}, operation: result.OperationQueueWait},
