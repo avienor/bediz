@@ -41,7 +41,7 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 	for i, entry := range report.Capabilities {
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "images.download", "images.delete", "queue.list", "queue.get", "queue.wait", "queue.cancel", "queue.clear", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
+	wantOperations := []string{"models.list", "models.scan", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "images.download", "images.delete", "queue.list", "queue.get", "queue.wait", "queue.cancel", "queue.clear", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if !slices.Equal(operations, wantOperations) {
 		t.Fatalf("reported operations = %q, want implemented operations %q", operations, wantOperations)
 	}
@@ -1224,5 +1224,6 @@ func openAPIFixture(t *testing.T) map[string]any {
 		t.Fatal(err)
 	}
 	document["paths"].(map[string]any)["/api/v2/models/starter_models"] = map[string]any{"get": map[string]any{"responses": map[string]any{"200": map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/StarterModelResponse"}}}}}}}
+	document["paths"].(map[string]any)["/api/v2/models/scan_folder"] = map[string]any{"get": map[string]any{}}
 	return document
 }

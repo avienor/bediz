@@ -14,6 +14,7 @@ const (
 	OperationConfigSet       = "config.set"
 	OperationModels          = "models"
 	OperationModelsList      = "models.list"
+	OperationModelsScan      = "models.scan"
 	OperationModelsInstall   = "models.install"
 	OperationModelsStatus    = "models.status"
 	OperationImages          = "images"

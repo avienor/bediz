@@ -106,6 +106,10 @@ type installBackendJob struct {
 var huggingFaceRepoID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$`)
 var windowsServerPath = regexp.MustCompile(`^(?:[A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+)`)
 
+func isAbsoluteServerPath(value string) bool {
+	return strings.HasPrefix(value, "/") || windowsServerPath.MatchString(value)
+}
+
 func Install(ctx context.Context, client *httpclient.Client, request InstallRequest) (InstallResult, error) {
 	return (Installer{Backend: client}).Install(ctx, request)
 }
@@ -151,7 +155,7 @@ func (installer Installer) Install(ctx context.Context, request InstallRequest) 
 			return InstallResult{}, err
 		}
 	case "path":
-		if !strings.HasPrefix(source, "/") && !windowsServerPath.MatchString(source) {
+		if !isAbsoluteServerPath(source) {
 			return InstallResult{}, operation.InvalidRequest("server path source must be absolute in the InvokeAI filesystem namespace")
 		}
 	case "civitai":

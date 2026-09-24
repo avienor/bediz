@@ -14,7 +14,7 @@
 
 **Permanent records:** V1 spec §14 records the scan contract, including the rule that the path is resolved on the server as in `models install` path sources. Tests record it.
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Accepted behavior
 
@@ -22,5 +22,11 @@
 - The result data is `{"models":[{"path":..., "installed": bool}]}`, sorted by path.
 - The expected 6.14.1 endpoint is the model manager scan-folder GET under `/api/v2/models/`. Confirm it before coding.
 
-- [ ] Scan is read-only and allowlisted
-- [ ] Spec §14 is updated
+- [x] Scan is read-only and allowlisted
+- [x] Spec §14 is updated
+
+## Comments
+
+- 2026-09-24, live verification on InvokeAI 6.14.1 (`http://127.0.0.1:9090`): `go run ./cmd/bediz models scan --path /home/nyx/Workspace/image-studio/invokeai/models --url http://127.0.0.1:9090 --json` succeeded with `operation: "models.scan"`, 16 model paths, and 14 marked installed. The scan endpoint reports `is_installed` for each result. The command sends one GET and performs no install or move. Repeated after the review fixes with the same counts.
+- `go run ./cmd/bediz doctor --url http://127.0.0.1:9090 --json` reported `models.scan` compatible and `GET /api/v2/models/scan_folder` available.
+- CLI-seam tests cover missing and relative paths without network traffic, flags and Request Documents, sorted allowlisted output, HTTP 400 folder rejection, and missing backend installed state. The review found local-OS path validation and a new test using legacy JSON; both were corrected. `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify` passed after the corrections.

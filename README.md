@@ -70,6 +70,8 @@ Inspection commands return normalized Bediz records rather than raw InvokeAI res
 
 Model installation accepts an exact HTTP(S) artifact URL without userinfo, query, or fragment. Its job ID identifies only a job in the current InvokeAI registry; after a restart, use `models list` and the InvokeAI install job list before deciding whether to resubmit an uncertain installation. `models status` returns a safe projection of the job currently under that ID.
 
+`./bediz models scan --path /absolute/server/folder --json` lists model files found in a folder on the InvokeAI server and whether each is installed. The command reads server state and does not install anything. The path is resolved on the server, even when Bediz runs on another machine.
+
 Civitai installation requires an exact version ID or a model page URL with `modelVersionId`. One file is selected directly; among multiple files, exactly one primary is selected. Otherwise the JSON result returns numeric file choices; resubmit the same version with `--file-id` or `source.file_id`. A model page URL without `modelVersionId` never picks a version, even when only one exists: the JSON result returns numeric version choices to resubmit as the exact version reference. A direct Civitai download URL is a `url` source and follows the direct URL validation rules.
 
 Each operation also accepts a schema-versioned request document from a file or standard input. Operation arguments and flags cannot be mixed with `--request`:

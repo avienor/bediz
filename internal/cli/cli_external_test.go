@@ -3236,8 +3236,9 @@ func TestGlobalJSONFlagBeforeVersionReturnsStableContract(t *testing.T) {
 func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 	isolateUserConfigDir(t)
 	paths := map[string]any{
-		"/api/v1/app/version": map[string]any{"get": map[string]any{}},
-		"/api/v2/models/":     map[string]any{"get": map[string]any{}},
+		"/api/v1/app/version":        map[string]any{"get": map[string]any{}},
+		"/api/v2/models/":            map[string]any{"get": map[string]any{}},
+		"/api/v2/models/scan_folder": map[string]any{"get": map[string]any{}},
 		"/api/v2/models/install": map[string]any{"post": map[string]any{
 			"parameters": []any{map[string]any{"name": "source", "in": "query", "required": true}},
 			"responses":  map[string]any{"201": map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/ModelInstallJob"}}}}},
@@ -3327,7 +3328,7 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 		}
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "images.download", "images.delete", "queue.list", "queue.get", "queue.wait", "queue.cancel", "queue.clear", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
+	wantOperations := []string{"models.list", "models.scan", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "images.download", "images.delete", "queue.list", "queue.get", "queue.wait", "queue.cancel", "queue.clear", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if envelope.SchemaVersion != 1 || !envelope.OK || envelope.Operation != "doctor" || !envelope.Data.Ready ||
 		!slices.Equal(operations, wantOperations) || envelope.Data.UISync["generate"] != "partial" ||
 		len(envelope.Data.OpenAPI.Invocations) != 26 || len(envelope.Data.Models.Relevant) != 12 || len(envelope.Data.Models.Requirements) != 13 {

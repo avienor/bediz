@@ -180,6 +180,13 @@ var Matrix = []Entry{
 		},
 	},
 	{
+		Operation:     result.OperationModelsScan,
+		VersionPolicy: VersionPolicyCompatibleEndpoint,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v2/models/scan_folder"},
+		},
+	},
+	{
 		Operation:     result.OperationModelsInstall,
 		VersionPolicy: VersionPolicySupportedRange,
 		Endpoints: []EndpointRequirement{
