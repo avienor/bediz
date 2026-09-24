@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/avienor/bediz/internal/config"
+	"github.com/avienor/bediz/internal/generation"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/huggingface"
 	"github.com/avienor/bediz/internal/images"
@@ -183,6 +184,15 @@ func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, e
 			maps.Copy(details, extra)
 		}
 		return c.fail(operationName, jsonOutput, code, message, details)
+	}
+	if profile, ok := errors.AsType[*generation.ProfileLoadError](err); ok {
+		if errors.Is(profile.Err, os.ErrNotExist) {
+			return fail(result.CodeNotFound, fmt.Sprintf("profile %q was not found", profile.Name), nil)
+		}
+		return fail(result.CodeInvalidConfiguration, profile.Error(), map[string]any{"name": profile.Name})
+	}
+	if setting, ok := errors.AsType[*generation.ProfileSettingError](err); ok {
+		return fail(result.CodeInvalidRequest, setting.Error(), map[string]any{"source": "profile", "profile": setting.Profile, "field": setting.Field})
 	}
 	if submission, ok := errors.AsType[*models.StarterSubmissionError](err); ok {
 		details := map[string]any{"jobs": submission.Progress.Jobs, "skipped": submission.Progress.Skipped}

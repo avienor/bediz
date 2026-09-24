@@ -19,6 +19,7 @@ type generateOptions struct {
 	noWait         bool
 	waitTimeout    time.Duration
 	model          string
+	profile        string
 	prompt         string
 	negativePrompt string
 	width          int
@@ -52,6 +53,7 @@ func (c *CLI) newGenerateCommand(exitCode *int, jsonOutput *bool) *cobra.Command
 	command.Flags().StringVar(&options.requestPath, "request", "", "read a request document from a file or standard input with -")
 	command.Flags().BoolVar(&options.noWait, "no-wait", false, "return after InvokeAI accepts the request")
 	command.Flags().StringVar(&options.model, "model", "", "supported main model key or unique name")
+	command.Flags().StringVar(&options.profile, "profile", "", "local Generation Profile name")
 	command.Flags().StringVar(&options.prompt, "prompt", "", "positive prompt")
 	command.Flags().StringVar(&options.negativePrompt, "negative-prompt", "", "negative prompt")
 	command.Flags().IntVar(&options.width, "width", 0, "output width")
@@ -77,7 +79,7 @@ func (c *CLI) executeGenerate(ctx context.Context, jsonOutput bool, command *cob
 		return c.fail(result.OperationGenerate, jsonOutput, result.CodeInvalidRequest, "--timeout cannot be combined with --no-wait", nil)
 	}
 	operationFlags := []string{
-		"model", "prompt", "negative-prompt", "width", "height", "steps", "scheduler", "guidance",
+		"model", "profile", "prompt", "negative-prompt", "width", "height", "steps", "scheduler", "guidance",
 		"seed", "output-count", "board", "vae", "qwen3-encoder", "t5-encoder", "clip-embed",
 	}
 	fieldsSet := false
@@ -88,6 +90,7 @@ func (c *CLI) executeGenerate(ctx context.Context, jsonOutput bool, command *cob
 	if fieldsSet {
 		request.SchemaVersion = 1
 		request.Model = options.model
+		request.Profile = options.profile
 		request.PositivePrompt = options.prompt
 		request.NegativePrompt = options.negativePrompt
 		request.BoardID = options.boardID

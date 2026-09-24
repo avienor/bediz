@@ -15,7 +15,8 @@ type Components struct {
 
 type Request struct {
 	SchemaVersion  int         `json:"schema_version"`
-	Model          string      `json:"model"`
+	Model          string      `json:"model,omitempty"`
+	Profile        string      `json:"profile,omitempty"`
 	PositivePrompt string      `json:"positive_prompt"`
 	NegativePrompt string      `json:"negative_prompt,omitempty"`
 	Width          *int        `json:"width,omitempty"`

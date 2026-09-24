@@ -14,7 +14,7 @@
 
 **Permanent records:** V1 spec §8.3, §11.2, §11.4, and §11.6 record the `profile` field, the `--profile` flag, the precedence, the `profile_preference_skipped` warning, and the receipt fields. `CONTEXT.md` gains no new term (Generation Profile and Component Resolution already cover this). Tests record the contract.
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Accepted behavior
 
@@ -24,7 +24,13 @@
 - A profile selector naming a component kind that does not apply to the family (such as `qwen3_encoder` for FLUX.1) is an inapplicable setting and returns `invalid_request`, not a skip.
 - `submitted_request` keeps `profile` as given, and `resolved_settings.profile` names the applied profile. Standalone `recall` does not accept profiles.
 
-- [ ] The precedence and the model-from-profile behavior work for Anima, SDXL, and FLUX.1
-- [ ] Inapplicable profile settings are rejected; unusable component preferences are skipped with a warning
-- [ ] The receipt and warnings reflect the profile
-- [ ] Spec §8.3 and §11 are updated
+- [x] The precedence and the model-from-profile behavior work for Anima, SDXL, and FLUX.1
+- [x] Inapplicable profile settings are rejected; unusable component preferences are skipped with a warning
+- [x] The receipt and warnings reflect the profile
+- [x] Spec §8.3 and §11 are updated
+
+## Comments
+
+- 2026-09-24: Live InvokeAI 6.14.1 verification: `curl -fsS --max-time 3 http://127.0.0.1:9090/api/v1/app/version` returned `6.14.1`; `go run ./cmd/bediz models list --json` confirmed the installed SDXL main and VAE.
+- 2026-09-24: With an isolated `XDG_CONFIG_HOME`, `go run ./cmd/bediz profiles create --request - --json` created `profile_check` (Juggernaut-XL-v9, `sdxl-vae-fp16-fix`, 768×768, 10 steps, Euler, guidance 5). `go run ./cmd/bediz generate --request - --timeout 5m --json` with `{"schema_version":1,"profile":"profile_check","positive_prompt":"A small red ceramic cup on a wooden table, soft daylight","seed":42}` completed successfully. Receipt resolved the profile model and VAE keys, preserved `submitted_request.profile` and `resolved_settings.profile`, and recorded image `13c7043c-cce5-43a6-b857-b9dae2f3b7b7.png` (queue item 91). The sole warning was `ui_sync_partial`, in both receipt and envelope. The generated image remains in the user's gallery.
+- 2026-09-24: `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify` all passed.

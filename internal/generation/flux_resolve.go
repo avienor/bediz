@@ -76,7 +76,7 @@ func resolveFLUX(request Request, main ModelIdentifier, inventory []ModelIdentif
 	if *resolved.Steps < 1 {
 		return Resolution{}, operation.InvalidRequest("steps must be positive")
 	}
-	if !slices.Contains([]string{"euler", "heun", "lcm"}, *resolved.Scheduler) {
+	if !isFLUXScheduler(*resolved.Scheduler) {
 		return Resolution{}, operation.InvalidRequest("scheduler is not supported for FLUX.1")
 	}
 	if *resolved.OutputCount < 1 {
@@ -120,4 +120,8 @@ func resolveFLUX(request Request, main ModelIdentifier, inventory []ModelIdentif
 		return Resolution{}, fmt.Errorf("resolve FLUX.1 CLIP Embed: %w", err)
 	}
 	return Resolution{Request: resolved, Models: ResolvedModels{Main: main, VAE: vae, T5Encoder: t5, CLIPEmbed: clip}, Seeds: seeds}, nil
+}
+
+func isFLUXScheduler(scheduler string) bool {
+	return slices.Contains([]string{"euler", "heun", "lcm"}, scheduler)
 }
