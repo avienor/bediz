@@ -1,6 +1,6 @@
 # 04: Queue cancel
 
-**What to build:** A human or agent can stop a queued or running item. `bediz queue cancel ITEM_ID` sends one cancellation for that item and returns its normalized queue item afterward. InvokeAI 6.14.1 also cancels every non-terminal item in the same workflow-call chain as the named item.
+**What to build:** A human or agent can stop a queued or running item. `bediz queue cancel ITEM_ID` sends one cancellation for that item and returns its normalized queue item afterward. InvokeAI 6.14.1 cancels the non-terminal items in the named item's workflow-call chain, including the named item itself, and leaves terminal items unchanged.
 
 **Blocked by:** None (can start immediately).
 
@@ -20,7 +20,7 @@
 
 - The request has `queue_id` (default `default`) and `item_id`. There is no batch or bulk selector in V1.
 - The item id must be positive, matching `queue get`.
-- InvokeAI 6.14.1 moves the named item and every non-terminal item in its workflow-call chain to `canceled`. Completed, failed, and already canceled items keep their status. Bediz documents that effect and does not try to narrow it. Bediz's own generate and upscale batches create no chains, so for them one item is canceled.
+- InvokeAI 6.14.1 cancels the non-terminal items in the named item's workflow-call chain, and the named item itself counts as part of that chain. Completed, failed, and already canceled items keep their status. Bediz documents that effect and does not try to narrow it. Bediz's own generate and upscale batches create no chains, so for them at most the named item is canceled.
 - The result data is the `queue get` projection of the named item after cancellation.
 - The 6.14.1 endpoint is `PUT /api/v1/queue/{queue_id}/i/{item_id}/cancel`, confirmed against the installed source. Check it against the live OpenAPI document before coding.
 
