@@ -20,7 +20,7 @@
 
 - The name is taken exactly as given, and a name that is empty after trimming is `invalid_request`.
 - Before the mutation, Bediz lists all boards, including archived ones. If any has exactly the same name, it returns `invalid_request` with `reason: "board_name_exists"` and `board_ids`, every matching board identifier sorted ascending, and does not send the mutation. InvokeAI still allows duplicates created by other clients; `boards get` handles those through `selection_required`.
-- The check covers only boards visible to the calling user, which is InvokeAI 6.14.1's per-user scope for non-admin callers. A same-named board owned by another user does not block creation.
+- The check covers every board visible to the calling user. InvokeAI 6.14.1 shows an admin every board. It shows a non-admin their own boards, boards shared with them, and boards with `shared` or `public` visibility, including those owned by other users. A visible board with the same name blocks creation whoever owns it. Only a board the caller cannot see does not block creation.
 - The create request is sent once and never retried automatically. An inconclusive transport result, or a success response without a board identifier, returns `outcome_unknown`, and the caller inspects `boards list` before trying again.
 - Creating a board requires a supported InvokeAI version.
 

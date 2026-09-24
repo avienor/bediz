@@ -6,11 +6,11 @@
 
 **Execution route:** `frontier-owned`. The operation is irreversible, it affects work the human may have queued, and its exact 6.14.1 effect on the in-progress item must be observed live before it is documented.
 
-**Verification gate:** CLI-seam tests cover a missing `--yes` (`invalid_request`, exit 2, no network request), success, a conclusive rejection, and an inconclusive result (`outcome_unknown`). Tests prove the clear is sent exactly once and never retried. A live 6.14.1 observation records what happens to pending, in-progress, and completed items, and the spec states that observed effect. Run the live check only against an otherwise empty queue, holding items created for this check alone, so no human's work is lost. Report the caller's scope (single-user default admin, or multi-user). `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify` pass.
+**Verification gate:** CLI-seam tests cover a missing `--yes` (`invalid_request`, exit 2, no network request), success, a conclusive rejection, and an inconclusive result (`outcome_unknown`). Tests prove the clear is sent exactly once and never retried. A live 6.14.1 observation records what happens to pending, in-progress, and completed items, and the spec states that observed effect. Run the live check only on an isolated InvokeAI 6.14.1 instance started for this check, with its own root directory and port, and with no other client connected. Never run it on the shared baseline at `127.0.0.1:9090`. An empty-queue check there does not isolate the test, because another client can enqueue between the check and the clear, and an admin clear deletes that item too. Report the caller's scope (single-user default admin, or multi-user). If no isolated instance can be started, report live verification as unavailable instead of falling back to the baseline. `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify` pass.
 
 **Review gate:** Not required by this route.
 
-**Escalate when:** The live effect differs from the scope described below, the endpoint is not limited to one queue, or the live queue holds items that were not created for the check.
+**Escalate when:** The live effect differs from the scope described below, the endpoint is not limited to one queue, or an isolated instance cannot be started.
 
 **Permanent records:** V1 spec §15 records the observed destructive effect and the `--yes` requirement. Tests record the contract.
 

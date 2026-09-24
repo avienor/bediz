@@ -21,7 +21,7 @@
 - `boards list` accepts `offset` (default 0), `limit` (default 20, valid 1–100), and `include_archived` (default false). Results keep the order InvokeAI returns: newest first by creation time. InvokeAI 6.14.1 applies no tiebreaker before paging, so Bediz promises no order among boards with equal creation times and does not re-sort a page. The result also carries the total count that InvokeAI reports.
 - A board summary contains only `board_id`, `board_name`, `image_count`, `archived`, an optional `cover_image_name`, and the created and updated timestamps.
 - `boards get SELECTOR` first tries an exact board identifier. If nothing matches, it searches every board, including archived ones, for an exact name that is case-sensitive. A single match wins. Several matches return `selection_required` with `kind: "board"`, and each candidate carries `board_id` and `board_name`. No match returns `not_found`.
-- InvokeAI 6.14.1 shows a non-admin caller only the boards visible to that user; an admin sees all boards. Bediz reports that scope as is, and name lookup covers only visible boards.
+- InvokeAI 6.14.1 shows an admin every board. It shows a non-admin their own boards, boards shared with them, and boards with `shared` or `public` visibility, including those owned by other users. Bediz reports that scope as is, and name lookup covers only visible boards.
 - Read-only inspection may run on an untested but compatible InvokeAI version (§5).
 - The expected 6.14.1 endpoints are the boards list and board detail routes under `/api/v1/boards/`. Confirm them against the live OpenAPI document before coding.
 
