@@ -12,7 +12,7 @@
 
 **Permanent records:** The ticket 01 ADR records publication through tagged GitHub Releases. README records the release process for maintainers.
 
-**Status:** awaiting-live-verification
+**Status:** awaiting-review
 
 ## Accepted behavior
 
@@ -21,15 +21,15 @@
 - Every published tag contains the skill, and the skill declares that tag's version.
 - Pushing a real tag is the user's decision. The implementer asks before pushing any tag to the main repository.
 
-- [ ] A tag push publishes verified archives and `SHA256SUMS`
-- [ ] Failed verification or a skill version mismatch publishes nothing
-- [ ] CI checksums match a local build
+- [x] A tag push publishes verified archives and `SHA256SUMS`
+- [x] Failed verification or a skill version mismatch publishes nothing
+- [x] CI checksums match a local build
 
 ## Comments
 
 **2026-09-24, implementation:** The workflow is `.github/workflows/release.yml`.
 
-- **Build job** (`contents: read`): checks out the tag without persisting credentials and installs the `go.mod` toolchain with `actions/setup-go` (`GOTOOLCHAIN=local`, no cache). It then runs `go run ./tools/release -check <tag>`, the four verification commands, and `go run ./tools/release <tag>`, verifies `sha256sum -c SHA256SUMS`, and uploads `dist/<tag>` as an artifact.
+- **Build job** (`contents: read`): checks out the tag without persisting credentials and reads the `toolchain` directive from `go.mod` and installs that version with `actions/setup-go` (`GOTOOLCHAIN=local`, no cache). It then runs `go run ./tools/release -check <tag>`, the four verification commands, and `go run ./tools/release <tag>`, verifies `sha256sum -c SHA256SUMS`, and uploads `dist/<tag>` as an artifact.
 - **Publish job** (`contents: write`, the only job that can write, runs only after a successful build): downloads the artifact, re-checks `SHA256SUMS`, and runs `gh release create <tag> --verify-tag`, adding `--prerelease` when the tag has a `-` suffix.
 - **Actions:** pinned to commit SHAs.
 - **No extra secrets:** the job needs none beyond the default token.
@@ -45,8 +45,11 @@ The release command now refuses a version that differs from `metadata.bediz-vers
 
 **Observation:** two version tags on one commit make `go build` record the higher tag as the module version, so the build is refused. The skill-version rule prevents this for releases, because a prerelease commit and its final commit must declare different skill versions.
 
-**Pending (needs the user):** the live gate has not run.
-- Push a prerelease tag and compare its assets with a local build.
-- Confirm that a mismatched tag and a failing verification step publish nothing.
+**2026-09-24, live verification on `avienor/bediz`** (user approved; throwaway `v0.0.0-ci.N` tags on detached test commits):
 
-Each of these pushes a tag to `avienor/bediz`, or needs a throwaway repository, and the prerelease test needs deleting afterwards.
+- **Workflow not triggered at first:** a tag whose commit was not in any pushed branch did not start the workflow. After `feature/release-and-skill` was pushed, the same tag did.
+- **First run, wrong toolchain:** `actions/setup-go` v7.0.0 resolved `go-version-file: go.mod` to the `go` directive (1.27.0), and `-check` refused the build. Nothing was published. The workflow now reads the `toolchain` directive and passes it as `go-version` (commit 456497f).
+- **`v0.0.0-ci.1`** (skill declares `v0.0.0-ci.1`): run 36018125715 succeeded and published a prerelease that is not a draft. Its assets were exactly the three archives and `SHA256SUMS`. The downloaded assets passed `sha256sum -c`, and `SHA256SUMS` was byte-identical to a local build of the same commit and tag.
+- **`v0.0.0-ci.2`** (same commit; the skill declares `ci.1`): run 36018635094 failed at the skill version check. The publish job was skipped, and no release was created.
+- **`v0.0.0-ci.3`** (skill declares `ci.3`, with a deliberately failing test): run 36018634595 failed at `go test ./...`. The publish job was skipped, and no release was created.
+- **Cleanup:** the test release and all three tags were then deleted locally and on GitHub.
