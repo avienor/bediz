@@ -84,7 +84,7 @@ Confirm the version: `npx skills list --json` (add `-g` for a global installatio
 
 Tell the user that the skill loads in a new agent session.
 
-**Done when** the installed `SKILL.md` declares `metadata.bediz-version: <tag>`.
+**Done when** the installed `SKILL.md` declares `metadata.bediz-version: <tag>`, or `npx` is unavailable and the user knows to install Node.js and then the skill from `<tag>`.
 
 ## 6. Doctor
 

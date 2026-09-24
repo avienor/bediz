@@ -33,7 +33,7 @@ Bediz covers text-to-image generation, generative upscale, and the model, galler
 
 ## Workflow
 
-1. **Readiness.** When you do not yet know what this installation supports (first use in a session, after an exit status 4 or 5, or after the user changes InvokeAI), run `bediz doctor --json`. `data.capabilities` is the **Capability Matrix** for this installation: each entry has `operation`, an optional `family`, `compatible`, and `failures`. Request only compatible operation and family pairs. A failure naming `missing_component:<name>` means a model is absent; `data.issues` carries the details. `data.ui_sync` tells you how much of each operation the InvokeAI web interface can show. Compare `data.bediz.version` with this skill's `metadata.bediz-version`; when they differ, tell the user this skill may not match their Bediz.
+1. **Readiness.** When you do not yet know what this installation supports (first use in a session, after an exit status 4 or 5, or after the user changes InvokeAI), run `bediz doctor --json`. On success the report is in `data`; when `ok` is `false` (for example, when a model is missing), the same report is in `error.details.report`. Its `capabilities` field is the **Capability Matrix** for this installation: each entry has `operation`, an optional `family`, `compatible`, and `failures`. Request only compatible operation and family pairs. A failure naming `missing_component:<name>` means a model is absent; the report's `issues` carries the details. `ui_sync` tells you how much of each operation the InvokeAI web interface can restore. Compare the report's `bediz.version` with this skill's `metadata.bediz-version`; when they differ, tell the user this skill may not match their Bediz.
 2. **Model.** Run `bediz models list --json`, narrowing with `--base` or `--type` when the list is long. Select models by their exact `key` (the **Model Key**). Prefer an installed model that fits the request. When none fits, go to [Models](#models).
 3. **Request.** Write the Request Document under [Creative Discretion](#creative-discretion), using the [family rules](#families).
 4. **Run.** `generate` and `upscale` wait for completion by default. For long jobs, add `--no-wait`, then `bediz queue wait ITEM_ID --json` with the returned `data.queue.item_ids`.
@@ -110,9 +110,9 @@ When the state shows the change happened, continue from it. Submit again only wh
 
 ## UI Synchronization
 
-After `generate` and `upscale`, Bediz loads the resolved settings into the InvokeAI web interface (**Parameter Recall**). Report its warnings honestly:
+After `generate` and `upscale`, Bediz sends the resolved settings to the InvokeAI web interface (**Parameter Recall**). Report its warnings honestly:
 
-- `ui_sync_partial`: InvokeAI accepted the job and the interface shows part of its settings. Tell the user the web interface does not restore the fields in `details.not_restored`; the Execution Receipt keeps every value.
+- `ui_sync_partial`: InvokeAI accepted the job and the settings Bediz could send. An open web interface restores only part of them: tell the user it does not restore the fields in `details.not_restored`. The Execution Receipt keeps every value. Bediz cannot tell whether a browser was open to receive the settings, so do not claim the user can see them.
 - `ui_sync_failed`: InvokeAI accepted the job, but the interface did not receive its settings. Say so, rather than telling the user the interface shows them. After a generation, you can load its settings on request with `bediz recall --request - --json`, sending `model`, the prompts, `width`, `height`, `steps`, and the first `seed` from the receipt.
 
 ## Models

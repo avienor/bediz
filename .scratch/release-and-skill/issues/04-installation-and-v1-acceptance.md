@@ -63,3 +63,10 @@
   3. "Make a photo with Stable Diffusion 3.5 Large." The model is not installed. Expect the source, size, and license, and no installation without consent.
 
 **2026-09-24, closed by the user:** The user closed the ticket and will run the fresh-agent walkthrough of `INSTALLATION.md`, the README steps that install into `~/.local/bin`, and the skill-driven acceptance generation, including the missing-model consent case, themselves later. The unchecked items above are not verified yet. A finding from that run reopens ticket 02 or updates the spec, as the ticket's permanent-record rule requires.
+
+**2026-09-24, branch review fixes:**
+
+- The skill now reads the `doctor` report from `error.details.report` when `ok` is `false`. Before this fix, an agent could not find the Capability Matrix in the missing-model case.
+- The skill no longer claims the web interface shows synchronized settings: Recall acceptance does not prove a browser received them (spec §12).
+- `INSTALLATION.md` step 5 is also done when `npx` is unavailable and the user knows to install the skill later.
+- `v1.0.0-rc.1` ships the earlier skill text. The acceptance walkthrough should use a release candidate that contains these fixes.
