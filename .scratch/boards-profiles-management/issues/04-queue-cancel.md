@@ -1,0 +1,27 @@
+# 04: Queue cancel
+
+**What to build:** A human or agent can stop one queued or running item. `bediz queue cancel ITEM_ID` sends one cancellation for that item and returns its normalized queue item afterward.
+
+**Blocked by:** None (can start immediately).
+
+**Execution route:** `worker + independent review`. This is a single-item mutation with an explicit contract, and it is covered by send-once tests plus a live check.
+
+**Verification gate:** CLI-seam tests cover a pending item, an in-progress item, an already terminal item (the result reports its unchanged terminal status, exit 0), an absent item (`not_found`), a conclusive rejection, and an inconclusive transport result (`outcome_unknown`). Tests prove that the cancellation is sent exactly once and is never retried. No `--yes` is required. `doctor` registers cancel for the tested version range only. A live cancellation of a pending item on 6.14.1 is observed in the InvokeAI queue UI, or the report says live verification was unavailable. `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify` pass.
+
+**Review gate:** Review the fixed diff against spec §15, §17, §18, and this ticket. Independently check the send-once guarantee and the already-terminal behavior against the real 6.14.1 response. A retry or a missing `outcome_unknown` blocks acceptance.
+
+**Escalate when:** The 6.14.1 cancel endpoint turns out to cancel more than one item, or it returns an error for items that are already terminal.
+
+**Permanent records:** V1 spec §15 records the per-item cancel contract and that batch cancellation is deferred. Tests record the contract.
+
+**Status:** ready-for-agent
+
+## Accepted behavior
+
+- The request has `queue_id` (default `default`) and `item_id`. There is no batch or bulk selector in V1.
+- The result data is the `queue get` projection of the item after cancellation.
+- The expected 6.14.1 endpoint is the per-item cancel route under `/api/v1/queue/{queue_id}/i/{item_id}`. Confirm it before coding.
+
+- [ ] Cancel works with a positional id and with a Request Document
+- [ ] The cancellation is sent once, and an uncertain result returns `outcome_unknown`
+- [ ] Spec §15 is updated
