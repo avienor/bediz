@@ -55,7 +55,16 @@ Before writing, read the repository's `writing-for-agents` skill and its `SKILL-
   - "succeeded" versus "accepted" under `--no-wait`.
   No new `CONTEXT.md` term was needed.
 
-**Trigger check:** Each prompt was judged against the final `description` by reading, not by an automated routing run. An automated skill-evaluation run can replace this record.
+**Trigger check:**
+
+**How it was run (2026-09-24):**
+- Tooling: Claude Code 2.1.281 headless (`claude -p`), model `claude-opus-5-5`.
+- Project: a scratch project whose `.claude/skills/bediz/` is a copy of this commit's skill. The user's global skills stayed loaded as competing distractors.
+- Each prompt ran once with `--max-turns 2`, `Skill` allowed, and shell, file-write, web, and agent tools disallowed.
+- A prompt counted as "trigger" when the stream contained a `Skill` tool call with `skill: "bediz"`.
+- All 14 runs ended in a result record with empty standard error.
+
+**Result:** 14 of 14 passed.
 
 | # | Prompt | Expected | Result |
 | --- | --- | --- | --- |
@@ -65,11 +74,11 @@ Before writing, read the repository's `writing-for-agents` skill and its `SKILL-
 | 4 | Find a good anime FLUX model and install it for InvokeAI | trigger | trigger |
 | 5 | What's stuck in my InvokeAI queue? Cancel it | trigger | trigger |
 | 6 | Make a board called Moodboard in InvokeAI and put the next renders there | trigger | trigger |
-| 7 | Save these SDXL settings as a generation profile for Bediz | trigger | trigger |
+| 7 | Save these SDXL settings as a generation profile for Bediz: 30 steps, cfg 6, 1216x832 | trigger | trigger |
 | 8 | Delete the blurry images from my InvokeAI gallery | trigger | trigger |
-| 9 | Fix the failing Go test in internal/cli | no trigger | no trigger ("developing Bediz itself") |
-| 10 | Remove the background from this photo | no trigger | no trigger ("other image editing") |
-| 11 | Inpaint the sky in this InvokeAI image | no trigger | no trigger ("inpainting"); if it fires anyway, the body sends the user to the web interface |
-| 12 | Resize these PNGs to 512px with ImageMagick | no trigger | no trigger ("other image editing") |
-| 13 | Write a Python script that calls the Stable Diffusion API | no trigger | no trigger (coding, no InvokeAI or Bediz) |
-| 14 | Generate a logo with DALL·E | no trigger | no trigger (not InvokeAI) |
+| 9 | Fix the failing Go test in internal/cli | none | none |
+| 10 | Remove the background from this photo: ~/Pictures/me.jpg | none | none |
+| 11 | Inpaint the sky in this InvokeAI image | none | none |
+| 12 | Resize these PNGs to 512px with ImageMagick | none | none |
+| 13 | Write a Python script that calls the Stable Diffusion API | none | none |
+| 14 | Generate a logo with DALL-E | none | none |
