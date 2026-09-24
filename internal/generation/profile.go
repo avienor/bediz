@@ -51,6 +51,18 @@ func validateProfileApplicability(name string, profile profiles.Generate, main M
 			}
 		}
 	}
+	if profile.Width != nil {
+		multiple := 8
+		if main.Base == "flux" {
+			multiple = 16
+		}
+		if *profile.Width%multiple != 0 {
+			return invalid("width")
+		}
+		if *profile.Height%multiple != 0 {
+			return invalid("height")
+		}
+	}
 	if profile.Guidance != nil && main.Base == "flux" && main.Variant == "schnell" {
 		return invalid("guidance")
 	}

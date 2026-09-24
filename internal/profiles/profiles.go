@@ -305,6 +305,8 @@ func List() ([]Summary, error) {
 		}
 		summaries = append(summaries, summary)
 	}
+	// Filename order puts "a-b.json" before "a.json", so sort by the name itself.
+	slices.SortFunc(summaries, func(a, b Summary) int { return strings.Compare(a.Name, b.Name) })
 	return summaries, nil
 }
 

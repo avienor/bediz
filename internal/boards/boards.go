@@ -125,13 +125,19 @@ func Get(ctx context.Context, client *httpclient.Client, request GetRequest) (Ge
 		return GetResult{}, operation.InvalidRequest("board selector is required")
 	}
 
-	var board boardRecord
-	err := client.GetJSON(ctx, "/api/v1/boards/"+url.PathEscape(request.Board), &board)
-	if err == nil {
-		return GetResult{Board: normalize(board)}, nil
-	}
-	if !invisibleBoard(err) {
-		return GetResult{}, err
+	// A dot segment is cleaned into another route, so it can only be a name.
+	if request.Board != "." && request.Board != ".." {
+		var board boardRecord
+		err := client.GetJSON(ctx, "/api/v1/boards/"+url.PathEscape(request.Board), &board)
+		if err == nil {
+			if board.BoardID != request.Board {
+				return GetResult{}, &httpclient.InvalidResponseError{Err: errors.New("board detail names another board")}
+			}
+			return GetResult{Board: normalize(board)}, nil
+		}
+		if !invisibleBoard(err) {
+			return GetResult{}, err
+		}
 	}
 
 	matches, err := boardsNamed(ctx, client, request.Board)

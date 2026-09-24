@@ -382,7 +382,7 @@ func TestLiveGate(t *testing.T) {
 				t.Errorf("doctor returned an unsatisfied or incomplete model requirement: %#v", requirement)
 			}
 		}
-		wantOperations := []string{"auth.huggingface.login", "auth.huggingface.logout", "auth.huggingface.status", "boards.create", "boards.get", "boards.list", "generate", "generate", "generate", "images.download", "images.get", "images.list", "images.upload", "models.install", "models.install", "models.list", "models.status", "queue.cancel", "queue.clear", "queue.get", "queue.list", "queue.wait", "recall", "upscale", "upscale"}
+		wantOperations := []string{"auth.huggingface.login", "auth.huggingface.logout", "auth.huggingface.status", "boards.create", "boards.get", "boards.list", "generate", "generate", "generate", "images.delete", "images.download", "images.get", "images.list", "images.upload", "models.delete", "models.install", "models.install", "models.list", "models.scan", "models.status", "queue.cancel", "queue.clear", "queue.get", "queue.list", "queue.wait", "recall", "upscale", "upscale"}
 		operations := make([]string, 0, len(data.Capabilities))
 		generateFamilies := map[string]bool{}
 		upscaleFamilies := map[string]bool{}

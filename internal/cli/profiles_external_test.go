@@ -102,6 +102,8 @@ func TestProfilesListSortsNamesAndReportsSections(t *testing.T) {
 	for _, document := range []string{
 		`{"schema_version":1,"name":"zeta","upscale":{}}`,
 		`{"schema_version":1,"name":"alpha","generate":{},"upscale":{}}`,
+		`{"schema_version":1,"name":"portrait-hd","generate":{}}`,
+		`{"schema_version":1,"name":"portrait","generate":{}}`,
 	} {
 		status, envelope, stderr := runProfilesJSON(t, document, "create", "--request", "-")
 		if status != result.ExitSuccess || stderr != "" {
@@ -118,6 +120,8 @@ func TestProfilesListSortsNamesAndReportsSections(t *testing.T) {
 	status, envelope, stderr := runProfilesJSON(t, "", "list")
 	want := []any{
 		map[string]any{"name": "alpha", "sections": []any{"generate", "upscale"}},
+		map[string]any{"name": "portrait", "sections": []any{"generate"}},
+		map[string]any{"name": "portrait-hd", "sections": []any{"generate"}},
 		map[string]any{"name": "zeta", "sections": []any{"upscale"}},
 	}
 	if status != result.ExitSuccess || stderr != "" || !reflect.DeepEqual(envelope["data"], map[string]any{"profiles": want}) {
@@ -161,6 +165,12 @@ func TestProfilesReplacementRequiresFlagsAndPreservesOldProfileOnWriteFailure(t 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	// Root and Windows ignore these mode bits, so the write cannot be made to fail there.
+	if probe, err := os.CreateTemp(dir, "probe-*"); err == nil {
+		_ = probe.Close()
+		_ = os.Remove(probe.Name())
+		return
+	}
 	status, envelope, stderr = runProfilesJSON(t, first, "create", "--request", "-", "--replace", "--yes")
 	if status != result.ExitInvalidRequest || stderr != "" || envelope["error"].(map[string]any)["code"] != result.CodeConfigurationWriteFailed {
 		t.Fatalf("failed replacement: status=%d stderr=%q result=%#v", status, stderr, envelope)

@@ -69,7 +69,7 @@ A stable machine-readable error code with a human-readable message and relevant 
 _Avoid_: Raw backend response, stack trace
 
 **Unknown Outcome**:
-A result indicating that Bediz cannot determine whether InvokeAI accepted a state-changing request because the connection failed before a conclusive response. The caller inspects InvokeAI state before deciding whether to submit another request.
+A result indicating that Bediz cannot determine whether InvokeAI accepted a state-changing request, because the connection failed before a conclusive response or an intermediary answered with a gateway status (502, 503, or 504). The caller inspects InvokeAI state before deciding whether to submit another request.
 _Avoid_: Operation failure, automatic retry
 
 **Core Generation**:

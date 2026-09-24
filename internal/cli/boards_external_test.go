@@ -265,6 +265,52 @@ func TestBoardsGetFallsBackToNameWhenIdentifierIsNotVisible(t *testing.T) {
 	}
 }
 
+func TestBoardsGetResolvesDotSegmentSelectorsOnlyByName(t *testing.T) {
+	for _, selector := range []string{".", ".."} {
+		t.Run(selector, func(t *testing.T) {
+			isolateUserConfigDir(t)
+			board := boardRecord("board-1", selector, false)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/boards/" && r.URL.Query().Get("all") == "true" {
+					_ = json.NewEncoder(w).Encode([]map[string]any{board})
+					return
+				}
+				// A cleaned dot segment reaches another route, such as the
+				// paginated board listing.
+				t.Errorf("unexpected request %s", r.URL)
+				_ = json.NewEncoder(w).Encode(map[string]any{"offset": 0, "limit": 10, "total": 1, "items": []any{board}})
+			}))
+			defer server.Close()
+
+			exitCode, envelope, stderr := runBoardsJSON(t, "", "boards", "get", selector, "--url", server.URL)
+
+			if exitCode != result.ExitSuccess || stderr != "" {
+				t.Fatalf("exit code = %d, stderr = %q, envelope = %#v", exitCode, stderr, envelope)
+			}
+			if got := envelope["data"].(map[string]any)["board"].(map[string]any); got["board_id"] != "board-1" || got["board_name"] != selector {
+				t.Fatalf("board = %#v", got)
+			}
+		})
+	}
+}
+
+func TestBoardsGetRejectsDetailNamingAnotherBoard(t *testing.T) {
+	isolateUserConfigDir(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(boardRecord("board-2", "Other", false))
+	}))
+	defer server.Close()
+
+	exitCode, envelope, stderr := runBoardsJSON(t, "", "boards", "get", "board-1", "--url", server.URL)
+
+	if exitCode != result.ExitInvokeAIFailure || stderr != "" {
+		t.Fatalf("exit code = %d, stderr = %q, envelope = %#v", exitCode, stderr, envelope)
+	}
+	if envelope["error"].(map[string]any)["code"] != result.CodeInvalidInvokeAIResponse {
+		t.Fatalf("envelope = %#v", envelope)
+	}
+}
+
 func TestBoardsGetReturnsSortedCandidatesForAmbiguousName(t *testing.T) {
 	isolateUserConfigDir(t)
 	server := newBoardsServer(t, []map[string]any{

@@ -156,10 +156,14 @@ func TestGenerateRejectsInapplicableProfileFieldsAfterModelResolution(t *testing
 	for _, tc := range []struct {
 		name, profile, model, field string
 		inventory                   []map[string]any
+		args                        []string
 	}{
-		{"schnell guidance", `{"schema_version":1,"name":"preset","generate":{"guidance":4}}`, "flux-schnell", "guidance", fluxCLIInventory()},
-		{"SDXL Qwen3", `{"schema_version":1,"name":"preset","generate":{"components":{"qwen3_encoder":"encoder-key"}}}`, "sdxl-main", "qwen3_encoder", sdxlInventory()},
-		{"FLUX Qwen3", `{"schema_version":1,"name":"preset","generate":{"components":{"qwen3_encoder":"encoder-key"}}}`, "flux-dev", "qwen3_encoder", fluxCLIInventory()},
+		{"schnell guidance", `{"schema_version":1,"name":"preset","generate":{"guidance":4}}`, "flux-schnell", "guidance", fluxCLIInventory(), nil},
+		{"SDXL Qwen3", `{"schema_version":1,"name":"preset","generate":{"components":{"qwen3_encoder":"encoder-key"}}}`, "sdxl-main", "qwen3_encoder", sdxlInventory(), nil},
+		{"FLUX Qwen3", `{"schema_version":1,"name":"preset","generate":{"components":{"qwen3_encoder":"encoder-key"}}}`, "flux-dev", "qwen3_encoder", fluxCLIInventory(), nil},
+		{"FLUX width", `{"schema_version":1,"name":"preset","generate":{"width":520,"height":512}}`, "flux-dev", "width", fluxCLIInventory(), nil},
+		{"FLUX height overridden", `{"schema_version":1,"name":"preset","generate":{"width":1024,"height":520}}`, "flux-dev", "height", fluxCLIInventory(), []string{"--width", "1024", "--height", "1024"}},
+		{"SDXL width", `{"schema_version":1,"name":"preset","generate":{"width":1020,"height":1024}}`, "sdxl-main", "width", sdxlInventory(), nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			isolateUserConfigDir(t)
@@ -176,7 +180,7 @@ func TestGenerateRejectsInapplicableProfileFieldsAfterModelResolution(t *testing
 			}))
 			defer server.Close()
 			var stdout, stderr bytes.Buffer
-			status := cli.New(&stdout, &stderr).Run(t.Context(), []string{"generate", "--no-wait", "--profile", "preset", "--model", tc.model, "--prompt", "test", "--url", server.URL, "--json"})
+			status := cli.New(&stdout, &stderr).Run(t.Context(), append([]string{"generate", "--no-wait", "--profile", "preset", "--model", tc.model, "--prompt", "test", "--url", server.URL, "--json"}, tc.args...))
 			var envelope map[string]any
 			if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
 				t.Fatal(err)
