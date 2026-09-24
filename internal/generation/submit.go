@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"slices"
 
+	"github.com/avienor/bediz/internal/capability"
 	"github.com/avienor/bediz/internal/graphops"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/result"
@@ -41,7 +42,7 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	if err := validateCommonRequest(request); err != nil {
 		return ExecutionReceipt{}, err
 	}
-	if err := graphops.CheckVersion(ctx, client); err != nil {
+	if err := capability.RequireSupportedVersion(ctx, client); err != nil {
 		return ExecutionReceipt{}, err
 	}
 	inventory, err := graphops.Inventory(ctx, client)

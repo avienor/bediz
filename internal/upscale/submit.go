@@ -7,6 +7,7 @@ import (
 	"math"
 	"slices"
 
+	"github.com/avienor/bediz/internal/capability"
 	"github.com/avienor/bediz/internal/graphops"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/images"
@@ -62,7 +63,7 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 		}
 		defer func() { _ = upload.Close() }()
 	}
-	if err := graphops.CheckVersion(ctx, client); err != nil {
+	if err := capability.RequireSupportedVersion(ctx, client); err != nil {
 		return ExecutionReceipt{}, err
 	}
 	inventory, err := graphops.Inventory(ctx, client)

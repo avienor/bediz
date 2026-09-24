@@ -161,18 +161,8 @@ func Create(ctx context.Context, client *httpclient.Client, request CreateReques
 		return CreateResult{}, operation.InvalidRequest("board name must not be empty")
 	}
 
-	var version struct {
-		Version string `json:"version"`
-	}
-	if err := client.GetJSON(ctx, "/api/v1/app/version", &version); err != nil {
+	if err := capability.RequireSupportedVersion(ctx, client); err != nil {
 		return CreateResult{}, err
-	}
-	supported, err := capability.SupportsInvokeAI(version.Version)
-	if err != nil {
-		return CreateResult{}, err
-	}
-	if !supported {
-		return CreateResult{}, operation.UnsupportedCapability(fmt.Sprintf("InvokeAI %s is outside the supported range %s", version.Version, capability.SupportedInvokeAIRange))
 	}
 
 	existing, err := boardsNamed(ctx, client, request.BoardName)

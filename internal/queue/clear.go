@@ -41,18 +41,8 @@ func Clear(ctx context.Context, client *httpclient.Client, request ClearRequest)
 		return ClearResult{}, operation.InvalidRequest("clearing a queue requires --yes")
 	}
 
-	var version struct {
-		Version string `json:"version"`
-	}
-	if err := client.GetJSON(ctx, "/api/v1/app/version", &version); err != nil {
+	if err := capability.RequireSupportedVersion(ctx, client); err != nil {
 		return ClearResult{}, err
-	}
-	supported, err := capability.SupportsInvokeAI(version.Version)
-	if err != nil {
-		return ClearResult{}, err
-	}
-	if !supported {
-		return ClearResult{}, operation.UnsupportedCapability(fmt.Sprintf("InvokeAI %s is outside the supported range %s", version.Version, capability.SupportedInvokeAIRange))
 	}
 
 	path := fmt.Sprintf("/api/v1/queue/%s/clear", url.PathEscape(request.QueueID))

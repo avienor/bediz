@@ -231,6 +231,12 @@ func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, e
 	if invalid, ok := errors.AsType[*operation.InvalidRequestError](err); ok {
 		return fail(result.CodeInvalidRequest, invalid.Error(), nil)
 	}
+	if invalid, ok := errors.AsType[*operation.InvalidInvokeAIVersionError](err); ok {
+		if invalid.Version == "" {
+			return fail(result.CodeInvalidVersionResponse, invalid.Error(), nil)
+		}
+		return fail(result.CodeInvalidInvokeAIVersion, invalid.Error(), map[string]any{"version": invalid.Version})
+	}
 	if unsupported, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); ok {
 		return fail(result.CodeUnsupportedCapability, unsupported.Error(), nil)
 	}

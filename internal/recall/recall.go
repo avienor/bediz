@@ -78,18 +78,8 @@ func submit(ctx context.Context, client *httpclient.Client, request Request, add
 	if err := validate(request); err != nil {
 		return Result{}, err
 	}
-	var versionResponse struct {
-		Version string `json:"version"`
-	}
-	if err := client.GetJSON(ctx, "/api/v1/app/version", &versionResponse); err != nil {
+	if err := capability.RequireSupportedVersion(ctx, client); err != nil {
 		return Result{}, err
-	}
-	supported, err := capability.SupportsInvokeAI(versionResponse.Version)
-	if err != nil {
-		return Result{}, operation.UnsupportedCapability(fmt.Sprintf("invalid InvokeAI version %q", versionResponse.Version))
-	}
-	if !supported {
-		return Result{}, operation.UnsupportedCapability(fmt.Sprintf("InvokeAI %s is outside the supported range %s", versionResponse.Version, capability.SupportedInvokeAIRange))
 	}
 	var openAPI openAPIDocument
 	if err := client.GetJSON(ctx, "/openapi.json", &openAPI); err != nil {

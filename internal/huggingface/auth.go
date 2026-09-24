@@ -95,18 +95,8 @@ func normalized(status string) (Result, error) {
 }
 
 func compatible(ctx context.Context, client *httpclient.Client, method string) error {
-	var version struct {
-		Version string `json:"version"`
-	}
-	if err := client.GetJSON(ctx, "/api/v1/app/version", &version); err != nil {
+	if err := capability.RequireSupportedVersion(ctx, client); err != nil {
 		return err
-	}
-	supported, err := capability.SupportsInvokeAI(version.Version)
-	if err != nil {
-		return &httpclient.InvalidResponseError{Err: err}
-	}
-	if !supported {
-		return operation.UnsupportedCapability("InvokeAI version is outside the tested Hugging Face authentication range")
 	}
 	var document struct {
 		Paths      map[string]map[string]jsontext.Value `json:"paths"`

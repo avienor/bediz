@@ -236,3 +236,16 @@ type InvalidQueueResultError struct {
 func (e *InvalidQueueResultError) Error() string {
 	return fmt.Sprintf("queue item %d %s", e.ItemID, e.Detail)
 }
+
+// InvalidInvokeAIVersionError reports a version answer that names no readable
+// InvokeAI version. Version is empty when the answer contained none.
+type InvalidInvokeAIVersionError struct {
+	Version string
+}
+
+func (e *InvalidInvokeAIVersionError) Error() string {
+	if e.Version == "" {
+		return "InvokeAI version response did not contain a version"
+	}
+	return fmt.Sprintf("invalid InvokeAI version %q", e.Version)
+}

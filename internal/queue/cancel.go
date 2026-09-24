@@ -41,18 +41,8 @@ func Cancel(ctx context.Context, client *httpclient.Client, request CancelReques
 		return CancelResult{}, operation.InvalidRequest("item id must be positive")
 	}
 
-	var version struct {
-		Version string `json:"version"`
-	}
-	if err := client.GetJSON(ctx, "/api/v1/app/version", &version); err != nil {
+	if err := capability.RequireSupportedVersion(ctx, client); err != nil {
 		return CancelResult{}, err
-	}
-	supported, err := capability.SupportsInvokeAI(version.Version)
-	if err != nil {
-		return CancelResult{}, err
-	}
-	if !supported {
-		return CancelResult{}, operation.UnsupportedCapability(fmt.Sprintf("InvokeAI %s is outside the supported range %s", version.Version, capability.SupportedInvokeAIRange))
 	}
 
 	path := fmt.Sprintf("/api/v1/queue/%s/i/%d/cancel", url.PathEscape(request.QueueID), request.ItemID)
