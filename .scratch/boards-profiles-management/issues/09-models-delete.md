@@ -6,11 +6,11 @@
 
 **Execution route:** `frontier-owned`. Deleting a managed model removes files, and the difference between managed and in-place registrations must be observed live on 6.14.1 before the contract is accepted.
 
-**Verification gate:** CLI-seam tests cover a missing `--yes` (exit 2, no network request), a name or other non-key selector (resolves nothing, `not_found`), success, a conclusive rejection, and an inconclusive result (`outcome_unknown`). Tests prove that the deletion is sent exactly once and never retried. Live 6.14.1 observations show that deleting a managed model removes its files, while deleting an in-place registration leaves the source file at its original path. `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify` pass.
+**Verification gate:** CLI-seam tests cover a missing `--yes` (exit 2, no network request), a name or other non-key selector (resolves nothing, `not_found`), success, a conclusive rejection, and an inconclusive result (`outcome_unknown`). Tests prove that the deletion is sent exactly once and never retried. Live 6.14.1 observations show that deleting a managed model removes its files, while deleting an in-place registration leaves the source file at its original path. The live check uses only small throwaway models installed for it: one managed install and one in-place registration from a temporary server path. It never touches a baseline or user model. Afterward, the model inventory must match the inventory before the check, apart from the throwaway source file, which is then removed by hand. Follow `docs/agents/live-verification.md`. `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify` pass.
 
 **Review gate:** Not required by this route.
 
-**Escalate when:** The live behavior of an in-place deletion removes the source file, or the endpoint deletes dependent models.
+**Escalate when:** The live behavior of an in-place deletion removes the source file, the endpoint deletes dependent models, or no suitably small throwaway model is available.
 
 **Permanent records:** V1 spec §14 records the observed deletion effects and the exact-key selector. Tests record the contract.
 
