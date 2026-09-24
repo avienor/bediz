@@ -24,6 +24,7 @@ func TestOperationNamesMatchThePublishedValues(t *testing.T) {
 		{name: "models scan", value: OperationModelsScan, wire: "models.scan"},
 		{name: "models install", value: OperationModelsInstall, wire: "models.install"},
 		{name: "models status", value: OperationModelsStatus, wire: "models.status"},
+		{name: "models delete", value: OperationModelsDelete, wire: "models.delete"},
 		{name: "images", value: OperationImages, wire: "images"},
 		{name: "images list", value: OperationImagesList, wire: "images.list"},
 		{name: "images get", value: OperationImagesGet, wire: "images.get"},

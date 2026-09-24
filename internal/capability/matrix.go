@@ -212,6 +212,15 @@ var Matrix = []Entry{
 		},
 	},
 	{
+		Operation:     result.OperationModelsDelete,
+		VersionPolicy: VersionPolicySupportedRange,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/app/version"},
+			{Method: "GET", Path: "/api/v2/models/i/{key}"},
+			{Method: "DELETE", Path: "/api/v2/models/i/{key}"},
+		},
+	},
+	{
 		Operation:     result.OperationImagesList,
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
 		Endpoints: []EndpointRequirement{

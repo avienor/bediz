@@ -982,7 +982,7 @@ func (c *CLI) newModelsCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
 	listCommand.Flags().StringVar(&options.modelType, "type", "", "include one exact model type")
 	listCommand.Flags().StringVar(&options.modelFormat, "format", "", "include one exact model format")
 	listCommand.Flags().StringVar(&options.modelName, "name", "", "include one exact model name")
-	command.AddCommand(listCommand, c.newModelsScanCommand(exitCode, jsonOutput), c.newModelsInstallCommand(exitCode, jsonOutput), c.newModelsStatusCommand(exitCode, jsonOutput))
+	command.AddCommand(listCommand, c.newModelsScanCommand(exitCode, jsonOutput), c.newModelsInstallCommand(exitCode, jsonOutput), c.newModelsStatusCommand(exitCode, jsonOutput), c.newModelsDeleteCommand(exitCode, jsonOutput))
 	return command
 }
 

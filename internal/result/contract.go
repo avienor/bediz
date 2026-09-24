@@ -17,6 +17,7 @@ const (
 	OperationModelsScan      = "models.scan"
 	OperationModelsInstall   = "models.install"
 	OperationModelsStatus    = "models.status"
+	OperationModelsDelete    = "models.delete"
 	OperationImages          = "images"
 	OperationImagesList      = "images.list"
 	OperationImagesGet       = "images.get"

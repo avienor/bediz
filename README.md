@@ -72,6 +72,8 @@ Model installation accepts an exact HTTP(S) artifact URL without userinfo, query
 
 `./bediz models scan --path /absolute/server/folder --json` lists model files found in a folder on the InvokeAI server and whether each is installed. The command reads server state and does not install anything. The path is resolved on the server, even when Bediz runs on another machine.
 
+`./bediz models delete MODEL_KEY --yes --json` removes one installed model selected by its exact key and returns the key, name, base, type, and format it had. InvokeAI deletes the files of a model in its managed models directory; an in-place registration loses only its record, and its source file stays where it was.
+
 Civitai installation requires an exact version ID or a model page URL with `modelVersionId`. One file is selected directly; among multiple files, exactly one primary is selected. Otherwise the JSON result returns numeric file choices; resubmit the same version with `--file-id` or `source.file_id`. A model page URL without `modelVersionId` never picks a version, even when only one exists: the JSON result returns numeric version choices to resubmit as the exact version reference. A direct Civitai download URL is a `url` source and follows the direct URL validation rules.
 
 Each operation also accepts a schema-versioned request document from a file or standard input. Operation arguments and flags cannot be mixed with `--request`:

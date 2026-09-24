@@ -29,6 +29,10 @@
       },
       "get": {}
     },
+    "/api/v2/models/i/{key}": {
+      "get": {},
+      "delete": {}
+    },
     "/api/v2/models/install/{id}": {
       "get": {}
     },
