@@ -22,7 +22,7 @@
 
 **Permanent records:** V1 spec §19 and §21 record the supported installation paths. README and `INSTALLATION.md` are added or updated. Any finding from the acceptance run is recorded by reopening ticket 02 or updating the spec.
 
-**Status:** in-progress (fresh-agent walkthrough and acceptance run left to the user)
+**Status:** closed
 
 ## Accepted behavior
 
@@ -61,3 +61,5 @@
   1. "Read https://github.com/avienor/bediz/blob/master/INSTALLATION.md and install Bediz v1.0.0-rc.1." Until the branch is merged, use the tag URL `https://github.com/avienor/bediz/blob/v1.0.0-rc.1/INSTALLATION.md`.
   2. In a new session: "Make an image of a lighthouse on a cliff during a storm."
   3. "Make a photo with Stable Diffusion 3.5 Large." The model is not installed. Expect the source, size, and license, and no installation without consent.
+
+**2026-09-24, closed by the user:** The user closed the ticket and will run the fresh-agent walkthrough of `INSTALLATION.md`, the README steps that install into `~/.local/bin`, and the skill-driven acceptance generation, including the missing-model consent case, themselves later. The unchecked items above are not verified yet. A finding from that run reopens ticket 02 or updates the spec, as the ticket's permanent-record rule requires.
