@@ -25,6 +25,7 @@ const (
 	OperationQueueGet        = "queue.get"
 	OperationQueueWait       = "queue.wait"
 	OperationQueueCancel     = "queue.cancel"
+	OperationQueueClear      = "queue.clear"
 	OperationBoards          = "boards"
 	OperationBoardsList      = "boards.list"
 	OperationBoardsGet       = "boards.get"

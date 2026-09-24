@@ -372,6 +372,13 @@ type queueCancelOptions struct {
 	requestPath string
 }
 
+type queueClearOptions struct {
+	remoteOptions
+	queueID     string
+	requestPath string
+	yes         bool
+}
+
 type queueWaitOptions struct {
 	remoteOptions
 	queueID     string
@@ -506,6 +513,30 @@ func (c *CLI) newQueueCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
 	cancelCommand.Flags().StringVar(&cancelOptions.queueID, "queue-id", "default", "exact InvokeAI queue id")
 	cancelCommand.Flags().StringVar(&cancelOptions.requestPath, "request", "", "read a request document from a file or standard input with -")
 	command.AddCommand(cancelCommand)
+
+	clearOptions := queueClearOptions{remoteOptions: defaultRemoteOptions(), queueID: "default"}
+	clearCommand := &cobra.Command{
+		Use:   "clear --yes",
+		Short: "Cancel and delete the queue items within your authorization scope",
+		Long: `Clear a queue within your InvokeAI authorization scope. The request is sent once
+and requires --yes, including when it comes from a request document.
+
+InvokeAI decides the scope, and Bediz neither widens nor narrows it: an admin
+caller, including the single-user default, cancels and deletes every item in the
+queue, pending, in progress, and completed alike; any other caller cancels and
+deletes only their own items. The result reports how many items InvokeAI deleted.`,
+		Args:        cobra.NoArgs,
+		Annotations: map[string]string{operationAnnotation: result.OperationQueueClear},
+		Run: func(cmd *cobra.Command, _ []string) {
+			clearOptions.captureRemoteFlags(cmd)
+			*exitCode = c.executeQueueClear(cmd.Context(), *jsonOutput, clearOptions, cmd.Flags().Changed("queue-id"))
+		},
+	}
+	addRemoteFlags(clearCommand, &clearOptions.remoteOptions, requestTimeoutUsage)
+	clearCommand.Flags().StringVar(&clearOptions.queueID, "queue-id", "default", "exact InvokeAI queue id")
+	clearCommand.Flags().StringVar(&clearOptions.requestPath, "request", "", "read a request document from a file or standard input with -")
+	clearCommand.Flags().BoolVar(&clearOptions.yes, "yes", false, "approve deleting the queue items within your authorization scope")
+	command.AddCommand(clearCommand)
 	return command
 }
 
@@ -557,6 +588,28 @@ func (c *CLI) executeQueueCancel(ctx context.Context, jsonOutput bool, options q
 		invoke:      queueops.Cancel,
 		render: func(cancel queueops.CancelResult, w io.Writer) error {
 			return renderQueueItem(queueops.GetResult{Item: cancel.Item}, w)
+		},
+	}
+	return execution.run(ctx, c, jsonOutput)
+}
+
+// executeQueueClear compiles --queue-id and a request document to the same
+// clear request. --yes is execution approval, not a document field, so it
+// applies to both.
+func (c *CLI) executeQueueClear(ctx context.Context, jsonOutput bool, options queueClearOptions, queueIDSet bool) int {
+	execution := remoteExecution[queueops.ClearRequest, queueops.ClearResult]{
+		operation:         result.OperationQueueClear,
+		connection:        options.remoteOptions,
+		request:           queueops.ClearRequest{SchemaVersion: 1, QueueID: options.queueID},
+		requestPath:       options.requestPath,
+		operationFlagsSet: queueIDSet,
+		invoke: func(ctx context.Context, client *httpclient.Client, request queueops.ClearRequest) (queueops.ClearResult, error) {
+			request.Approved = options.yes
+			return queueops.Clear(ctx, client, request)
+		},
+		render: func(clear queueops.ClearResult, w io.Writer) error {
+			_, err := fmt.Fprintf(w, "Deleted %d queue items from queue %s\n", clear.Deleted, clear.QueueID)
+			return err
 		},
 	}
 	return execution.run(ctx, c, jsonOutput)

@@ -260,6 +260,14 @@ var Matrix = []Entry{
 		},
 	},
 	{
+		Operation:     result.OperationQueueClear,
+		VersionPolicy: VersionPolicySupportedRange,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/app/version"},
+			{Method: "PUT", Path: "/api/v1/queue/{queue_id}/clear"},
+		},
+	},
+	{
 		Operation:     result.OperationBoardsList,
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
 		Endpoints: []EndpointRequirement{

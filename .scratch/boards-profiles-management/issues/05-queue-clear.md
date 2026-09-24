@@ -14,7 +14,7 @@
 
 **Permanent records:** V1 spec §15 records the observed destructive effect and the `--yes` requirement. Tests record the contract.
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Accepted behavior
 
@@ -24,6 +24,20 @@
 - The result data is `{"queue_id":..., "deleted": <count reported by InvokeAI>}`.
 - Clearing requires a supported InvokeAI version.
 
-- [ ] `--yes` is enforced before the network
-- [ ] The clear is sent once, and an uncertain result returns `outcome_unknown`
-- [ ] The live effect is recorded in spec §15
+- [x] `--yes` is enforced before the network
+- [x] The clear is sent once, and an uncertain result returns `outcome_unknown`
+- [x] The live effect is recorded in spec §15
+
+## Comments
+
+### 2026-09-24 implementation
+
+- The installed 6.14.1 source (`session_queue.clear` router and `session_queue_sqlite.clear`) passes `user_id=None` for an admin caller and the caller's own id otherwise, cancels every in-progress item in that scope, then deletes every row in `queue_id` in that scope, and returns `ClearResult{deleted}`. That matches the accepted scope, so no escalation was needed.
+- `internal/queue` owns `queue.Clear`. It validates the schema version, queue id, and approval, checks the supported version range, and sends one `PUT` through the non-retrying mutation path. A success without a non-negative `deleted` count returns `outcome_unknown`. `--yes` sets `ClearRequest.Approved`, which has no JSON tag, so a document `yes` field is rejected as unknown.
+- `doctor` registers `queue.clear` for the supported range only (version and clear route).
+- Live check on an isolated InvokeAI 6.14.1 instance (`invokeai-web` from the baseline venv, its own fresh root in a temporary directory, `127.0.0.1:9191`, `INVOKEAI_DEVICE=cpu`, no other client connected), stopped afterwards. The shared baseline at `127.0.0.1:9090` was not touched. Caller scope: single-user mode (`multiuser_enabled: false`), which makes the caller the default admin. Queue items used a model-free `range_of_size` → `iterate` → `add` graph, 300 iterations for a quick item and 30000 for a long-running one.
+  - Before the clear: item 1 `completed`, item 2 `in_progress`, item 3 `pending`.
+  - `queue clear --json` without `--yes`: exit 2, `invalid_request`, and the queue status was unchanged.
+  - `queue clear --yes --json`: exit 0, `{"queue_id":"default","deleted":3}`. Afterwards the queue status reported total 0 and `is_processing: false`, and `GET /api/v1/queue/default/i/{1,2,3}` each returned 404. The in-progress item stopped executing and was deleted along with the pending and completed items.
+  - With one completed item in queue `other` and one in `default`, `queue clear --yes --queue-id default --json` reported `deleted: 1`, and queue `other` still held its completed item. The endpoint is limited to one queue.
+  - Multi-user (non-admin) scope was not exercised live. The source restricts it to the caller's own items, and the spec records that.

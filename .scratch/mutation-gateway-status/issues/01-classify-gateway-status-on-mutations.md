@@ -17,6 +17,8 @@ Affected sends, as of `e978e5d`:
 - `models install`: a repeat submits a second install job.
 - `recall`, `auth huggingface login|logout`: repeating is harmless or idempotent.
 - `boards create`: a repeat is caught by the duplicate-name check, which returns `board_name_exists` with the created board's identifier.
+- `queue cancel` (added after `e978e5d`): repeating is harmless, because canceling an already terminal item succeeds with its unchanged status.
+- `queue clear` (added after `e978e5d`): a repeat clears again, which also deletes any items enqueued since the first clear. The repeat's `deleted` count covers only those later items.
 
 ## Options
 
