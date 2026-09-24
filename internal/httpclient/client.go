@@ -249,9 +249,11 @@ func (e *ResponseTooLargeError) Error() string {
 // file. Connection failures and gateway statuses are retried within the
 // configured limit before any body is handed to receive. The body passed to
 // receive fails with an InvalidResponseError when it cannot be read, including
-// a ResponseTooLargeError once it exceeds the configured response-size limit;
-// receive is called at most once and its error is returned unchanged.
-func (c *Client) GetStream(ctx context.Context, path, accept string, receive func(contentType string, body io.Reader) error) error {
+// a ResponseTooLargeError once it exceeds maxBody. The caller chooses maxBody
+// because a streamed body is not held in memory like a JSON response; an error
+// answer is still bounded by the configured response-size limit. receive is
+// called at most once and its error is returned unchanged.
+func (c *Client) GetStream(ctx context.Context, path, accept string, maxBody int64, receive func(contentType string, body io.Reader) error) error {
 	requestURL, err := c.resolve(path)
 	if err != nil {
 		return err
@@ -283,10 +285,10 @@ func (c *Client) GetStream(ctx context.Context, path, accept string, receive fun
 			return &HTTPError{StatusCode: response.StatusCode, Status: response.Status, Body: compactBody(responseBody)}
 		}
 		defer response.Body.Close()
-		if response.ContentLength > c.maxBody {
-			return &InvalidResponseError{URL: requestURL, Err: &ResponseTooLargeError{Limit: c.maxBody}}
+		if response.ContentLength > maxBody {
+			return &InvalidResponseError{URL: requestURL, Err: &ResponseTooLargeError{Limit: maxBody}}
 		}
-		body := &limitedBody{reader: response.Body, remaining: c.maxBody, limit: c.maxBody, url: requestURL}
+		body := &limitedBody{reader: response.Body, remaining: maxBody, limit: maxBody, url: requestURL}
 		return receive(response.Header.Get("Content-Type"), body)
 	}
 	return errors.New("request attempts exhausted")

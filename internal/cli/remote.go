@@ -324,7 +324,7 @@ func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, e
 		return fail(result.CodeConnectionFailed, "could not reach InvokeAI", nil)
 	}
 	if tooLarge, ok := errors.AsType[*httpclient.ResponseTooLargeError](err); ok {
-		return fail(result.CodeInvalidInvokeAIResponse, "InvokeAI returned a response larger than the configured limit", map[string]any{
+		return fail(result.CodeInvalidInvokeAIResponse, "InvokeAI returned a response larger than the limit", map[string]any{
 			"reason": "response_too_large", "limit_bytes": tooLarge.Limit,
 		})
 	}

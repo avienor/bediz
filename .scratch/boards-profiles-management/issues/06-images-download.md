@@ -36,4 +36,4 @@
   - `bediz doctor --json` reported `images.download` as compatible.
   - No temporary files were left behind. The live steps created no gallery images.
 - The full-image route is a plain GET that accepts the bearer token, so escalation was not needed. Hard-link publishing works on Linux, on macOS, and on NTFS on Windows. A file system without hard links (FAT or exFAT) makes the download fail with `output_write_failed`. It never falls back to an overwrite.
-- The download limit is the shared HTTP response-size limit, 16 MiB by default. A larger image, such as a large upscale, returns `response_too_large`.
+- 2026-09-24: The download originally used the shared JSON response-size limit of 16 MiB, which a 4× upscale of a 1024 × 1024 image (about 20–27 MB) would exceed. The user approved a separate, fixed download limit of 256 MiB. It is not configurable in V1. Spec §15.1 and §15.3 record the limit and the `--timeout` note.

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -293,7 +294,8 @@ func TestImagesDownloadLeavesATargetCreatedDuringTheDownloadUntouched(t *testing
 
 func TestImagesDownloadFailuresLeaveNoFile(t *testing.T) {
 	isolateUserConfigDir(t)
-	oversized := int(httpclient.DefaultMaxBody) + 1
+	const downloadLimit = 256 << 20
+	oversized := downloadLimit + 1
 	tests := []struct {
 		name        string
 		serve       http.HandlerFunc
@@ -312,11 +314,11 @@ func TestImagesDownloadFailuresLeaveNoFile(t *testing.T) {
 			serve: func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "image/png")
 				w.Header().Set("Content-Length", strconv.Itoa(oversized))
-				_, _ = w.Write(bytes.Repeat([]byte{0}, oversized))
+				_, _ = w.Write(downloadPNG)
 			},
 			wantCode:    "invalid_invokeai_response",
 			wantExit:    result.ExitInvokeAIFailure,
-			wantDetails: map[string]any{"reason": "response_too_large", "limit_bytes": float64(httpclient.DefaultMaxBody)},
+			wantDetails: map[string]any{"reason": "response_too_large", "limit_bytes": float64(downloadLimit)},
 		},
 		{
 			name: "streamed size above limit",
@@ -330,7 +332,7 @@ func TestImagesDownloadFailuresLeaveNoFile(t *testing.T) {
 			},
 			wantCode:    "invalid_invokeai_response",
 			wantExit:    result.ExitInvokeAIFailure,
-			wantDetails: map[string]any{"reason": "response_too_large", "limit_bytes": float64(httpclient.DefaultMaxBody)},
+			wantDetails: map[string]any{"reason": "response_too_large", "limit_bytes": float64(downloadLimit)},
 		},
 		{
 			name: "truncated body",
@@ -370,6 +372,22 @@ func TestImagesDownloadFailuresLeaveNoFile(t *testing.T) {
 				t.Fatalf("directory entries = %q, want none", entries)
 			}
 		})
+	}
+}
+
+func TestImagesDownloadAcceptsImagesLargerThanTheJSONResponseLimit(t *testing.T) {
+	isolateUserConfigDir(t)
+	large := append(slices.Clone(downloadPNG), make([]byte, int(httpclient.DefaultMaxBody))...)
+	server := newImageDownloadServer(t, fullImage(large))
+	output := filepath.Join(t.TempDir(), "large.png")
+
+	exitCode, envelope, stderr := runBoardsJSON(t, "", "images", "download", downloadImageName, "--output", output, "--url", server.URL)
+
+	if exitCode != result.ExitSuccess || stderr != "" {
+		t.Fatalf("exit code = %d, stderr = %q, envelope = %#v", exitCode, stderr, envelope["error"])
+	}
+	if written, err := os.ReadFile(output); err != nil || !bytes.Equal(written, large) {
+		t.Fatalf("written %d bytes, %v; want the %d served bytes", len(written), err, len(large))
 	}
 }
 

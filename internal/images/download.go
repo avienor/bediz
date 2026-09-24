@@ -16,6 +16,12 @@ import (
 	"github.com/avienor/bediz/internal/operation"
 )
 
+// DownloadMaxBytes bounds a downloaded image. It is separate from the JSON
+// response-size limit because the body streams to disk: it admits an
+// 8192 × 8192 image at four bytes per pixel and still stops a runaway response
+// from filling the disk.
+const DownloadMaxBytes = int64(256 << 20)
+
 type DownloadRequest struct {
 	SchemaVersion int    `json:"schema_version"`
 	ImageName     string `json:"image_name"`
@@ -48,7 +54,7 @@ func Download(ctx context.Context, client *httpclient.Client, request DownloadRe
 	}
 
 	result := DownloadResult{ImageName: request.ImageName, Path: target}
-	err = client.GetStream(ctx, "/api/v1/images/i/"+url.PathEscape(request.ImageName)+"/full", "image/*",
+	err = client.GetStream(ctx, "/api/v1/images/i/"+url.PathEscape(request.ImageName)+"/full", "image/*", DownloadMaxBytes,
 		func(contentType string, body io.Reader) error {
 			mediaType, _, err := mime.ParseMediaType(contentType)
 			if err != nil || !strings.HasPrefix(mediaType, "image/") {
