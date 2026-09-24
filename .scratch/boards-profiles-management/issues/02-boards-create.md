@@ -45,3 +45,9 @@
   - After archiving that board through the InvokeAI API, `boards create bediz-live-human --json`: exit 2, `board_name_exists` with the archived board's identifier.
   - `doctor --json`: ok, `boards.create` compatible with no failures.
   - InvokeAI web UI gallery at `http://127.0.0.1:9090`: `bediz-live-create` and `Bediz-Live-Create` appear in the board list; the archived board is hidden, which is the UI default.
+
+### 2026-09-24 review
+
+- Independent standards and spec reviews found no blocker. The unused test helper parameter was removed.
+- A 502, 503, or 504 answer to the create request is reported as a conclusive `invokeai_operation_failed`, as for every other mutation. Repeating the create after such an answer is safe, because the duplicate-name check returns `board_name_exists` with the identifier if the board was created. The question for all mutations is tracked in `.scratch/mutation-gateway-status/issues/01-classify-gateway-status-on-mutations.md`.
+- Not changed: InvokeAI's 300-character name limit is not checked locally (a longer name ends as `invokeai_operation_failed`); a positional name starting with `-` needs `--` or a Request Document.
