@@ -338,7 +338,7 @@ func TestGenerateSDXLRecallFailureKeepsSuccessfulReceipt(t *testing.T) {
 			_ = json.MarshalWrite(w, map[string]any{"queue_id": "default", "enqueued": 1, "requested": 1, "item_ids": []int{17}, "batch": map[string]any{"batch_id": "batch-sdxl"}})
 		case "/api/v1/recall/default":
 			recalls.Add(1)
-			http.Error(w, "Recall unavailable", http.StatusServiceUnavailable)
+			http.Error(w, "Recall failed", http.StatusInternalServerError)
 		default:
 			http.NotFound(w, r)
 		}

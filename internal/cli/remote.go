@@ -9,9 +9,11 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/avienor/bediz/internal/config"
+	"github.com/avienor/bediz/internal/generation"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/huggingface"
 	"github.com/avienor/bediz/internal/images"
@@ -152,7 +154,8 @@ func (e remoteExecution[Request, Result]) run(ctx context.Context, c *CLI, jsonO
 // the single place command failures become structured error codes; doctor
 // classifies its own diagnostic issues before it reports one. A failure after
 // an uploaded upscale source keeps the code of its cause and adds the complete
-// uploaded Image Reference to the details.
+// uploaded Image Reference to the details, and a failure after an applied queue
+// cancellation keeps the code of its cause and adds the canceled item.
 func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
 	if uploaded, ok := errors.AsType[*upscale.UploadedSourceError](err); ok {
 		return c.classifyRemote(operationName, jsonOutput, uploaded.Err, map[string]any{
@@ -160,10 +163,22 @@ func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
 			"source_uploaded": true,
 		})
 	}
+	if applied, ok := errors.AsType[*queueops.CancelAppliedError](err); ok {
+		return c.classifyRemote(operationName, jsonOutput, applied.Err, map[string]any{
+			"cancel_applied": true,
+			"queue_id":       applied.QueueID,
+			"item_id":        applied.ItemID,
+			"item_status":    applied.Status,
+		})
+	}
 	return c.classifyRemote(operationName, jsonOutput, err, nil)
 }
 
 func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, extra map[string]any) int {
+	var warnings []result.Warning
+	if preference, ok := errors.AsType[*upscale.ProfilePreferenceError](err); ok {
+		warnings = preference.Warnings
+	}
 	fail := func(code, message string, details map[string]any) int {
 		if len(extra) > 0 {
 			details = maps.Clone(details)
@@ -172,12 +187,30 @@ func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, e
 			}
 			maps.Copy(details, extra)
 		}
-		return c.fail(operationName, jsonOutput, code, message, details)
+		return c.failWithWarnings(operationName, jsonOutput, code, message, details, warnings)
+	}
+	if profile, ok := errors.AsType[*generation.ProfileLoadError](err); ok {
+		if errors.Is(profile.Err, os.ErrNotExist) {
+			return fail(result.CodeNotFound, fmt.Sprintf("profile %q was not found", profile.Name), nil)
+		}
+		return fail(result.CodeInvalidConfiguration, profile.Error(), map[string]any{"name": profile.Name})
+	}
+	if profile, ok := errors.AsType[*upscale.ProfileLoadError](err); ok {
+		if errors.Is(profile.Err, os.ErrNotExist) {
+			return fail(result.CodeNotFound, fmt.Sprintf("profile %q was not found", profile.Name), nil)
+		}
+		return fail(result.CodeInvalidConfiguration, profile.Error(), map[string]any{"name": profile.Name})
+	}
+	if setting, ok := errors.AsType[*generation.ProfileSettingError](err); ok {
+		return fail(result.CodeInvalidRequest, setting.Error(), map[string]any{"source": "profile", "profile": setting.Profile, "field": setting.Field})
 	}
 	if submission, ok := errors.AsType[*models.StarterSubmissionError](err); ok {
 		details := map[string]any{"jobs": submission.Progress.Jobs, "skipped": submission.Progress.Skipped}
-		if _, uncertain := errors.AsType[*httpclient.OutcomeUnknownError](submission.Cause); uncertain {
+		if unknown, uncertain := errors.AsType[*httpclient.OutcomeUnknownError](submission.Cause); uncertain {
 			details["uncertain_role"] = submission.Role
+			if unknown.StatusCode != 0 {
+				details["status"] = unknown.StatusCode
+			}
 			if submission.DependencyIndex != nil {
 				details["uncertain_dependency_index"] = *submission.DependencyIndex
 			}
@@ -210,8 +243,27 @@ func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, e
 	if _, ok := errors.AsType[*huggingface.UnchangedStateError](err); ok {
 		return fail(result.CodeInvokeAIOperationFailed, "InvokeAI did not clear the Hugging Face token", nil)
 	}
+	if exists, ok := errors.AsType[*operation.BoardNameExistsError](err); ok {
+		return fail(result.CodeInvalidRequest, exists.Error(), map[string]any{
+			"reason": "board_name_exists", "board_ids": exists.BoardIDs,
+		})
+	}
+	if exists, ok := errors.AsType[*operation.OutputExistsError](err); ok {
+		return fail(result.CodeInvalidRequest, exists.Error(), map[string]any{
+			"reason": "output_exists", "path": exists.Path,
+		})
+	}
+	if failed, ok := errors.AsType[*operation.OutputWriteError](err); ok {
+		return fail(result.CodeOutputWriteFailed, failed.Error(), map[string]any{"path": failed.Path})
+	}
 	if invalid, ok := errors.AsType[*operation.InvalidRequestError](err); ok {
 		return fail(result.CodeInvalidRequest, invalid.Error(), nil)
+	}
+	if invalid, ok := errors.AsType[*operation.InvalidInvokeAIVersionError](err); ok {
+		if invalid.Version == "" {
+			return fail(result.CodeInvalidVersionResponse, invalid.Error(), nil)
+		}
+		return fail(result.CodeInvalidInvokeAIVersion, invalid.Error(), map[string]any{"version": invalid.Version})
 	}
 	if unsupported, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); ok {
 		return fail(result.CodeUnsupportedCapability, unsupported.Error(), nil)
@@ -225,6 +277,14 @@ func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, e
 		return fail(result.CodeSelectionRequired, selection.Error(), map[string]any{
 			"kind": "civitai_version", "selector": selection.ModelID, "candidates": selection.Candidates,
 		})
+	}
+	if selection, ok := errors.AsType[*operation.BoardSelectionError](err); ok {
+		return fail(result.CodeSelectionRequired, selection.Error(), map[string]any{
+			"kind": "board", "selector": selection.Selector, "candidates": selection.Candidates,
+		})
+	}
+	if missing, ok := errors.AsType[*operation.NotFoundError](err); ok {
+		return fail(result.CodeNotFound, missing.Error(), nil)
 	}
 	if selection, ok := errors.AsType[*operation.SelectionRequiredError](err); ok {
 		return fail(result.CodeSelectionRequired, selection.Error(), map[string]any{
@@ -256,10 +316,10 @@ func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, e
 		})
 	}
 	if timeout, ok := errors.AsType[*operation.WaitTimeoutError](err); ok {
-		return fail(result.CodeWaitTimeout, timeout.Error(), queuePositionDetails(timeout.Position))
+		return fail(result.CodeWaitTimeout, timeout.Error(), waitStoppedDetails(timeout.Position, timeout.PendingItemIDs))
 	}
 	if interrupted, ok := errors.AsType[*operation.InterruptedError](err); ok {
-		return fail(result.CodeInterrupted, interrupted.Error(), queuePositionDetails(interrupted.Position))
+		return fail(result.CodeInterrupted, interrupted.Error(), waitStoppedDetails(interrupted.Position, interrupted.PendingItemIDs))
 	}
 	if failure, ok := errors.AsType[*operation.ItemFailureError](err); ok {
 		return fail(result.CodeInvokeAIOperationFailed, failure.Error(), acceptedItemDetails(failure.Position, failure.ItemID, failure.Status))
@@ -267,17 +327,26 @@ func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, e
 	if invalid, ok := errors.AsType[*operation.InvalidQueueResultError](err); ok {
 		return fail(result.CodeInvalidInvokeAIResponse, invalid.Error(), acceptedItemDetails(invalid.Position, invalid.ItemID, invalid.Status))
 	}
-	if _, ok := errors.AsType[*httpclient.OutcomeUnknownError](err); ok {
-		if operationName == result.OperationModelsInstall {
-			return fail(result.CodeOutcomeUnknown, "InvokeAI may have accepted the installation; inspect the current model inventory and install job list before submitting again", nil)
+	if unknown, ok := errors.AsType[*httpclient.OutcomeUnknownError](err); ok {
+		var details map[string]any
+		if unknown.StatusCode != 0 {
+			details = map[string]any{"status": unknown.StatusCode}
 		}
-		return fail(result.CodeOutcomeUnknown, "InvokeAI may have accepted the operation; inspect remote state before retrying", nil)
+		if operationName == result.OperationModelsInstall {
+			return fail(result.CodeOutcomeUnknown, "InvokeAI may have accepted the installation; inspect the current model inventory and install job list before submitting again", details)
+		}
+		return fail(result.CodeOutcomeUnknown, "InvokeAI may have accepted the operation; inspect remote state before retrying", details)
 	}
 	if errors.Is(err, context.Canceled) {
 		return fail(result.CodeInterrupted, "operation was interrupted locally", nil)
 	}
 	if _, ok := errors.AsType[*httpclient.NetworkError](err); ok {
 		return fail(result.CodeConnectionFailed, "could not reach InvokeAI", nil)
+	}
+	if tooLarge, ok := errors.AsType[*httpclient.ResponseTooLargeError](err); ok {
+		return fail(result.CodeInvalidInvokeAIResponse, "InvokeAI returned a response larger than the limit", map[string]any{
+			"reason": "response_too_large", "limit_bytes": tooLarge.Limit,
+		})
 	}
 	if _, ok := errors.AsType[*httpclient.InvalidResponseError](err); ok {
 		return fail(result.CodeInvalidInvokeAIResponse, "InvokeAI returned an invalid response", nil)
@@ -296,13 +365,27 @@ func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, e
 }
 
 // queuePositionDetails reports accepted remote work in the structured failure
-// details of a wait-path error.
+// details of a wait-path error. queue wait observes items without a batch
+// identity, so its details carry no batch_id.
 func queuePositionDetails(position operation.QueuePosition) map[string]any {
-	return map[string]any{
+	details := map[string]any{
 		"queue_id": position.QueueID,
-		"batch_id": position.BatchID,
 		"item_ids": position.ItemIDs,
 	}
+	if position.BatchID != "" {
+		details["batch_id"] = position.BatchID
+	}
+	return details
+}
+
+// waitStoppedDetails adds the items that were not yet terminal when the wait
+// tracked them.
+func waitStoppedDetails(position operation.QueuePosition, pending []int) map[string]any {
+	details := queuePositionDetails(position)
+	if pending != nil {
+		details["pending_item_ids"] = pending
+	}
+	return details
 }
 
 // acceptedItemDetails reports accepted remote work and the queue item that
@@ -327,6 +410,26 @@ type queueGetOptions struct {
 	remoteOptions
 	queueID     string
 	requestPath string
+}
+
+type queueCancelOptions struct {
+	remoteOptions
+	queueID     string
+	requestPath string
+}
+
+type queueClearOptions struct {
+	remoteOptions
+	queueID     string
+	requestPath string
+	yes         bool
+}
+
+type queueWaitOptions struct {
+	remoteOptions
+	queueID     string
+	requestPath string
+	waitTimeout time.Duration
 }
 
 func (c *CLI) newQueueCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
@@ -389,6 +492,97 @@ func (c *CLI) newQueueCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
 	getCommand.Flags().StringVar(&getOptions.queueID, "queue-id", "default", "exact InvokeAI queue id")
 	getCommand.Flags().StringVar(&getOptions.requestPath, "request", "", "read a request document from a file or standard input with -")
 	command.AddCommand(getCommand)
+
+	waitOptions := queueWaitOptions{remoteOptions: defaultRemoteOptions(), queueID: "default"}
+	waitCommand := &cobra.Command{
+		Use:         "wait ITEM_ID...",
+		Short:       "Wait until queue items reach a terminal status",
+		Args:        cobra.ArbitraryArgs,
+		Annotations: map[string]string{operationAnnotation: result.OperationQueueWait},
+		Run: func(cmd *cobra.Command, args []string) {
+			waitOptions.captureRemoteFlags(cmd)
+			if waitOptions.requestPath == "" && len(args) == 0 {
+				*exitCode = c.fail(result.OperationQueueWait, *jsonOutput, result.CodeInvalidRequest, "item ids or --request is required", nil)
+				return
+			}
+			if waitOptions.requestPath != "" && (len(args) > 0 || cmd.Flags().Changed("queue-id")) {
+				*exitCode = c.fail(result.OperationQueueWait, *jsonOutput, result.CodeInvalidRequest, "operation arguments and flags cannot be combined with --request", nil)
+				return
+			}
+			itemIDs := make([]int, 0, len(args))
+			for _, arg := range args {
+				itemID, err := strconv.Atoi(arg)
+				if err != nil {
+					*exitCode = c.fail(result.OperationQueueWait, *jsonOutput, result.CodeInvalidRequest, "item ids must be positive integers", nil)
+					return
+				}
+				itemIDs = append(itemIDs, itemID)
+			}
+			*exitCode = c.executeQueueWait(cmd.Context(), *jsonOutput, waitOptions, itemIDs)
+		},
+	}
+	addConnectionFlags(waitCommand, &waitOptions.remoteOptions)
+	waitCommand.Flags().DurationVar(&waitOptions.waitTimeout, "timeout", 0, "total local wait timeout; zero waits until every item reaches a terminal state")
+	waitCommand.Flags().StringVar(&waitOptions.queueID, "queue-id", "default", "exact InvokeAI queue id")
+	waitCommand.Flags().StringVar(&waitOptions.requestPath, "request", "", "read a request document from a file or standard input with -")
+	command.AddCommand(waitCommand)
+
+	cancelOptions := queueCancelOptions{remoteOptions: defaultRemoteOptions(), queueID: "default"}
+	cancelCommand := &cobra.Command{
+		Use:         "cancel ITEM_ID",
+		Short:       "Cancel one queue item",
+		Args:        cobra.MaximumNArgs(1),
+		Annotations: map[string]string{operationAnnotation: result.OperationQueueCancel},
+		Run: func(cmd *cobra.Command, args []string) {
+			cancelOptions.captureRemoteFlags(cmd)
+			if cancelOptions.requestPath == "" && len(args) == 0 {
+				*exitCode = c.fail(result.OperationQueueCancel, *jsonOutput, result.CodeInvalidRequest, "item id or --request is required", nil)
+				return
+			}
+			if cancelOptions.requestPath != "" && (len(args) > 0 || cmd.Flags().Changed("queue-id")) {
+				*exitCode = c.fail(result.OperationQueueCancel, *jsonOutput, result.CodeInvalidRequest, "operation arguments and flags cannot be combined with --request", nil)
+				return
+			}
+			itemID := 0
+			var err error
+			if len(args) == 1 {
+				itemID, err = strconv.Atoi(args[0])
+			}
+			if len(args) == 1 && (err != nil || itemID < 1) {
+				*exitCode = c.fail(result.OperationQueueCancel, *jsonOutput, result.CodeInvalidRequest, "item id must be a positive integer", nil)
+				return
+			}
+			*exitCode = c.executeQueueCancel(cmd.Context(), *jsonOutput, cancelOptions, itemID)
+		},
+	}
+	addRemoteFlags(cancelCommand, &cancelOptions.remoteOptions, requestTimeoutUsage)
+	cancelCommand.Flags().StringVar(&cancelOptions.queueID, "queue-id", "default", "exact InvokeAI queue id")
+	cancelCommand.Flags().StringVar(&cancelOptions.requestPath, "request", "", "read a request document from a file or standard input with -")
+	command.AddCommand(cancelCommand)
+
+	clearOptions := queueClearOptions{remoteOptions: defaultRemoteOptions(), queueID: "default"}
+	clearCommand := &cobra.Command{
+		Use:   "clear --yes",
+		Short: "Cancel and delete the queue items within your authorization scope",
+		Long: `Clear a queue within your InvokeAI authorization scope. The request is sent once
+and requires --yes, including when it comes from a request document.
+
+InvokeAI decides the scope, and Bediz neither widens nor narrows it: an admin
+caller, including the single-user default, cancels and deletes every item in the
+queue, pending, in progress, and completed alike; any other caller cancels and
+deletes only their own items. The result reports how many items InvokeAI deleted.`,
+		Args:        cobra.NoArgs,
+		Annotations: map[string]string{operationAnnotation: result.OperationQueueClear},
+		Run: func(cmd *cobra.Command, _ []string) {
+			clearOptions.captureRemoteFlags(cmd)
+			*exitCode = c.executeQueueClear(cmd.Context(), *jsonOutput, clearOptions, cmd.Flags().Changed("queue-id"))
+		},
+	}
+	addRemoteFlags(clearCommand, &clearOptions.remoteOptions, requestTimeoutUsage)
+	clearCommand.Flags().StringVar(&clearOptions.queueID, "queue-id", "default", "exact InvokeAI queue id")
+	clearCommand.Flags().StringVar(&clearOptions.requestPath, "request", "", "read a request document from a file or standard input with -")
+	clearCommand.Flags().BoolVar(&clearOptions.yes, "yes", false, "approve deleting the queue items within your authorization scope")
+	command.AddCommand(clearCommand)
 	return command
 }
 
@@ -431,6 +625,77 @@ func renderQueueItem(get queueops.GetResult, w io.Writer) error {
 	return err
 }
 
+func (c *CLI) executeQueueCancel(ctx context.Context, jsonOutput bool, options queueCancelOptions, itemID int) int {
+	execution := remoteExecution[queueops.CancelRequest, queueops.CancelResult]{
+		operation:   result.OperationQueueCancel,
+		connection:  options.remoteOptions,
+		request:     queueops.CancelRequest{SchemaVersion: 1, QueueID: options.queueID, ItemID: itemID},
+		requestPath: options.requestPath,
+		invoke:      queueops.Cancel,
+		render: func(cancel queueops.CancelResult, w io.Writer) error {
+			return renderQueueItem(queueops.GetResult{Item: cancel.Item}, w)
+		},
+	}
+	return execution.run(ctx, c, jsonOutput)
+}
+
+// executeQueueClear compiles --queue-id and a request document to the same
+// clear request. --yes is execution approval, not a document field, so it
+// applies to both.
+func (c *CLI) executeQueueClear(ctx context.Context, jsonOutput bool, options queueClearOptions, queueIDSet bool) int {
+	execution := remoteExecution[queueops.ClearRequest, queueops.ClearResult]{
+		operation:         result.OperationQueueClear,
+		connection:        options.remoteOptions,
+		request:           queueops.ClearRequest{SchemaVersion: 1, QueueID: options.queueID},
+		requestPath:       options.requestPath,
+		operationFlagsSet: queueIDSet,
+		invoke: func(ctx context.Context, client *httpclient.Client, request queueops.ClearRequest) (queueops.ClearResult, error) {
+			request.Approved = options.yes
+			return queueops.Clear(ctx, client, request)
+		},
+		render: func(clear queueops.ClearResult, w io.Writer) error {
+			_, err := fmt.Fprintf(w, "Deleted %d queue items from queue %s\n", clear.Deleted, clear.QueueID)
+			return err
+		},
+	}
+	return execution.run(ctx, c, jsonOutput)
+}
+
+// executeQueueWait compiles positional item ids and a request document to the
+// same wait request. --timeout bounds only local waiting, so it may accompany
+// --request; every HTTP request keeps its own bounded transport timeout.
+func (c *CLI) executeQueueWait(ctx context.Context, jsonOutput bool, options queueWaitOptions, itemIDs []int) int {
+	if options.waitTimeout < 0 {
+		return c.fail(result.OperationQueueWait, jsonOutput, result.CodeInvalidRequest, "timeout cannot be negative", nil)
+	}
+	execution := remoteExecution[queueops.WaitRequest, queueops.WaitResult]{
+		operation:   result.OperationQueueWait,
+		connection:  options.remoteOptions,
+		request:     queueops.WaitRequest{SchemaVersion: 1, QueueID: options.queueID, ItemIDs: itemIDs},
+		requestPath: options.requestPath,
+		invoke: func(ctx context.Context, client *httpclient.Client, request queueops.WaitRequest) (queueops.WaitResult, error) {
+			return queueops.Wait(ctx, client, request, queueops.WaitOptions{Timeout: options.waitTimeout})
+		},
+		render: renderQueueWait,
+	}
+	return execution.run(ctx, c, jsonOutput)
+}
+
+// renderQueueWait writes one line per item in request order and appends the
+// concise error of a failed or canceled item when InvokeAI reports one.
+func renderQueueWait(wait queueops.WaitResult, w io.Writer) error {
+	for _, item := range wait.Items {
+		line := fmt.Sprintf("%d\t%s\t%s", item.ItemID, item.Status, item.BatchID)
+		if item.Error != nil {
+			line += "\t" + strings.TrimPrefix(item.Error.Type+": "+item.Error.Message, ": ")
+		}
+		if _, err := fmt.Fprintln(w, line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type imageListOptions struct {
 	remoteOptions
 	offset              int
@@ -449,6 +714,18 @@ type imageGetOptions struct {
 type imageUploadOptions struct {
 	remoteOptions
 	requestPath string
+}
+
+type imageDownloadOptions struct {
+	remoteOptions
+	requestPath string
+	output      string
+}
+
+type imageDeleteOptions struct {
+	remoteOptions
+	requestPath string
+	yes         bool
 }
 
 func (c *CLI) newImagesCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
@@ -533,6 +810,62 @@ func (c *CLI) newImagesCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
 	addRemoteFlags(uploadCommand, &uploadOptions.remoteOptions, requestTimeoutUsage)
 	uploadCommand.Flags().StringVar(&uploadOptions.requestPath, "request", "", "read a request document from a file or standard input with -")
 	command.AddCommand(uploadCommand)
+
+	downloadOptions := imageDownloadOptions{remoteOptions: defaultRemoteOptions()}
+	downloadCommand := &cobra.Command{
+		Use:         "download IMAGE_NAME --output PATH",
+		Short:       "Save a full-resolution image to a new local file",
+		Args:        cobra.MaximumNArgs(1),
+		Annotations: map[string]string{operationAnnotation: result.OperationImagesDownload},
+		Run: func(cmd *cobra.Command, args []string) {
+			downloadOptions.captureRemoteFlags(cmd)
+			if downloadOptions.requestPath != "" && (len(args) > 0 || cmd.Flags().Changed("output")) {
+				*exitCode = c.fail(result.OperationImagesDownload, *jsonOutput, result.CodeInvalidRequest, "image name and --output cannot be combined with --request", nil)
+				return
+			}
+			if downloadOptions.requestPath == "" && len(args) == 0 {
+				*exitCode = c.fail(result.OperationImagesDownload, *jsonOutput, result.CodeInvalidRequest, "image name or --request is required", nil)
+				return
+			}
+			imageName := ""
+			if len(args) == 1 {
+				imageName = args[0]
+			}
+			*exitCode = c.executeImagesDownload(cmd.Context(), *jsonOutput, downloadOptions, imageName)
+		},
+	}
+	addRemoteFlags(downloadCommand, &downloadOptions.remoteOptions, requestTimeoutUsage)
+	downloadCommand.Flags().StringVar(&downloadOptions.output, "output", "", "new local file to write; a relative path resolves against the working directory")
+	downloadCommand.Flags().StringVar(&downloadOptions.requestPath, "request", "", "read a request document from a file or standard input with -")
+	command.AddCommand(downloadCommand)
+
+	deleteOptions := imageDeleteOptions{remoteOptions: defaultRemoteOptions()}
+	deleteCommand := &cobra.Command{
+		Use:         "delete IMAGE_NAME --yes",
+		Short:       "Delete one image by its exact InvokeAI image name",
+		Args:        cobra.MaximumNArgs(1),
+		Annotations: map[string]string{operationAnnotation: result.OperationImagesDelete},
+		Run: func(cmd *cobra.Command, args []string) {
+			deleteOptions.captureRemoteFlags(cmd)
+			if deleteOptions.requestPath != "" && len(args) > 0 {
+				*exitCode = c.fail(result.OperationImagesDelete, *jsonOutput, result.CodeInvalidRequest, "image name cannot be combined with --request", nil)
+				return
+			}
+			if deleteOptions.requestPath == "" && len(args) == 0 {
+				*exitCode = c.fail(result.OperationImagesDelete, *jsonOutput, result.CodeInvalidRequest, "image name or --request is required", nil)
+				return
+			}
+			imageName := ""
+			if len(args) == 1 {
+				imageName = args[0]
+			}
+			*exitCode = c.executeImagesDelete(cmd.Context(), *jsonOutput, deleteOptions, imageName)
+		},
+	}
+	addRemoteFlags(deleteCommand, &deleteOptions.remoteOptions, requestTimeoutUsage)
+	deleteCommand.Flags().StringVar(&deleteOptions.requestPath, "request", "", "read a request document from a file or standard input with -")
+	deleteCommand.Flags().BoolVar(&deleteOptions.yes, "yes", false, "approve deleting the named image")
+	command.AddCommand(deleteCommand)
 	return command
 }
 
@@ -593,6 +926,39 @@ func (c *CLI) executeImagesUpload(ctx context.Context, jsonOutput bool, options 
 	return execution.run(ctx, c, jsonOutput)
 }
 
+func (c *CLI) executeImagesDownload(ctx context.Context, jsonOutput bool, options imageDownloadOptions, imageName string) int {
+	execution := remoteExecution[images.DownloadRequest, images.DownloadResult]{
+		operation:   result.OperationImagesDownload,
+		connection:  options.remoteOptions,
+		request:     images.DownloadRequest{SchemaVersion: 1, ImageName: imageName, Output: options.output},
+		requestPath: options.requestPath,
+		invoke:      images.Download,
+		render: func(download images.DownloadResult, w io.Writer) error {
+			_, err := fmt.Fprintf(w, "%s\t%d\t%s\n", download.Path, download.SizeBytes, download.ContentType)
+			return err
+		},
+	}
+	return execution.run(ctx, c, jsonOutput)
+}
+
+func (c *CLI) executeImagesDelete(ctx context.Context, jsonOutput bool, options imageDeleteOptions, imageName string) int {
+	execution := remoteExecution[images.DeleteRequest, images.DeleteResult]{
+		operation:   result.OperationImagesDelete,
+		connection:  options.remoteOptions,
+		request:     images.DeleteRequest{SchemaVersion: 1, ImageName: imageName},
+		requestPath: options.requestPath,
+		invoke: func(ctx context.Context, client *httpclient.Client, request images.DeleteRequest) (images.DeleteResult, error) {
+			request.Approved = options.yes
+			return images.Delete(ctx, client, request)
+		},
+		render: func(deleted images.DeleteResult, w io.Writer) error {
+			_, err := fmt.Fprintln(w, deleted.ImageName)
+			return err
+		},
+	}
+	return execution.run(ctx, c, jsonOutput)
+}
+
 func renderUploadedImage(upload images.GetResult, w io.Writer) error {
 	_, err := fmt.Fprintf(w, "%s\t%s\n", upload.Image.ImageName, upload.Image.ImageURL)
 	return err
@@ -636,7 +1002,7 @@ func (c *CLI) newModelsCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
 	listCommand.Flags().StringVar(&options.modelType, "type", "", "include one exact model type")
 	listCommand.Flags().StringVar(&options.modelFormat, "format", "", "include one exact model format")
 	listCommand.Flags().StringVar(&options.modelName, "name", "", "include one exact model name")
-	command.AddCommand(listCommand, c.newModelsInstallCommand(exitCode, jsonOutput), c.newModelsStatusCommand(exitCode, jsonOutput))
+	command.AddCommand(listCommand, c.newModelsScanCommand(exitCode, jsonOutput), c.newModelsInstallCommand(exitCode, jsonOutput), c.newModelsStatusCommand(exitCode, jsonOutput), c.newModelsDeleteCommand(exitCode, jsonOutput))
 	return command
 }
 

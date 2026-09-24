@@ -6,7 +6,6 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -107,6 +106,10 @@ type installBackendJob struct {
 var huggingFaceRepoID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$`)
 var windowsServerPath = regexp.MustCompile(`^(?:[A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+)`)
 
+func isAbsoluteServerPath(value string) bool {
+	return strings.HasPrefix(value, "/") || windowsServerPath.MatchString(value)
+}
+
 func Install(ctx context.Context, client *httpclient.Client, request InstallRequest) (InstallResult, error) {
 	return (Installer{Backend: client}).Install(ctx, request)
 }
@@ -152,7 +155,7 @@ func (installer Installer) Install(ctx context.Context, request InstallRequest) 
 			return InstallResult{}, err
 		}
 	case "path":
-		if !strings.HasPrefix(source, "/") && !windowsServerPath.MatchString(source) {
+		if !isAbsoluteServerPath(source) {
 			return InstallResult{}, operation.InvalidRequest("server path source must be absolute in the InvokeAI filesystem namespace")
 		}
 	case "civitai":
@@ -710,18 +713,8 @@ func validBackendJob(job installBackendJob) error {
 }
 
 func checkInstallCompatibility(ctx context.Context, client *httpclient.Client, hasSourceToken bool, sourceType string) error {
-	var version struct {
-		Version string `json:"version"`
-	}
-	if err := client.GetJSON(ctx, "/api/v1/app/version", &version); err != nil {
+	if err := capability.RequireSupportedVersion(ctx, client); err != nil {
 		return err
-	}
-	supported, err := capability.SupportsInvokeAI(version.Version)
-	if err != nil {
-		return &httpclient.InvalidResponseError{Err: fmt.Errorf("invalid InvokeAI version: %w", err)}
-	}
-	if !supported {
-		return operation.UnsupportedCapability("InvokeAI version is outside the tested model installation range")
 	}
 	var document struct {
 		Paths map[string]map[string]capability.InstallEndpoint `json:"paths"`

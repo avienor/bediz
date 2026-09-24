@@ -219,6 +219,16 @@ func Get(ctx context.Context, client *httpclient.Client, request GetRequest) (Ge
 	if err := client.GetJSON(ctx, path, &response); err != nil {
 		return GetResult{}, err
 	}
+	item, err := projectItem(ctx, client, response)
+	if err != nil {
+		return GetResult{}, err
+	}
+	return GetResult{Item: item}, nil
+}
+
+// projectItem normalizes one InvokeAI queue-item record to the queue get
+// projection and hydrates the Image References of its image outputs.
+func projectItem(ctx context.Context, client *httpclient.Client, response itemRecord) (Item, error) {
 	item := Item{
 		ItemID:      response.ItemID,
 		QueueID:     response.QueueID,
@@ -276,7 +286,7 @@ func Get(ctx context.Context, client *httpclient.Client, request GetRequest) (Ge
 			if httpError, ok := errors.AsType[*httpclient.HTTPError](err); ok && httpError.StatusCode == http.StatusNotFound {
 				continue
 			}
-			return GetResult{}, fmt.Errorf("get output image %q: %w", imageName, err)
+			return Item{}, fmt.Errorf("get output image %q: %w", imageName, err)
 		}
 		if image.Image.ImageName != imageName {
 			if item.ImageOutputValidationError == "" {
@@ -294,5 +304,5 @@ func Get(ctx context.Context, client *httpclient.Client, request GetRequest) (Ge
 			item.NonIntermediateImageOutputCount++
 		}
 	}
-	return GetResult{Item: item}, nil
+	return item, nil
 }

@@ -180,6 +180,13 @@ var Matrix = []Entry{
 		},
 	},
 	{
+		Operation:     result.OperationModelsScan,
+		VersionPolicy: VersionPolicyCompatibleEndpoint,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v2/models/scan_folder"},
+		},
+	},
+	{
 		Operation:     result.OperationModelsInstall,
 		VersionPolicy: VersionPolicySupportedRange,
 		Endpoints: []EndpointRequirement{
@@ -205,6 +212,15 @@ var Matrix = []Entry{
 		},
 	},
 	{
+		Operation:     result.OperationModelsDelete,
+		VersionPolicy: VersionPolicySupportedRange,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/app/version"},
+			{Method: "GET", Path: "/api/v2/models/i/{key}"},
+			{Method: "DELETE", Path: "/api/v2/models/i/{key}"},
+		},
+	},
+	{
 		Operation:     result.OperationImagesList,
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
 		Endpoints: []EndpointRequirement{
@@ -227,6 +243,21 @@ var Matrix = []Entry{
 		},
 	},
 	{
+		Operation:     result.OperationImagesDownload,
+		VersionPolicy: VersionPolicyCompatibleEndpoint,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/images/i/{image_name}/full"},
+		},
+	},
+	{
+		Operation:     result.OperationImagesDelete,
+		VersionPolicy: VersionPolicySupportedRange,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/app/version"},
+			{Method: "DELETE", Path: "/api/v1/images/i/{image_name}"},
+		},
+	},
+	{
 		Operation:     result.OperationQueueList,
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
 		Endpoints: []EndpointRequirement{
@@ -240,6 +271,55 @@ var Matrix = []Entry{
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v1/queue/{queue_id}/i/{item_id}"},
 			{Method: "GET", Path: "/api/v1/images/i/{image_name}"},
+		},
+	},
+	{
+		Operation:     result.OperationQueueWait,
+		VersionPolicy: VersionPolicyCompatibleEndpoint,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/queue/{queue_id}/i/{item_id}"},
+			{Method: "GET", Path: "/api/v1/images/i/{image_name}"},
+		},
+	},
+	{
+		Operation:     result.OperationQueueCancel,
+		VersionPolicy: VersionPolicySupportedRange,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/app/version"},
+			{Method: "PUT", Path: "/api/v1/queue/{queue_id}/i/{item_id}/cancel"},
+			{Method: "GET", Path: "/api/v1/images/i/{image_name}"},
+		},
+	},
+	{
+		Operation:     result.OperationQueueClear,
+		VersionPolicy: VersionPolicySupportedRange,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/app/version"},
+			{Method: "PUT", Path: "/api/v1/queue/{queue_id}/clear"},
+		},
+	},
+	{
+		Operation:     result.OperationBoardsList,
+		VersionPolicy: VersionPolicyCompatibleEndpoint,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/boards/"},
+		},
+	},
+	{
+		Operation:     result.OperationBoardsGet,
+		VersionPolicy: VersionPolicyCompatibleEndpoint,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/boards/{board_id}"},
+			{Method: "GET", Path: "/api/v1/boards/"},
+		},
+	},
+	{
+		Operation:     result.OperationBoardsCreate,
+		VersionPolicy: VersionPolicySupportedRange,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/app/version"},
+			{Method: "GET", Path: "/api/v1/boards/"},
+			{Method: "POST", Path: "/api/v1/boards/"},
 		},
 	},
 	AnimaGenerationEntry(),

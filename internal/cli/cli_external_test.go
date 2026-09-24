@@ -3236,21 +3236,28 @@ func TestGlobalJSONFlagBeforeVersionReturnsStableContract(t *testing.T) {
 func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 	isolateUserConfigDir(t)
 	paths := map[string]any{
-		"/api/v1/app/version": map[string]any{"get": map[string]any{}},
-		"/api/v2/models/":     map[string]any{"get": map[string]any{}},
+		"/api/v1/app/version":        map[string]any{"get": map[string]any{}},
+		"/api/v2/models/":            map[string]any{"get": map[string]any{}},
+		"/api/v2/models/scan_folder": map[string]any{"get": map[string]any{}},
 		"/api/v2/models/install": map[string]any{"post": map[string]any{
 			"parameters": []any{map[string]any{"name": "source", "in": "query", "required": true}},
 			"responses":  map[string]any{"201": map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/ModelInstallJob"}}}}},
 		}},
 		"/api/v2/models/install/{id}":                    map[string]any{"get": map[string]any{}},
+		"/api/v2/models/i/{key}":                         map[string]any{"get": map[string]any{}, "delete": map[string]any{}},
 		"/api/v2/models/starter_models":                  map[string]any{"get": map[string]any{"responses": map[string]any{"200": map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/StarterModelResponse"}}}}}}},
 		"/api/v1/images/":                                map[string]any{"get": map[string]any{}},
-		"/api/v1/images/i/{image_name}":                  map[string]any{"get": map[string]any{}},
+		"/api/v1/images/i/{image_name}":                  map[string]any{"get": map[string]any{}, "delete": map[string]any{}},
 		"/api/v1/images/upload":                          map[string]any{"post": map[string]any{}},
+		"/api/v1/images/i/{image_name}/full":             map[string]any{"get": map[string]any{}},
 		"/api/v1/queue/{queue_id}/item_ids":              map[string]any{"get": map[string]any{}},
 		"/api/v1/queue/{queue_id}/item_summaries_by_ids": map[string]any{"post": map[string]any{}},
 		"/api/v1/queue/{queue_id}/i/{item_id}":           map[string]any{"get": map[string]any{}},
+		"/api/v1/queue/{queue_id}/i/{item_id}/cancel":    map[string]any{"put": map[string]any{}},
+		"/api/v1/queue/{queue_id}/clear":                 map[string]any{"put": map[string]any{}},
 		"/api/v1/queue/{queue_id}/enqueue_batch":         map[string]any{"post": map[string]any{}},
+		"/api/v1/boards/":                                map[string]any{"get": map[string]any{}, "post": map[string]any{}},
+		"/api/v1/boards/{board_id}":                      map[string]any{"get": map[string]any{}},
 	}
 	openAPIDocument := sdxlOpenAPIFixture(t)
 	paths["/api/v1/recall/{queue_id}"] = openAPIDocument["paths"].(map[string]any)["/api/v1/recall/{queue_id}"]
@@ -3322,7 +3329,7 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 		}
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
+	wantOperations := []string{"models.list", "models.scan", "models.install", "models.install", "models.status", "models.delete", "images.list", "images.get", "images.upload", "images.download", "images.delete", "queue.list", "queue.get", "queue.wait", "queue.cancel", "queue.clear", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if envelope.SchemaVersion != 1 || !envelope.OK || envelope.Operation != "doctor" || !envelope.Data.Ready ||
 		!slices.Equal(operations, wantOperations) || envelope.Data.UISync["generate"] != "partial" ||
 		len(envelope.Data.OpenAPI.Invocations) != 26 || len(envelope.Data.Models.Relevant) != 12 || len(envelope.Data.Models.Requirements) != 13 {
@@ -3502,11 +3509,20 @@ func TestImplementedRemoteCommandsReportStableOperationsAndFailures(t *testing.T
 	}{
 		{name: "doctor", args: []string{"doctor"}, operation: result.OperationDoctor},
 		{name: "models list", args: []string{"models", "list"}, operation: result.OperationModelsList},
+		{name: "models delete", args: []string{"models", "delete", "model-key", "--yes"}, operation: result.OperationModelsDelete},
 		{name: "images list", args: []string{"images", "list"}, operation: result.OperationImagesList},
 		{name: "images get", args: []string{"images", "get", "image-1.png"}, operation: result.OperationImagesGet},
 		{name: "images upload", args: []string{"images", "upload", imagePath}, operation: result.OperationImagesUpload},
+		{name: "images download", args: []string{"images", "download", "image-1.png", "--output", filepath.Join(t.TempDir(), "image-1.png")}, operation: result.OperationImagesDownload},
+		{name: "images delete", args: []string{"images", "delete", "image-1.png", "--yes"}, operation: result.OperationImagesDelete},
 		{name: "queue list", args: []string{"queue", "list"}, operation: result.OperationQueueList},
 		{name: "queue get", args: []string{"queue", "get", "5"}, operation: result.OperationQueueGet},
+		{name: "queue wait", args: []string{"queue", "wait", "5"}, operation: result.OperationQueueWait},
+		{name: "queue cancel", args: []string{"queue", "cancel", "5"}, operation: result.OperationQueueCancel},
+		{name: "queue clear", args: []string{"queue", "clear", "--yes"}, operation: result.OperationQueueClear},
+		{name: "boards list", args: []string{"boards", "list"}, operation: result.OperationBoardsList},
+		{name: "boards get", args: []string{"boards", "get", "board-1"}, operation: result.OperationBoardsGet},
+		{name: "boards create", args: []string{"boards", "create", "Portraits"}, operation: result.OperationBoardsCreate},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

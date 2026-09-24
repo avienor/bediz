@@ -29,6 +29,10 @@
       },
       "get": {}
     },
+    "/api/v2/models/i/{key}": {
+      "get": {},
+      "delete": {}
+    },
     "/api/v2/models/install/{id}": {
       "get": {}
     },
@@ -47,10 +51,21 @@
       },
       "delete": {}
     },
+    "/api/v1/boards/": {
+      "get": {},
+      "post": {}
+    },
+    "/api/v1/boards/{board_id}": {
+      "get": {}
+    },
     "/api/v1/images/": {
       "get": {}
     },
     "/api/v1/images/i/{image_name}": {
+      "get": {},
+      "delete": {}
+    },
+    "/api/v1/images/i/{image_name}/full": {
       "get": {}
     },
     "/api/v1/images/upload": {
@@ -64,6 +79,12 @@
     },
     "/api/v1/queue/{queue_id}/i/{item_id}": {
       "get": {}
+    },
+    "/api/v1/queue/{queue_id}/i/{item_id}/cancel": {
+      "put": {}
+    },
+    "/api/v1/queue/{queue_id}/clear": {
+      "put": {}
     },
     "/api/v1/queue/{queue_id}/enqueue_batch": {
       "post": {}

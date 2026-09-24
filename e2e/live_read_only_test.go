@@ -166,6 +166,21 @@ type imagesListData struct {
 	Items []imageReference `json:"items"`
 }
 
+type boardSummary struct {
+	BoardID        string  `json:"board_id"`
+	BoardName      string  `json:"board_name"`
+	ImageCount     *int    `json:"image_count"`
+	Archived       *bool   `json:"archived"`
+	CoverImageName *string `json:"cover_image_name"`
+	CreatedAt      string  `json:"created_at"`
+	UpdatedAt      string  `json:"updated_at"`
+}
+
+type boardsListData struct {
+	pageMetadata
+	Items []boardSummary `json:"items"`
+}
+
 type queueListData struct {
 	pageMetadata
 	Items []struct {
@@ -367,7 +382,7 @@ func TestLiveGate(t *testing.T) {
 				t.Errorf("doctor returned an unsatisfied or incomplete model requirement: %#v", requirement)
 			}
 		}
-		wantOperations := []string{"auth.huggingface.login", "auth.huggingface.logout", "auth.huggingface.status", "generate", "generate", "generate", "images.get", "images.list", "images.upload", "models.install", "models.install", "models.list", "models.status", "queue.get", "queue.list", "recall", "upscale", "upscale"}
+		wantOperations := []string{"auth.huggingface.login", "auth.huggingface.logout", "auth.huggingface.status", "boards.create", "boards.get", "boards.list", "generate", "generate", "generate", "images.delete", "images.download", "images.get", "images.list", "images.upload", "models.delete", "models.install", "models.install", "models.list", "models.scan", "models.status", "queue.cancel", "queue.clear", "queue.get", "queue.list", "queue.wait", "recall", "upscale", "upscale"}
 		operations := make([]string, 0, len(data.Capabilities))
 		generateFamilies := map[string]bool{}
 		upscaleFamilies := map[string]bool{}
@@ -457,6 +472,43 @@ func TestLiveGate(t *testing.T) {
 			if item.ItemID < 1 || item.QueueID == "" || item.Status == "" || item.BatchID == "" || item.CreatedAt == "" {
 				t.Errorf("queue item %d is not a normalized summary: %#v", index, item)
 			}
+		}
+	}) {
+		return
+	}
+
+	if !t.Run("board listing and lookup are normalized", func(t *testing.T) {
+		envelope := runJSONCommand(t, binary, target, "boards", "list", "--limit", "1", "--include-archived")
+		assertSuccessEnvelope(t, envelope, "boards.list")
+		var data boardsListData
+		unmarshalData(t, envelope.Data, &data)
+		if data.Items == nil {
+			t.Fatal("boards list is null, want an array")
+		}
+		assertPageBounds(t, data.pageMetadata, len(data.Items), 0, 1)
+		for index, board := range data.Items {
+			if board.BoardID == "" || board.ImageCount == nil || board.Archived == nil || board.CreatedAt == "" || board.UpdatedAt == "" {
+				t.Errorf("board %d is not a normalized summary: %#v", index, board)
+			}
+		}
+		if len(data.Items) == 1 {
+			envelope := runJSONCommand(t, binary, target, "boards", "get", data.Items[0].BoardID)
+			assertSuccessEnvelope(t, envelope, "boards.get")
+			var got struct {
+				Board boardSummary `json:"board"`
+			}
+			unmarshalData(t, envelope.Data, &got)
+			if !reflect.DeepEqual(got.Board, data.Items[0]) {
+				t.Errorf("boards get = %#v, want listed summary %#v", got.Board, data.Items[0])
+			}
+		}
+		absent := "bediz-e2e-absent-board-" + uuid.New().String()
+		missing, exitCode := executeJSONCommandContext(t, t.Context(), binary, target, "boards", "get", absent)
+		var failure struct {
+			Code string `json:"code"`
+		}
+		if err := json.Unmarshal(missing.Error, &failure); err != nil || exitCode != 6 || missing.Operation != "boards.get" || failure.Code != "not_found" {
+			t.Errorf("boards get %q = exit %d, envelope %#v; want not_found", absent, exitCode, missing)
 		}
 	}) {
 		return

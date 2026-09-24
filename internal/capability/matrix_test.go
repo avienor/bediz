@@ -10,14 +10,24 @@ import (
 func TestMatrixAdvertisesOnlyImplementedOperations(t *testing.T) {
 	want := []string{
 		result.OperationModelsList,
+		result.OperationModelsScan,
 		result.OperationModelsInstall,
 		result.OperationModelsInstall,
 		result.OperationModelsStatus,
+		result.OperationModelsDelete,
 		result.OperationImagesList,
 		result.OperationImagesGet,
 		result.OperationImagesUpload,
+		result.OperationImagesDownload,
+		result.OperationImagesDelete,
 		result.OperationQueueList,
 		result.OperationQueueGet,
+		result.OperationQueueWait,
+		result.OperationQueueCancel,
+		result.OperationQueueClear,
+		result.OperationBoardsList,
+		result.OperationBoardsGet,
+		result.OperationBoardsCreate,
 		result.OperationGenerate,
 		result.OperationGenerate,
 		result.OperationGenerate,
@@ -36,8 +46,8 @@ func TestMatrixAdvertisesOnlyImplementedOperations(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("advertised operations = %q, want implemented operations %q", got, want)
 	}
-	if Matrix[2].Family != "starter" || !slices.Contains(Matrix[2].Endpoints, EndpointRequirement{Method: "GET", Path: "/api/v2/models/starter_models"}) {
-		t.Fatalf("starter capability = %#v", Matrix[2])
+	if Matrix[3].Family != "starter" || !slices.Contains(Matrix[3].Endpoints, EndpointRequirement{Method: "GET", Path: "/api/v2/models/starter_models"}) {
+		t.Fatalf("starter capability = %#v", Matrix[3])
 	}
 }
 

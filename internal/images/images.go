@@ -163,18 +163,8 @@ func Upload(ctx context.Context, client *httpclient.Client, request UploadReques
 	}
 	defer func() { _ = upload.Close() }()
 
-	var version struct {
-		Version string `json:"version"`
-	}
-	if err := client.GetJSON(ctx, "/api/v1/app/version", &version); err != nil {
+	if err := capability.RequireSupportedVersion(ctx, client); err != nil {
 		return GetResult{}, err
-	}
-	supported, err := capability.SupportsInvokeAI(version.Version)
-	if err != nil {
-		return GetResult{}, err
-	}
-	if !supported {
-		return GetResult{}, operation.UnsupportedCapability(fmt.Sprintf("InvokeAI %s is outside the supported range %s", version.Version, capability.SupportedInvokeAIRange))
 	}
 	reference, err := upload.Send(ctx, client)
 	if err != nil {

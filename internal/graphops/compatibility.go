@@ -10,24 +10,6 @@ import (
 	"github.com/avienor/bediz/internal/operation"
 )
 
-// CheckVersion restricts graph-producing operations to the tested range.
-func CheckVersion(ctx context.Context, client *httpclient.Client) error {
-	var response struct {
-		Version string `json:"version"`
-	}
-	if err := client.GetJSON(ctx, "/api/v1/app/version", &response); err != nil {
-		return err
-	}
-	supported, err := capability.SupportsInvokeAI(response.Version)
-	if err != nil {
-		return fmt.Errorf("validate InvokeAI version: %w", err)
-	}
-	if !supported {
-		return operation.UnsupportedCapability(fmt.Sprintf("InvokeAI %s is outside the supported range %s", response.Version, capability.SupportedInvokeAIRange))
-	}
-	return nil
-}
-
 type openAPIDocument struct {
 	Components struct {
 		Schemas map[string]struct {

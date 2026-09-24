@@ -75,6 +75,45 @@ func (*CivitaiVersionSelectionError) Error() string {
 	return "Civitai model page requires one exact version selection"
 }
 
+type BoardCandidate struct {
+	BoardID   string `json:"board_id"`
+	BoardName string `json:"board_name"`
+}
+
+// BoardSelectionError reports a board name shared by several visible boards.
+// Candidates are sorted by board identifier.
+type BoardSelectionError struct {
+	Selector   string
+	Candidates []BoardCandidate
+}
+
+func (*BoardSelectionError) Error() string {
+	return "board name requires one exact board selection"
+}
+
+// BoardNameExistsError reports visible boards that already have the exact name
+// a create request asked for. BoardIDs are sorted by board identifier.
+type BoardNameExistsError struct {
+	BoardName string
+	BoardIDs  []string
+}
+
+func (e *BoardNameExistsError) Error() string {
+	return fmt.Sprintf("a visible board is already named %q", e.BoardName)
+}
+
+// NotFoundError reports that a selector resolved to no visible InvokeAI
+// resource.
+type NotFoundError struct {
+	Message string
+}
+
+func (e *NotFoundError) Error() string { return e.Message }
+
+func NotFound(message string) error {
+	return &NotFoundError{Message: message}
+}
+
 func (e *SelectionRequiredError) Error() string {
 	return "model selector requires one exact selection"
 }
@@ -126,25 +165,38 @@ func (p QueuePosition) describe() string {
 	return "queue items " + strings.Join(identifiers, ", ")
 }
 
+// waitingFor names the items a stopped wait was still waiting for: the pending
+// items when the wait tracked them, otherwise every item of the position.
+func waitingFor(position QueuePosition, pending []int) string {
+	if pending != nil {
+		position.ItemIDs = pending
+	}
+	return position.describe()
+}
+
 // WaitTimeoutError reports that a caller-supplied wait deadline elapsed before
 // accepted remote work reached a terminal state. The remote item was not
-// canceled.
+// canceled. PendingItemIDs, when set, lists in request order the items that
+// were not yet terminal.
 type WaitTimeoutError struct {
-	Position QueuePosition
+	Position       QueuePosition
+	PendingItemIDs []int
 }
 
 func (e *WaitTimeoutError) Error() string {
-	return "wait timeout elapsed before " + e.Position.describe() + " reached a terminal state; the InvokeAI item was not canceled"
+	return "wait timeout elapsed before " + waitingFor(e.Position, e.PendingItemIDs) + " reached a terminal state; the InvokeAI item was not canceled"
 }
 
 // InterruptedError reports that local interruption stopped Bediz while accepted
-// remote work continued. It unwraps to context.Canceled.
+// remote work continued. It unwraps to context.Canceled. PendingItemIDs, when
+// set, lists in request order the items that were not yet terminal.
 type InterruptedError struct {
-	Position QueuePosition
+	Position       QueuePosition
+	PendingItemIDs []int
 }
 
 func (e *InterruptedError) Error() string {
-	return "waiting for " + e.Position.describe() + " was interrupted locally; the InvokeAI item was not canceled"
+	return "waiting for " + waitingFor(e.Position, e.PendingItemIDs) + " was interrupted locally; the InvokeAI item was not canceled"
 }
 
 func (e *InterruptedError) Unwrap() error { return context.Canceled }
@@ -184,3 +236,39 @@ type InvalidQueueResultError struct {
 func (e *InvalidQueueResultError) Error() string {
 	return fmt.Sprintf("queue item %d %s", e.ItemID, e.Detail)
 }
+
+// InvalidInvokeAIVersionError reports a version answer that names no readable
+// InvokeAI version. Version is empty when the answer contained none.
+type InvalidInvokeAIVersionError struct {
+	Version string
+}
+
+func (e *InvalidInvokeAIVersionError) Error() string {
+	if e.Version == "" {
+		return "InvokeAI version response did not contain a version"
+	}
+	return fmt.Sprintf("invalid InvokeAI version %q", e.Version)
+}
+
+// OutputExistsError reports a local output path that already names a file,
+// directory, or link. Bediz never replaces it.
+type OutputExistsError struct {
+	Path string
+}
+
+func (e *OutputExistsError) Error() string {
+	return fmt.Sprintf("output %q already exists; choose a new path", e.Path)
+}
+
+// OutputWriteError reports a local file-system failure while writing an
+// operation's output file. No partial file is left at Path.
+type OutputWriteError struct {
+	Path string
+	Err  error
+}
+
+func (e *OutputWriteError) Error() string {
+	return fmt.Sprintf("write output %q: %v", e.Path, e.Err)
+}
+
+func (e *OutputWriteError) Unwrap() error { return e.Err }

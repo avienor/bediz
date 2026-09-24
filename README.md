@@ -51,8 +51,15 @@ printf '%s' "$HF_TOKEN" | ./bediz auth huggingface login --token-stdin --json
 ./bediz images list --json
 ./bediz images get IMAGE_NAME --json
 ./bediz images upload /absolute/path/to/image.png --json
+./bediz images download IMAGE_NAME --output ./image.png --json
 ./bediz queue list --json
 ./bediz queue get ITEM_ID --json
+./bediz queue wait ITEM_ID [ITEM_ID...] --timeout 10m --json
+./bediz queue cancel ITEM_ID --json
+./bediz queue clear --yes --json
+./bediz boards list --json
+./bediz boards get BOARD_ID_OR_NAME --json
+./bediz boards create "Board name" --json
 ./bediz generate --model "Anima Base 1.0" --prompt "a lighthouse in a storm" --json
 ./bediz upscale --image IMAGE_NAME --model "Juggernaut-XL-v9" --tile-controlnet TILE_MODEL_KEY --scale 2 --json
 ./bediz upscale --image-path /absolute/path/to/image.png --model "Juggernaut-XL-v9" --tile-controlnet TILE_MODEL_KEY --scale 2 --json
@@ -62,6 +69,10 @@ printf '%s' "$HF_TOKEN" | ./bediz auth huggingface login --token-stdin --json
 Inspection commands return normalized Bediz records rather than raw InvokeAI response documents. List output is page-bounded, image selectors use stable InvokeAI image names, and queue listing hydrates only the requested page of lightweight summaries. On supported InvokeAI 6.14.x versions, preserving queue order and total count requires reading the complete lightweight item-ID index; the configured HTTP response-size limit bounds that response, and Bediz never fetches execution graphs while listing.
 
 Model installation accepts an exact HTTP(S) artifact URL without userinfo, query, or fragment. Its job ID identifies only a job in the current InvokeAI registry; after a restart, use `models list` and the InvokeAI install job list before deciding whether to resubmit an uncertain installation. `models status` returns a safe projection of the job currently under that ID.
+
+`./bediz models scan --path /absolute/server/folder --json` lists model files found in a folder on the InvokeAI server and whether each is installed. The command reads server state and does not install anything. The path is resolved on the server, even when Bediz runs on another machine.
+
+`./bediz models delete MODEL_KEY --yes --json` removes one installed model selected by its exact key and returns the key, name, base, type, and format it had. InvokeAI deletes the files of a model in its managed models directory; an in-place registration loses only its record, and its source file stays where it was.
 
 Civitai installation requires an exact version ID or a model page URL with `modelVersionId`. One file is selected directly; among multiple files, exactly one primary is selected. Otherwise the JSON result returns numeric file choices; resubmit the same version with `--file-id` or `source.file_id`. A model page URL without `modelVersionId` never picks a version, even when only one exists: the JSON result returns numeric version choices to resubmit as the exact version reference. A direct Civitai download URL is a `url` source and follows the direct URL validation rules.
 
@@ -126,7 +137,7 @@ binary, then removes only the model it installed. It requires outbound HTTPS
 access from InvokeAI. It skips unless both environment variables are set.
 
 The gate builds the real `bediz` binary and invokes `doctor`, `models list`,
-bounded image and queue listing, a self-cleaning image upload round trip, and a
+bounded image, queue, and board listing, a board lookup, a self-cleaning image upload round trip, and a
 self-cleaning Anima generation round trip through the process boundary. The upload case creates a unique 2-by-2 PNG,
 verifies the same normalized Image Reference through `images upload`,
 `images get`, and `images list`, then deletes exactly that image through the

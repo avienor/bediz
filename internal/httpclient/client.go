@@ -82,11 +82,14 @@ func (e *InvalidResponseError) Unwrap() error { return e.Err }
 
 // OutcomeUnknownError means a state-changing request may have reached InvokeAI,
 // but Bediz did not receive a conclusive response. Callers must inspect remote
-// state before deciding whether to submit the operation again.
+// state before deciding whether to submit the operation again. StatusCode is
+// the gateway status that made the answer inconclusive, or zero when no status
+// was received.
 type OutcomeUnknownError struct {
-	Method string
-	URL    string
-	Err    error
+	Method     string
+	URL        string
+	StatusCode int
+	Err        error
 }
 
 func (e *OutcomeUnknownError) Error() string {
@@ -157,28 +160,28 @@ func (c *Client) GetJSON(ctx context.Context, path string, target any) error {
 	return c.doJSON(ctx, http.MethodGet, path, nil, target, true)
 }
 
+// DoJSON sends a JSON request. A GET or HEAD is a safe read; any other method
+// is a mutation, sent once without following redirects.
 func (c *Client) DoJSON(ctx context.Context, method, path string, requestBody, target any) error {
-	safeRead := method == http.MethodGet || method == http.MethodHead
-	return c.doJSON(ctx, method, path, requestBody, target, safeRead)
+	if method == http.MethodGet || method == http.MethodHead {
+		return c.doJSON(ctx, method, path, requestBody, target, true)
+	}
+	return c.withoutRedirects().doJSON(ctx, method, path, requestBody, target, false)
 }
 
 // DoJSONPrivate sends a mutation without exposing its URL, backend response
-// body, or transport error through any returned error. It refuses redirects so
-// a credential cannot be forwarded and the mutation cannot be replayed.
+// body, or transport error through any returned error. Like every mutation it
+// refuses redirects, so a credential cannot be forwarded either.
 func (c *Client) DoJSONPrivate(ctx context.Context, method, path string, requestBody, target any) error {
-	privateClient := *c
-	privateHTTP := *c.http
-	privateHTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	privateClient.http = &privateHTTP
-	err := privateClient.doJSON(ctx, method, path, requestBody, target, false)
+	err := c.withoutRedirects().doJSON(ctx, method, path, requestBody, target, false)
 	if err == nil {
 		return nil
 	}
 	if httpErr, ok := errors.AsType[*HTTPError](err); ok {
 		return &HTTPError{StatusCode: httpErr.StatusCode, Status: fmt.Sprintf("%d %s", httpErr.StatusCode, http.StatusText(httpErr.StatusCode))}
 	}
-	if _, ok := errors.AsType[*OutcomeUnknownError](err); ok {
-		return &OutcomeUnknownError{Method: method, Err: errors.New("private request response was inconclusive")}
+	if unknown, ok := errors.AsType[*OutcomeUnknownError](err); ok {
+		return &OutcomeUnknownError{Method: method, StatusCode: unknown.StatusCode, Err: errors.New("private request response was inconclusive")}
 	}
 	return &InvalidResponseError{Err: errors.New("private request could not be prepared")}
 }
@@ -190,6 +193,8 @@ func (c *Client) QueryJSON(ctx context.Context, path string, requestBody, target
 	return c.doJSON(ctx, http.MethodPost, path, requestBody, target, true)
 }
 
+// PostStream sends a streamed mutation, such as an upload, once without
+// following redirects.
 func (c *Client) PostStream(ctx context.Context, path string, body io.Reader, contentType string, target any) error {
 	requestURL, err := c.resolve(path)
 	if err != nil {
@@ -206,7 +211,7 @@ func (c *Client) PostStream(ctx context.Context, path string, body io.Reader, co
 		request.Header.Set("Authorization", "Bearer "+c.token)
 	}
 
-	response, err := c.http.Do(request)
+	response, err := c.withoutRedirects().http.Do(request)
 	if err != nil {
 		return &OutcomeUnknownError{Method: http.MethodPost, URL: requestURL, Err: err}
 	}
@@ -214,6 +219,9 @@ func (c *Client) PostStream(ctx context.Context, path string, body io.Reader, co
 	_ = response.Body.Close()
 	if readErr != nil {
 		return &OutcomeUnknownError{Method: http.MethodPost, URL: requestURL, Err: readErr}
+	}
+	if gatewayStatus(response.StatusCode) {
+		return gatewayOutcomeUnknown(http.MethodPost, requestURL, response)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return &HTTPError{StatusCode: response.StatusCode, Status: response.Status, Body: compactBody(responseBody)}
@@ -225,6 +233,94 @@ func (c *Client) PostStream(ctx context.Context, path string, body io.Reader, co
 		return &OutcomeUnknownError{Method: http.MethodPost, URL: requestURL, Err: fmt.Errorf("decode response: %w", err)}
 	}
 	return nil
+}
+
+// ResponseTooLargeError reports a response body larger than the configured
+// response-size limit.
+type ResponseTooLargeError struct {
+	Limit int64
+}
+
+func (e *ResponseTooLargeError) Error() string {
+	return fmt.Sprintf("response body exceeds %d bytes", e.Limit)
+}
+
+// GetStream performs a safe read of a non-JSON resource, such as an image
+// file. Connection failures and gateway statuses are retried within the
+// configured limit before any body is handed to receive. The body passed to
+// receive fails with an InvalidResponseError when it cannot be read, including
+// a ResponseTooLargeError once it exceeds maxBody. The caller chooses maxBody
+// because a streamed body is not held in memory like a JSON response; an error
+// answer is still bounded by the configured response-size limit. receive is
+// called at most once and its error is returned unchanged.
+func (c *Client) GetStream(ctx context.Context, path, accept string, maxBody int64, receive func(contentType string, body io.Reader) error) error {
+	requestURL, err := c.resolve(path)
+	if err != nil {
+		return err
+	}
+	attempts := 1 + c.retries
+	for attempt := range attempts {
+		response, doErr := c.do(ctx, http.MethodGet, requestURL, accept, nil)
+		if doErr != nil {
+			if attempt+1 < attempts && ctx.Err() == nil {
+				if err := c.retryWait(ctx, defaultRetryWait*time.Duration(attempt+1)); err != nil {
+					return err
+				}
+				continue
+			}
+			return &NetworkError{Method: http.MethodGet, URL: requestURL, Err: doErr}
+		}
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			responseBody, readErr := readBody(response.Body, c.maxBody)
+			response.Body.Close()
+			if readErr != nil {
+				return &InvalidResponseError{URL: requestURL, Err: readErr}
+			}
+			if attempt+1 < attempts && gatewayStatus(response.StatusCode) {
+				if err := c.retryWait(ctx, defaultRetryWait*time.Duration(attempt+1)); err != nil {
+					return err
+				}
+				continue
+			}
+			return &HTTPError{StatusCode: response.StatusCode, Status: response.Status, Body: compactBody(responseBody)}
+		}
+		defer response.Body.Close()
+		if response.ContentLength > maxBody {
+			return &InvalidResponseError{URL: requestURL, Err: &ResponseTooLargeError{Limit: maxBody}}
+		}
+		body := &limitedBody{reader: response.Body, remaining: maxBody, limit: maxBody, url: requestURL}
+		return receive(response.Header.Get("Content-Type"), body)
+	}
+	return errors.New("request attempts exhausted")
+}
+
+// limitedBody reads a response body until it ends or exceeds the limit. Every
+// failure is an InvalidResponseError so callers can tell it from a failure of
+// their own.
+type limitedBody struct {
+	reader    io.Reader
+	remaining int64
+	limit     int64
+	url       string
+}
+
+func (b *limitedBody) Read(p []byte) (int, error) {
+	if b.remaining < 0 {
+		return 0, &InvalidResponseError{URL: b.url, Err: &ResponseTooLargeError{Limit: b.limit}}
+	}
+	// Read one byte past the limit so an oversized body is detected.
+	if int64(len(p)) > b.remaining+1 {
+		p = p[:b.remaining+1]
+	}
+	n, err := b.reader.Read(p)
+	b.remaining -= int64(n)
+	if b.remaining < 0 {
+		return 0, &InvalidResponseError{URL: b.url, Err: &ResponseTooLargeError{Limit: b.limit}}
+	}
+	if err != nil && !errors.Is(err, io.EOF) {
+		return n, &InvalidResponseError{URL: b.url, Err: fmt.Errorf("read response body: %w", err)}
+	}
+	return n, err
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path string, requestBody, target any, safeRead bool) error {
@@ -246,7 +342,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, requestBody, t
 		attempts += c.retries
 	}
 	for attempt := range attempts {
-		response, doErr := c.do(ctx, method, requestURL, body)
+		response, doErr := c.do(ctx, method, requestURL, "application/json", body)
 		if doErr != nil {
 			if attempt+1 < attempts && ctx.Err() == nil {
 				if err := c.retryWait(ctx, defaultRetryWait*time.Duration(attempt+1)); err != nil {
@@ -268,13 +364,16 @@ func (c *Client) doJSON(ctx context.Context, method, path string, requestBody, t
 			}
 			return &InvalidResponseError{URL: requestURL, Err: readErr}
 		}
+		if !safeRead && gatewayStatus(response.StatusCode) {
+			return gatewayOutcomeUnknown(method, requestURL, response)
+		}
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
 			httpErr := &HTTPError{
 				StatusCode: response.StatusCode,
 				Status:     response.Status,
 				Body:       compactBody(responseBody),
 			}
-			if attempt+1 < attempts && retryableStatus(response.StatusCode) {
+			if attempt+1 < attempts && gatewayStatus(response.StatusCode) {
 				if err := c.retryWait(ctx, defaultRetryWait*time.Duration(attempt+1)); err != nil {
 					return err
 				}
@@ -286,23 +385,45 @@ func (c *Client) doJSON(ctx context.Context, method, path string, requestBody, t
 			return nil
 		}
 		decoder := json.NewDecoder(bytes.NewReader(responseBody))
-		if err := decoder.Decode(target); err != nil {
-			if !safeRead {
-				return &OutcomeUnknownError{Method: method, URL: requestURL, Err: fmt.Errorf("decode response: %w", err)}
+		decodeErr := decoder.Decode(target)
+		if decodeErr == nil {
+			var trailing json.RawMessage
+			if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+				decodeErr = err
+				if decodeErr == nil {
+					decodeErr = errors.New("multiple JSON values in response")
+				}
 			}
-			return &InvalidResponseError{URL: requestURL, Err: fmt.Errorf("decode response: %w", err)}
+		}
+		if decodeErr != nil {
+			if !safeRead {
+				return &OutcomeUnknownError{Method: method, URL: requestURL, Err: fmt.Errorf("decode response: %w", decodeErr)}
+			}
+			return &InvalidResponseError{URL: requestURL, Err: fmt.Errorf("decode response: %w", decodeErr)}
 		}
 		return nil
 	}
 	return errors.New("request attempts exhausted")
 }
 
-func (c *Client) do(ctx context.Context, method, requestURL string, body []byte) (*http.Response, error) {
+// withoutRedirects returns a copy of the client that answers a redirect with
+// the redirect response itself. Following one would resend a mutation, or turn
+// it into a GET after 301, 302, or 303, and report that GET's answer as the
+// mutation's.
+func (c *Client) withoutRedirects() *Client {
+	mutationClient := *c
+	mutationHTTP := *c.http
+	mutationHTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	mutationClient.http = &mutationHTTP
+	return &mutationClient
+}
+
+func (c *Client) do(ctx context.Context, method, requestURL, accept string, body []byte) (*http.Response, error) {
 	request, err := http.NewRequestWithContext(ctx, method, requestURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Accept", accept)
 	request.Header.Set("User-Agent", c.userAgent)
 	if len(body) > 0 {
 		request.Header.Set("Content-Type", "application/json")
@@ -360,8 +481,19 @@ func compactBody(body []byte) string {
 	return value
 }
 
-func retryableStatus(status int) bool {
+// gatewayStatus reports a 502, 503, or 504 answer. InvokeAI 6.14.1 answers
+// none of the routes Bediz uses with these statuses, so they come from an
+// intermediary: a safe read may be retried, and a mutation may already have
+// been forwarded, which makes its outcome unknown.
+func gatewayStatus(status int) bool {
 	return status == http.StatusBadGateway || status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout
+}
+
+func gatewayOutcomeUnknown(method, requestURL string, response *http.Response) *OutcomeUnknownError {
+	return &OutcomeUnknownError{
+		Method: method, URL: requestURL, StatusCode: response.StatusCode,
+		Err: fmt.Errorf("gateway answered %s", response.Status),
+	}
 }
 
 func wait(ctx context.Context, duration time.Duration) error {

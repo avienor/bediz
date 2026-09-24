@@ -29,6 +29,7 @@ type upscaleReceiptEnvelope struct {
 		} `json:"source_image"`
 		SourceUploaded   bool `json:"source_uploaded"`
 		ResolvedSettings struct {
+			Profile       string            `json:"profile"`
 			Scale         int               `json:"scale"`
 			Creativity    int               `json:"creativity"`
 			Structure     int               `json:"structure"`

@@ -69,7 +69,7 @@ A stable machine-readable error code with a human-readable message and relevant 
 _Avoid_: Raw backend response, stack trace
 
 **Unknown Outcome**:
-A result indicating that Bediz cannot determine whether InvokeAI accepted a state-changing request because the connection failed before a conclusive response. The caller inspects InvokeAI state before deciding whether to submit another request.
+A result indicating that Bediz cannot determine whether InvokeAI accepted a state-changing request, because the connection failed before a conclusive response or an intermediary answered with a gateway status (502, 503, or 504). The caller inspects InvokeAI state before deciding whether to submit another request.
 _Avoid_: Operation failure, automatic retry
 
 **Core Generation**:
@@ -103,6 +103,10 @@ _Avoid_: Controller default, permission to override the user
 **Installation Consent**:
 The user's authorization for a creative agent to download a missing model after being told its source, approximate size, and known license information. A direct request to install or use a named model already supplies this consent.
 _Avoid_: Approval for generation, blanket download permission
+
+**Execution Approval**:
+The explicit `--yes` a caller supplies for one irreversible or destructive command, such as a queue clear, a deletion, a profile replacement, or moving model files. It belongs to that execution rather than the request, so it is never a Request Document field and is still required when the request comes from a document.
+_Avoid_: Confirmation prompt, Installation Consent, approval stored in a request
 
 **Model Family**:
 A group of models that share an execution-graph shape, required component types, and compatible generation settings.
@@ -139,6 +143,10 @@ _Avoid_: Generic Civitai model page, Civitai search result
 **Execution Graph**:
 The backend-executable recipe of invocation nodes and data-flow edges for one operation; it underlies Generate and Canvas as well as user-authored workflows.
 _Avoid_: Saved workflow, workflow-editor layout
+
+**Workflow-Call Chain**:
+The InvokeAI queue items linked by workflow calls: a root item and every item it calls, directly or through other called items. Canceling any item in the chain cancels the chain's non-terminal items. Bediz's own generate and upscale batches create no chains.
+_Avoid_: Batch, queue item group
 
 **Graph Compiler**:
 The deterministic component that translates a normalized operation into a model-family-specific execution graph.

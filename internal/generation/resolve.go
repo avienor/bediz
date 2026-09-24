@@ -191,7 +191,7 @@ func validateCommonRequest(request Request) error {
 	if request.SchemaVersion != 1 {
 		return operation.InvalidRequest(fmt.Sprintf("unsupported request schema version %d", request.SchemaVersion))
 	}
-	if request.Model == "" {
+	if request.Model == "" && request.Profile == "" {
 		return operation.InvalidRequest("model is required")
 	}
 	if request.PositivePrompt == "" {
@@ -231,7 +231,7 @@ func validateAnimaSettings(request Request) error {
 	if *request.Steps < 1 {
 		return operation.InvalidRequest("steps must be positive")
 	}
-	if !slices.Contains([]string{"euler", "heun", "dpmpp_2m", "dpmpp_2m_sde", "er_sde", "lcm"}, *request.Scheduler) {
+	if !isAnimaScheduler(*request.Scheduler) {
 		return operation.InvalidRequest("scheduler is not supported for Anima")
 	}
 	if math.IsNaN(*request.Guidance) || math.IsInf(*request.Guidance, 0) || *request.Guidance < 1 {
@@ -241,4 +241,8 @@ func validateAnimaSettings(request Request) error {
 		return operation.InvalidRequest("output count must be positive")
 	}
 	return nil
+}
+
+func isAnimaScheduler(scheduler string) bool {
+	return slices.Contains([]string{"euler", "heun", "dpmpp_2m", "dpmpp_2m_sde", "er_sde", "lcm"}, scheduler)
 }

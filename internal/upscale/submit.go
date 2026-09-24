@@ -7,10 +7,12 @@ import (
 	"math"
 	"slices"
 
+	"github.com/avienor/bediz/internal/capability"
 	"github.com/avienor/bediz/internal/graphops"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/images"
 	"github.com/avienor/bediz/internal/operation"
+	"github.com/avienor/bediz/internal/profiles"
 	"github.com/avienor/bediz/internal/result"
 )
 
@@ -19,6 +21,7 @@ type Output = graphops.Output
 type WaitOptions = graphops.WaitOptions
 
 type ResolvedSettings struct {
+	Profile        string            `json:"profile,omitempty"`
 	PositivePrompt string            `json:"positive_prompt"`
 	NegativePrompt string            `json:"negative_prompt"`
 	Scale          int               `json:"scale"`
@@ -51,7 +54,29 @@ type ExecutionReceipt struct {
 // path source is checked locally before any request and uploaded once, only
 // after every validation and resolution step, immediately before the enqueue.
 func Submit(ctx context.Context, client *httpclient.Client, request Request) (ExecutionReceipt, error) {
-	if err := ValidateRequest(request); err != nil {
+	if err := validateRequest(request, false); err != nil {
+		return ExecutionReceipt{}, err
+	}
+	effective := request
+	var profileUpscale *profiles.Upscale
+	if request.Profile != "" {
+		if !profiles.ValidName(request.Profile) {
+			return ExecutionReceipt{}, operation.InvalidRequest("invalid profile name")
+		}
+		profile, err := profiles.Get(request.Profile)
+		if err != nil {
+			return ExecutionReceipt{}, &ProfileLoadError{Name: request.Profile, Err: err}
+		}
+		if profile.Upscale == nil {
+			return ExecutionReceipt{}, operation.InvalidRequest("profile has no upscale section")
+		}
+		profileUpscale = profile.Upscale
+		if effective.Model == "" && profileUpscale.Model != nil {
+			effective.Model = *profileUpscale.Model
+		}
+		effective = applyProfileSettings(effective, *profileUpscale)
+	}
+	if err := ValidateRequest(effective); err != nil {
 		return ExecutionReceipt{}, err
 	}
 	var upload *images.PreparedUpload
@@ -62,41 +87,50 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 		}
 		defer func() { _ = upload.Close() }()
 	}
-	if err := graphops.CheckVersion(ctx, client); err != nil {
+	if err := capability.RequireSupportedVersion(ctx, client); err != nil {
 		return ExecutionReceipt{}, err
 	}
 	inventory, err := graphops.Inventory(ctx, client)
 	if err != nil {
 		return ExecutionReceipt{}, err
 	}
-	resolved, err := Resolve(request, inventory, rand.Reader)
+	var profileWarnings []result.Warning
+	if profileUpscale != nil {
+		main, err := ResolveMain(inventory, effective.Model)
+		if err != nil {
+			return ExecutionReceipt{}, err
+		}
+		effective, profileWarnings = applyProfileComponents(effective, *profileUpscale, main, inventory)
+	}
+	resolved, err := Resolve(effective, inventory, rand.Reader)
 	if err != nil {
-		return ExecutionReceipt{}, err
+		return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
 	}
 	family, _ := familyFor(resolved.Models.Main.Base)
 	if err := graphops.CheckInvocations(ctx, client, family.entry().Invocations); err != nil {
-		return ExecutionReceipt{}, err
+		return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
 	}
 	if upload != nil {
 		source, err := upload.Send(ctx, client)
 		if err != nil {
-			return ExecutionReceipt{}, err
+			return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
 		}
-		receipt, err := submitSource(ctx, client, request, resolved, source, true)
+		receipt, err := submitSource(ctx, client, request, resolved, source, true, profileWarnings)
 		if err != nil {
-			return receipt, &UploadedSourceError{Source: source, Err: err}
+			return receipt, &UploadedSourceError{Source: source, Err: withProfileWarnings(err, profileWarnings)}
 		}
 		return receipt, nil
 	}
 	imageResult, err := images.Get(ctx, client, images.GetRequest{SchemaVersion: 1, ImageName: request.Source.Reference})
 	if err != nil {
-		return ExecutionReceipt{}, err
+		return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
 	}
 	source := imageResult.Image
 	if source.ImageName != request.Source.Reference {
-		return ExecutionReceipt{}, &httpclient.InvalidResponseError{Err: fmt.Errorf("source image has contradictory name %q; expected %q", source.ImageName, request.Source.Reference)}
+		return ExecutionReceipt{}, withProfileWarnings(&httpclient.InvalidResponseError{Err: fmt.Errorf("source image has contradictory name %q; expected %q", source.ImageName, request.Source.Reference)}, profileWarnings)
 	}
-	return submitSource(ctx, client, request, resolved, source, false)
+	receipt, err := submitSource(ctx, client, request, resolved, source, false, profileWarnings)
+	return receipt, withProfileWarnings(err, profileWarnings)
 }
 
 // UploadedSourceError reports a failure after Bediz uploaded the local source
@@ -112,7 +146,7 @@ func (e *UploadedSourceError) Error() string {
 
 func (e *UploadedSourceError) Unwrap() error { return e.Err }
 
-func submitSource(ctx context.Context, client *httpclient.Client, request Request, resolved Resolution, source images.Reference, uploaded bool) (ExecutionReceipt, error) {
+func submitSource(ctx context.Context, client *httpclient.Client, request Request, resolved Resolution, source images.Reference, uploaded bool, warnings []result.Warning) (ExecutionReceipt, error) {
 	if source.Width < 1 || source.Height < 1 || source.Width > math.MaxInt / *resolved.Request.Scale || source.Height > math.MaxInt / *resolved.Request.Scale {
 		return ExecutionReceipt{}, &httpclient.InvalidResponseError{Err: fmt.Errorf("source image has invalid dimensions %d × %d", source.Width, source.Height)}
 	}
@@ -136,6 +170,7 @@ func submitSource(ctx context.Context, client *httpclient.Client, request Reques
 	return ExecutionReceipt{
 		SubmittedRequest: request, SourceImage: source, SourceUploaded: uploaded,
 		ResolvedSettings: ResolvedSettings{
+			Profile:        request.Profile,
 			PositivePrompt: resolved.Request.PositivePrompt, NegativePrompt: resolved.Request.NegativePrompt,
 			Scale: *resolved.Request.Scale, Creativity: *resolved.Request.Creativity, Structure: *resolved.Request.Structure,
 			Steps: *resolved.Request.Steps, Scheduler: *resolved.Request.Scheduler, Guidance: *resolved.Request.Guidance,
@@ -143,7 +178,7 @@ func submitSource(ctx context.Context, client *httpclient.Client, request Reques
 			OutputWidth: outputWidth, OutputHeight: outputHeight, BoardID: resolved.Request.BoardID,
 			ModelKey: resolved.Models.Main.Key, ComponentKeys: componentKeys, Seeds: []uint32{resolved.Seed},
 		},
-		Queue: queueReceipt, Outputs: []Output{}, Warnings: []result.Warning{},
+		Queue: queueReceipt, Outputs: []Output{}, Warnings: append([]result.Warning{}, warnings...),
 	}, nil
 }
 
