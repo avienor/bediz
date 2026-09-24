@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/avienor/bediz/internal/config"
@@ -269,10 +270,10 @@ func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, e
 		})
 	}
 	if timeout, ok := errors.AsType[*operation.WaitTimeoutError](err); ok {
-		return fail(result.CodeWaitTimeout, timeout.Error(), queuePositionDetails(timeout.Position))
+		return fail(result.CodeWaitTimeout, timeout.Error(), waitStoppedDetails(timeout.Position, timeout.PendingItemIDs))
 	}
 	if interrupted, ok := errors.AsType[*operation.InterruptedError](err); ok {
-		return fail(result.CodeInterrupted, interrupted.Error(), queuePositionDetails(interrupted.Position))
+		return fail(result.CodeInterrupted, interrupted.Error(), waitStoppedDetails(interrupted.Position, interrupted.PendingItemIDs))
 	}
 	if failure, ok := errors.AsType[*operation.ItemFailureError](err); ok {
 		return fail(result.CodeInvokeAIOperationFailed, failure.Error(), acceptedItemDetails(failure.Position, failure.ItemID, failure.Status))
@@ -309,13 +310,27 @@ func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, e
 }
 
 // queuePositionDetails reports accepted remote work in the structured failure
-// details of a wait-path error.
+// details of a wait-path error. queue wait observes items without a batch
+// identity, so its details carry no batch_id.
 func queuePositionDetails(position operation.QueuePosition) map[string]any {
-	return map[string]any{
+	details := map[string]any{
 		"queue_id": position.QueueID,
-		"batch_id": position.BatchID,
 		"item_ids": position.ItemIDs,
 	}
+	if position.BatchID != "" {
+		details["batch_id"] = position.BatchID
+	}
+	return details
+}
+
+// waitStoppedDetails adds the items that were not yet terminal when the wait
+// tracked them.
+func waitStoppedDetails(position operation.QueuePosition, pending []int) map[string]any {
+	details := queuePositionDetails(position)
+	if pending != nil {
+		details["pending_item_ids"] = pending
+	}
+	return details
 }
 
 // acceptedItemDetails reports accepted remote work and the queue item that
@@ -340,6 +355,13 @@ type queueGetOptions struct {
 	remoteOptions
 	queueID     string
 	requestPath string
+}
+
+type queueWaitOptions struct {
+	remoteOptions
+	queueID     string
+	requestPath string
+	waitTimeout time.Duration
 }
 
 func (c *CLI) newQueueCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
@@ -402,6 +424,40 @@ func (c *CLI) newQueueCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
 	getCommand.Flags().StringVar(&getOptions.queueID, "queue-id", "default", "exact InvokeAI queue id")
 	getCommand.Flags().StringVar(&getOptions.requestPath, "request", "", "read a request document from a file or standard input with -")
 	command.AddCommand(getCommand)
+
+	waitOptions := queueWaitOptions{remoteOptions: defaultRemoteOptions(), queueID: "default"}
+	waitCommand := &cobra.Command{
+		Use:         "wait ITEM_ID...",
+		Short:       "Wait until queue items reach a terminal status",
+		Args:        cobra.ArbitraryArgs,
+		Annotations: map[string]string{operationAnnotation: result.OperationQueueWait},
+		Run: func(cmd *cobra.Command, args []string) {
+			waitOptions.captureRemoteFlags(cmd)
+			if waitOptions.requestPath == "" && len(args) == 0 {
+				*exitCode = c.fail(result.OperationQueueWait, *jsonOutput, result.CodeInvalidRequest, "item ids or --request is required", nil)
+				return
+			}
+			if waitOptions.requestPath != "" && (len(args) > 0 || cmd.Flags().Changed("queue-id")) {
+				*exitCode = c.fail(result.OperationQueueWait, *jsonOutput, result.CodeInvalidRequest, "operation arguments and flags cannot be combined with --request", nil)
+				return
+			}
+			itemIDs := make([]int, 0, len(args))
+			for _, arg := range args {
+				itemID, err := strconv.Atoi(arg)
+				if err != nil {
+					*exitCode = c.fail(result.OperationQueueWait, *jsonOutput, result.CodeInvalidRequest, "item ids must be positive integers", nil)
+					return
+				}
+				itemIDs = append(itemIDs, itemID)
+			}
+			*exitCode = c.executeQueueWait(cmd.Context(), *jsonOutput, waitOptions, itemIDs)
+		},
+	}
+	addConnectionFlags(waitCommand, &waitOptions.remoteOptions)
+	waitCommand.Flags().DurationVar(&waitOptions.waitTimeout, "timeout", 0, "total local wait timeout; zero waits until every item reaches a terminal state")
+	waitCommand.Flags().StringVar(&waitOptions.queueID, "queue-id", "default", "exact InvokeAI queue id")
+	waitCommand.Flags().StringVar(&waitOptions.requestPath, "request", "", "read a request document from a file or standard input with -")
+	command.AddCommand(waitCommand)
 	return command
 }
 
@@ -442,6 +498,41 @@ func (c *CLI) executeQueueGet(ctx context.Context, jsonOutput bool, options queu
 func renderQueueItem(get queueops.GetResult, w io.Writer) error {
 	_, err := fmt.Fprintf(w, "%d\t%s\t%s\n", get.Item.ItemID, get.Item.Status, get.Item.BatchID)
 	return err
+}
+
+// executeQueueWait compiles positional item ids and a request document to the
+// same wait request. --timeout bounds only local waiting, so it may accompany
+// --request; every HTTP request keeps its own bounded transport timeout.
+func (c *CLI) executeQueueWait(ctx context.Context, jsonOutput bool, options queueWaitOptions, itemIDs []int) int {
+	if options.waitTimeout < 0 {
+		return c.fail(result.OperationQueueWait, jsonOutput, result.CodeInvalidRequest, "timeout cannot be negative", nil)
+	}
+	execution := remoteExecution[queueops.WaitRequest, queueops.WaitResult]{
+		operation:   result.OperationQueueWait,
+		connection:  options.remoteOptions,
+		request:     queueops.WaitRequest{SchemaVersion: 1, QueueID: options.queueID, ItemIDs: itemIDs},
+		requestPath: options.requestPath,
+		invoke: func(ctx context.Context, client *httpclient.Client, request queueops.WaitRequest) (queueops.WaitResult, error) {
+			return queueops.Wait(ctx, client, request, queueops.WaitOptions{Timeout: options.waitTimeout})
+		},
+		render: renderQueueWait,
+	}
+	return execution.run(ctx, c, jsonOutput)
+}
+
+// renderQueueWait writes one line per item in request order and appends the
+// concise error of a failed or canceled item when InvokeAI reports one.
+func renderQueueWait(wait queueops.WaitResult, w io.Writer) error {
+	for _, item := range wait.Items {
+		line := fmt.Sprintf("%d\t%s\t%s", item.ItemID, item.Status, item.BatchID)
+		if item.Error != nil {
+			line += "\t" + strings.TrimPrefix(item.Error.Type+": "+item.Error.Message, ": ")
+		}
+		if _, err := fmt.Fprintln(w, line); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type imageListOptions struct {

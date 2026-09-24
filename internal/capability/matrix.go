@@ -243,6 +243,14 @@ var Matrix = []Entry{
 		},
 	},
 	{
+		Operation:     result.OperationQueueWait,
+		VersionPolicy: VersionPolicyCompatibleEndpoint,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/queue/{queue_id}/i/{item_id}"},
+			{Method: "GET", Path: "/api/v1/images/i/{image_name}"},
+		},
+	},
+	{
 		Operation:     result.OperationBoardsList,
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
 		Endpoints: []EndpointRequirement{

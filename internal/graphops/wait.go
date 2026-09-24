@@ -13,26 +13,6 @@ import (
 	"github.com/avienor/bediz/internal/queue"
 )
 
-// Waiting polls read-only queue inspection. The first poll is immediate and
-// later polls back off to maxPollInterval, so a quick item is observed within a
-// tenth of a second while a long one costs at most one request per second.
-const (
-	firstPollInterval = 100 * time.Millisecond
-	maxPollInterval   = time.Second
-)
-
-// InvokeAI 6.14 queue items use these statuses. pending, in_progress, and
-// waiting are non-terminal; waiting means the item is suspended while a
-// workflow-call child item runs. completed, failed, and canceled are terminal.
-const (
-	statusPending    = "pending"
-	statusInProgress = "in_progress"
-	statusWaiting    = "waiting"
-	statusCompleted  = "completed"
-	statusFailed     = "failed"
-	statusCanceled   = "canceled"
-)
-
 // WaitOptions bounds local waiting. A zero Timeout waits without a total
 // deadline.
 type WaitOptions struct {
@@ -40,7 +20,8 @@ type WaitOptions struct {
 	OnlyNonIntermediateImages bool
 }
 
-// Wait polls accepted queue items. It returns completed outputs accumulated before
+// Wait polls accepted queue items with the intervals and tested status set of
+// queue waiting. It returns completed outputs accumulated before
 // any error. A timeout or interruption stops only local waiting.
 func Wait(ctx context.Context, client *httpclient.Client, accepted QueueReceipt, seeds []uint32, seedField SeedField, options WaitOptions) ([]Output, error) {
 	if options.Timeout < 0 {
@@ -75,7 +56,7 @@ func Wait(ctx context.Context, client *httpclient.Client, accepted QueueReceipt,
 }
 
 func waitForItem(ctx, waitContext context.Context, client *httpclient.Client, position operation.QueuePosition, itemID int) (queue.Item, error) {
-	for interval := firstPollInterval; ; interval = min(interval*2, maxPollInterval) {
+	for interval := queue.FirstPollInterval; ; interval = min(interval*2, queue.MaxPollInterval) {
 		result, err := queue.Get(waitContext, client, queue.GetRequest{
 			SchemaVersion: 1,
 			QueueID:       position.QueueID,
@@ -92,10 +73,10 @@ func waitForItem(ctx, waitContext context.Context, client *httpclient.Client, po
 			}
 		}
 		switch item.Status {
-		case statusPending, statusInProgress, statusWaiting:
-		case statusCompleted:
+		case queue.StatusPending, queue.StatusInProgress, queue.StatusWaiting:
+		case queue.StatusCompleted:
 			return item, nil
-		case statusFailed, statusCanceled:
+		case queue.StatusFailed, queue.StatusCanceled:
 			failureType, failureMessage := normalizedFailure(item)
 			return queue.Item{}, &operation.ItemFailureError{
 				Position: position, ItemID: itemID, Status: item.Status,

@@ -30,6 +30,7 @@ func TestOperationNamesMatchThePublishedValues(t *testing.T) {
 		{name: "queue", value: OperationQueue, wire: "queue"},
 		{name: "queue list", value: OperationQueueList, wire: "queue.list"},
 		{name: "queue get", value: OperationQueueGet, wire: "queue.get"},
+		{name: "queue wait", value: OperationQueueWait, wire: "queue.wait"},
 		{name: "auth", value: OperationAuth, wire: "auth"},
 		{name: "auth huggingface", value: OperationAuthHuggingFace, wire: "auth.huggingface"},
 		{name: "auth huggingface status", value: OperationAuthHFStatus, wire: "auth.huggingface.status"},

@@ -14,7 +14,7 @@
 
 **Permanent records:** V1 spec §15 records the wait result shape and states that terminal failure is data. Tests record the contract.
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Accepted behavior
 
@@ -24,7 +24,31 @@
 - The existing generate and upscale wait cannot be reused as is: it turns failed or canceled items into errors, and it requires a batch identity and seeds. `queue wait` needs its own observation loop. That loop may share the polling intervals and the tested status set, and it must not check a batch identity.
 - There is no total timeout by default. When `--timeout` elapses, the command returns `wait_timeout` with the item ids that are not yet terminal. Neither a timeout nor an interruption cancels anything remotely.
 
-- [ ] Wait polls read-only until every item is terminal
-- [ ] Timeout and interruption behave as specified
-- [ ] `doctor` registers queue wait as read-only inspection
-- [ ] Spec §15 is updated
+- [x] Wait polls read-only until every item is terminal
+- [x] Timeout and interruption behave as specified
+- [x] `doctor` registers queue wait as read-only inspection
+- [x] Spec §15 is updated
+
+## Comments
+
+### 2026-09-24 implementation
+
+- `internal/queue` owns the observation loop (`queue.Wait`) and now exports the tested status set and poll intervals; `graphops` uses the same constants, so generate and upscale waiting is unchanged. No escalation was needed.
+- Each round polls, in request order, only the items not yet observed as terminal, so a timeout or interruption reports exactly the pending items. No batch identity is checked; a response that reports another item or queue identity is `invalid_invokeai_response`.
+- Failure details: `wait_timeout` and `interrupted` carry `queue_id`, the requested `item_ids`, and `pending_item_ids` in request order; `batch_id` is omitted because queue wait has none. An untested status adds `item_id` and `status`. An absent item is `not_found` naming the id.
+- Transient read failures use the HTTP client's bounded read retries, as generate waiting does.
+- `--timeout` bounds only local waiting and may accompany `--request`; each HTTP request keeps its default transport timeout. Human output prints one line per item and appends a failed item's concise error.
+- Live checks against InvokeAI 6.14.1 at `http://127.0.0.1:9090`:
+  - `doctor --json`: ok, `queue.wait` compatible.
+  - `generate --model "Anima Base 1.0" --prompt "a lighthouse in a storm" --width 768 --height 768 --output-count 2 --no-wait --json`: items `[87, 86]`.
+  - `queue wait 87 86 --timeout 1s --json`: exit 6, `wait_timeout`, `pending_item_ids` `[87, 86]`.
+  - `queue wait 87 86 --json` sent SIGINT after 2 s: `interrupted`, pending `[87, 86]`; both items later completed, so nothing was canceled.
+  - `queue wait 87 86 --json`: exit 0 after about 77 s, both `completed` with one Image Reference each, in request order.
+  - A one-output `generate --no-wait` gave item 88; `queue wait 88 --json` with SIGINT: exit 130. After canceling item 88 through the InvokeAI API, `queue wait 88 --json`: exit 0, status `canceled` returned as data.
+  - `queue wait 999999 --json`: exit 6, `not_found`. `queue wait 87 87 --json`: exit 2, `invalid_request`. `queue wait 88 87`: human output in request order.
+  - Gallery images created: `e189e208-8e64-421d-a3ed-0ded67f41567.png`, `920a461d-e45c-4373-9151-4f645d5e8cb9.png`.
+
+### 2026-09-24 review
+
+- Independent standards and spec reviews found no blocker. Applied: a failed item's concise error in human output, a clearer slice allocation, and a test for an interruption during an in-flight read.
+- Not changed: the generate and queue wait loops still share only constants, because the generate loop turns failures into errors and checks batch identity; merging them would change more than this slice.

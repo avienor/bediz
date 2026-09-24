@@ -3324,7 +3324,7 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 		}
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
+	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "queue.wait", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if envelope.SchemaVersion != 1 || !envelope.OK || envelope.Operation != "doctor" || !envelope.Data.Ready ||
 		!slices.Equal(operations, wantOperations) || envelope.Data.UISync["generate"] != "partial" ||
 		len(envelope.Data.OpenAPI.Invocations) != 26 || len(envelope.Data.Models.Relevant) != 12 || len(envelope.Data.Models.Requirements) != 13 {
@@ -3509,6 +3509,7 @@ func TestImplementedRemoteCommandsReportStableOperationsAndFailures(t *testing.T
 		{name: "images upload", args: []string{"images", "upload", imagePath}, operation: result.OperationImagesUpload},
 		{name: "queue list", args: []string{"queue", "list"}, operation: result.OperationQueueList},
 		{name: "queue get", args: []string{"queue", "get", "5"}, operation: result.OperationQueueGet},
+		{name: "queue wait", args: []string{"queue", "wait", "5"}, operation: result.OperationQueueWait},
 		{name: "boards list", args: []string{"boards", "list"}, operation: result.OperationBoardsList},
 		{name: "boards get", args: []string{"boards", "get", "board-1"}, operation: result.OperationBoardsGet},
 		{name: "boards create", args: []string{"boards", "create", "Portraits"}, operation: result.OperationBoardsCreate},
