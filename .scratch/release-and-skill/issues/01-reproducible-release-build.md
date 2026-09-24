@@ -68,3 +68,5 @@ After building, it fails unless the extracted native binary's `version --json` r
 **Deviation for review:** zip entries store the commit time in MS-DOS format, which has two-second precision, so an odd-second commit time is stored one second earlier. Storing it exactly needs the extended-timestamp extra field, which this ticket forbids. Spec §21 and ADR-0021 record the rounding.
 
 **Constraint:** the command must run on a release-target host, because it executes the host's binary from the finished archive to check the reported version, commit, and date.
+
+**2026-09-24, user decision:** The user accepted both points as implemented. Zip entry times use two-second MS-DOS precision and carry no extra fields. The release command runs only on a release-target host and stops with an error on any other host, instead of skipping the version check.
