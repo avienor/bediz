@@ -2,7 +2,7 @@
 name: bediz
 description: Drive a local InvokeAI through the Bediz CLI. Use when the user wants images generated or upscaled with InvokeAI or Bediz, models found or installed for InvokeAI, or its queue, gallery, boards, or generation profiles inspected or managed. Not for inpainting, img2img, or other image editing, or for developing Bediz itself.
 metadata:
-  bediz-version: v1.0.0
+  bediz-version: v1.0.0-rc.1
 ---
 
 # Bediz
