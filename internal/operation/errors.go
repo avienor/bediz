@@ -75,6 +75,34 @@ func (*CivitaiVersionSelectionError) Error() string {
 	return "Civitai model page requires one exact version selection"
 }
 
+type BoardCandidate struct {
+	BoardID   string `json:"board_id"`
+	BoardName string `json:"board_name"`
+}
+
+// BoardSelectionError reports a board name shared by several visible boards.
+// Candidates are sorted by board identifier.
+type BoardSelectionError struct {
+	Selector   string
+	Candidates []BoardCandidate
+}
+
+func (*BoardSelectionError) Error() string {
+	return "board name requires one exact board selection"
+}
+
+// NotFoundError reports that a selector resolved to no visible InvokeAI
+// resource.
+type NotFoundError struct {
+	Message string
+}
+
+func (e *NotFoundError) Error() string { return e.Message }
+
+func NotFound(message string) error {
+	return &NotFoundError{Message: message}
+}
+
 func (e *SelectionRequiredError) Error() string {
 	return "model selector requires one exact selection"
 }

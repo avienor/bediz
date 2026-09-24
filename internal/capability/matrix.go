@@ -242,6 +242,21 @@ var Matrix = []Entry{
 			{Method: "GET", Path: "/api/v1/images/i/{image_name}"},
 		},
 	},
+	{
+		Operation:     result.OperationBoardsList,
+		VersionPolicy: VersionPolicyCompatibleEndpoint,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/boards/"},
+		},
+	},
+	{
+		Operation:     result.OperationBoardsGet,
+		VersionPolicy: VersionPolicyCompatibleEndpoint,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/boards/{board_id}"},
+			{Method: "GET", Path: "/api/v1/boards/"},
+		},
+	},
 	AnimaGenerationEntry(),
 	SDXLGenerationEntry(),
 	FLUXGenerationEntry(),

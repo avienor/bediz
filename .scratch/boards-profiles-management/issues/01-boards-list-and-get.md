@@ -14,7 +14,7 @@
 
 **Permanent records:** V1 spec §15 gains the board list and get contract and the board summary fields. Tests record it.
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Accepted behavior
 
@@ -25,8 +25,26 @@
 - Read-only inspection may run on an untested but compatible InvokeAI version (§5).
 - The expected 6.14.1 endpoints are the boards list and board detail routes under `/api/v1/boards/`. Confirm them against the live OpenAPI document before coding.
 
-- [ ] `boards list` works with flags and with a Request Document
-- [ ] `boards get` resolves an exact id and a unique name, and returns `selection_required` or `not_found` otherwise
-- [ ] Board output is allowlisted and normalized
-- [ ] `doctor` reports both operations
-- [ ] Spec §15 is updated
+- [x] `boards list` works with flags and with a Request Document
+- [x] `boards get` resolves an exact id and a unique name, and returns `selection_required` or `not_found` otherwise
+- [x] Board output is allowlisted and normalized
+- [x] `doctor` reports both operations
+- [x] Spec §15 is updated
+
+## Comments
+
+### 2026-09-24 implementation
+
+- Endpoints confirmed against the live 6.14.1 OpenAPI document: `GET /api/v1/boards/` (paged with `offset` and `limit`, unpaged array with `all=true`) and `GET /api/v1/boards/{board_id}`. `BoardDTO` carries every summary field.
+- `boards get` Request Document: `{"schema_version":1,"board":"<id or name>"}`, mirroring the `model` selector. Result: `{"board": <summary>}`.
+- The 6.14.1 detail route answers 404 for an absent board and 403 for another user's private board. Both fall through to name lookup, so an invisible board ends as `not_found`. The detail route checks only owner and visibility, not the `shared_boards` table, while the list includes it; no 6.14.1 API writes `shared_boards`, so the difference is not reachable and was not escalated.
+- Live checks against InvokeAI 6.14.1 at `http://127.0.0.1:9090` with three throwaway boards (`bediz-live-check`, two `bediz-live-dup`, one archived), deleted afterward; the baseline has no boards again:
+  - `boards list --json`: exit 0, newest first, archived board excluded, total 2.
+  - `boards list --include-archived --limit 2 --json`: exit 0, archived board included.
+  - `boards list --limit 0 --json`: exit 2, `invalid_request`.
+  - `boards get <id> --json` and `boards get bediz-live-check --json`: exit 0, same summary.
+  - `boards get bediz-live-dup --json`: exit 3, `selection_required`, `kind: "board"`, candidates sorted by id.
+  - `boards get Bediz-Live-Check --json`: exit 6, `not_found` (case-sensitive).
+  - `echo '{"schema_version":1,"board":"bediz-live-check"}' | boards get --request -`: exit 0.
+  - `BEDIZ_E2E_URL=http://127.0.0.1:9090 go test -count=1 -v ./e2e -run '^TestLiveGate$/^(doctor_verifies|model_listing|image_listing|queue_listing|board_listing)'`: PASS, doctor reports `boards.list` and `boards.get` compatible.
+- Observation: InvokeAI rewrites `updated_at` without milliseconds after a PATCH (`2026-09-24 07:32:57`). Bediz passes timestamps through as reported, as it does for images.

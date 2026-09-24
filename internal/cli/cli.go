@@ -99,6 +99,7 @@ func (c *CLI) newRootCommand(exitCode *int) *cobra.Command {
 	root.AddCommand(c.newModelsCommand(exitCode, &jsonOutput))
 	root.AddCommand(c.newImagesCommand(exitCode, &jsonOutput))
 	root.AddCommand(c.newQueueCommand(exitCode, &jsonOutput))
+	root.AddCommand(c.newBoardsCommand(exitCode, &jsonOutput))
 	root.AddCommand(c.newAuthCommand(exitCode, &jsonOutput))
 	root.AddCommand(&cobra.Command{
 		Use:         "version",

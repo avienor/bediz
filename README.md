@@ -53,6 +53,8 @@ printf '%s' "$HF_TOKEN" | ./bediz auth huggingface login --token-stdin --json
 ./bediz images upload /absolute/path/to/image.png --json
 ./bediz queue list --json
 ./bediz queue get ITEM_ID --json
+./bediz boards list --json
+./bediz boards get BOARD_ID_OR_NAME --json
 ./bediz generate --model "Anima Base 1.0" --prompt "a lighthouse in a storm" --json
 ./bediz upscale --image IMAGE_NAME --model "Juggernaut-XL-v9" --tile-controlnet TILE_MODEL_KEY --scale 2 --json
 ./bediz upscale --image-path /absolute/path/to/image.png --model "Juggernaut-XL-v9" --tile-controlnet TILE_MODEL_KEY --scale 2 --json
@@ -126,7 +128,7 @@ binary, then removes only the model it installed. It requires outbound HTTPS
 access from InvokeAI. It skips unless both environment variables are set.
 
 The gate builds the real `bediz` binary and invokes `doctor`, `models list`,
-bounded image and queue listing, a self-cleaning image upload round trip, and a
+bounded image, queue, and board listing, a board lookup, a self-cleaning image upload round trip, and a
 self-cleaning Anima generation round trip through the process boundary. The upload case creates a unique 2-by-2 PNG,
 verifies the same normalized Image Reference through `images upload`,
 `images get`, and `images list`, then deletes exactly that image through the

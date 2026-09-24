@@ -47,6 +47,12 @@
       },
       "delete": {}
     },
+    "/api/v1/boards/": {
+      "get": {}
+    },
+    "/api/v1/boards/{board_id}": {
+      "get": {}
+    },
     "/api/v1/images/": {
       "get": {}
     },

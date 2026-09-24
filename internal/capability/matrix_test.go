@@ -18,6 +18,8 @@ func TestMatrixAdvertisesOnlyImplementedOperations(t *testing.T) {
 		result.OperationImagesUpload,
 		result.OperationQueueList,
 		result.OperationQueueGet,
+		result.OperationBoardsList,
+		result.OperationBoardsGet,
 		result.OperationGenerate,
 		result.OperationGenerate,
 		result.OperationGenerate,

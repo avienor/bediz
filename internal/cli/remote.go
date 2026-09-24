@@ -226,6 +226,14 @@ func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, e
 			"kind": "civitai_version", "selector": selection.ModelID, "candidates": selection.Candidates,
 		})
 	}
+	if selection, ok := errors.AsType[*operation.BoardSelectionError](err); ok {
+		return fail(result.CodeSelectionRequired, selection.Error(), map[string]any{
+			"kind": "board", "selector": selection.Selector, "candidates": selection.Candidates,
+		})
+	}
+	if missing, ok := errors.AsType[*operation.NotFoundError](err); ok {
+		return fail(result.CodeNotFound, missing.Error(), nil)
+	}
 	if selection, ok := errors.AsType[*operation.SelectionRequiredError](err); ok {
 		return fail(result.CodeSelectionRequired, selection.Error(), map[string]any{
 			"kind": selection.Kind, "selector": selection.Selector, "candidates": selection.Candidates,
