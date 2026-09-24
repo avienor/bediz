@@ -251,6 +251,15 @@ var Matrix = []Entry{
 		},
 	},
 	{
+		Operation:     result.OperationQueueCancel,
+		VersionPolicy: VersionPolicySupportedRange,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/app/version"},
+			{Method: "PUT", Path: "/api/v1/queue/{queue_id}/i/{item_id}/cancel"},
+			{Method: "GET", Path: "/api/v1/images/i/{image_name}"},
+		},
+	},
+	{
 		Operation:     result.OperationBoardsList,
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
 		Endpoints: []EndpointRequirement{

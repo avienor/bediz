@@ -72,6 +72,9 @@
     "/api/v1/queue/{queue_id}/i/{item_id}": {
       "get": {}
     },
+    "/api/v1/queue/{queue_id}/i/{item_id}/cancel": {
+      "put": {}
+    },
     "/api/v1/queue/{queue_id}/enqueue_batch": {
       "post": {}
     },

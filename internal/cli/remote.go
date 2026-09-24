@@ -357,6 +357,12 @@ type queueGetOptions struct {
 	requestPath string
 }
 
+type queueCancelOptions struct {
+	remoteOptions
+	queueID     string
+	requestPath string
+}
+
 type queueWaitOptions struct {
 	remoteOptions
 	queueID     string
@@ -458,6 +464,39 @@ func (c *CLI) newQueueCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
 	waitCommand.Flags().StringVar(&waitOptions.queueID, "queue-id", "default", "exact InvokeAI queue id")
 	waitCommand.Flags().StringVar(&waitOptions.requestPath, "request", "", "read a request document from a file or standard input with -")
 	command.AddCommand(waitCommand)
+
+	cancelOptions := queueCancelOptions{remoteOptions: defaultRemoteOptions(), queueID: "default"}
+	cancelCommand := &cobra.Command{
+		Use:         "cancel ITEM_ID",
+		Short:       "Cancel one queue item",
+		Args:        cobra.MaximumNArgs(1),
+		Annotations: map[string]string{operationAnnotation: result.OperationQueueCancel},
+		Run: func(cmd *cobra.Command, args []string) {
+			cancelOptions.captureRemoteFlags(cmd)
+			if cancelOptions.requestPath == "" && len(args) == 0 {
+				*exitCode = c.fail(result.OperationQueueCancel, *jsonOutput, result.CodeInvalidRequest, "item id or --request is required", nil)
+				return
+			}
+			if cancelOptions.requestPath != "" && (len(args) > 0 || cmd.Flags().Changed("queue-id")) {
+				*exitCode = c.fail(result.OperationQueueCancel, *jsonOutput, result.CodeInvalidRequest, "operation arguments and flags cannot be combined with --request", nil)
+				return
+			}
+			itemID := 0
+			var err error
+			if len(args) == 1 {
+				itemID, err = strconv.Atoi(args[0])
+			}
+			if len(args) == 1 && (err != nil || itemID < 1) {
+				*exitCode = c.fail(result.OperationQueueCancel, *jsonOutput, result.CodeInvalidRequest, "item id must be a positive integer", nil)
+				return
+			}
+			*exitCode = c.executeQueueCancel(cmd.Context(), *jsonOutput, cancelOptions, itemID)
+		},
+	}
+	addRemoteFlags(cancelCommand, &cancelOptions.remoteOptions, requestTimeoutUsage)
+	cancelCommand.Flags().StringVar(&cancelOptions.queueID, "queue-id", "default", "exact InvokeAI queue id")
+	cancelCommand.Flags().StringVar(&cancelOptions.requestPath, "request", "", "read a request document from a file or standard input with -")
+	command.AddCommand(cancelCommand)
 	return command
 }
 
@@ -498,6 +537,20 @@ func (c *CLI) executeQueueGet(ctx context.Context, jsonOutput bool, options queu
 func renderQueueItem(get queueops.GetResult, w io.Writer) error {
 	_, err := fmt.Fprintf(w, "%d\t%s\t%s\n", get.Item.ItemID, get.Item.Status, get.Item.BatchID)
 	return err
+}
+
+func (c *CLI) executeQueueCancel(ctx context.Context, jsonOutput bool, options queueCancelOptions, itemID int) int {
+	execution := remoteExecution[queueops.CancelRequest, queueops.CancelResult]{
+		operation:   result.OperationQueueCancel,
+		connection:  options.remoteOptions,
+		request:     queueops.CancelRequest{SchemaVersion: 1, QueueID: options.queueID, ItemID: itemID},
+		requestPath: options.requestPath,
+		invoke:      queueops.Cancel,
+		render: func(cancel queueops.CancelResult, w io.Writer) error {
+			return renderQueueItem(queueops.GetResult{Item: cancel.Item}, w)
+		},
+	}
+	return execution.run(ctx, c, jsonOutput)
 }
 
 // executeQueueWait compiles positional item ids and a request document to the

@@ -54,6 +54,7 @@ printf '%s' "$HF_TOKEN" | ./bediz auth huggingface login --token-stdin --json
 ./bediz queue list --json
 ./bediz queue get ITEM_ID --json
 ./bediz queue wait ITEM_ID [ITEM_ID...] --timeout 10m --json
+./bediz queue cancel ITEM_ID --json
 ./bediz boards list --json
 ./bediz boards get BOARD_ID_OR_NAME --json
 ./bediz boards create "Board name" --json

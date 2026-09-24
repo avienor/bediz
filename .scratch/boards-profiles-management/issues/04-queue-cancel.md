@@ -14,7 +14,7 @@
 
 **Permanent records:** V1 spec §15 records the per-item cancel contract, the workflow-call chain effect, and that batch cancellation is deferred. Tests record the contract.
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Accepted behavior
 
@@ -24,6 +24,31 @@
 - The result data is the `queue get` projection of the named item after cancellation.
 - The 6.14.1 endpoint is `PUT /api/v1/queue/{queue_id}/i/{item_id}/cancel`, confirmed against the installed source. Check it against the live OpenAPI document before coding.
 
-- [ ] Cancel works with a positional id and with a Request Document
-- [ ] The cancellation is sent once, and an uncertain result returns `outcome_unknown`
-- [ ] Spec §15 is updated
+- [x] Cancel works with a positional id and with a Request Document
+- [x] The cancellation is sent once, and an uncertain result returns `outcome_unknown`
+- [x] Spec §15 is updated
+
+## Comments
+
+### 2026-09-24 implementation
+
+- The live 6.14.1 OpenAPI document lists `PUT /api/v1/queue/{queue_id}/i/{item_id}/cancel` with a `SessionQueueItem` 200 response. The installed source (`session_queue_sqlite.cancel_queue_item`) cancels only the named item's workflow-call chain and skips terminal items without an error, so no escalation was needed.
+- `internal/queue` owns `queue.Cancel`. It checks the supported version range, sends one `PUT` through the non-retrying mutation path, and projects InvokeAI's cancel response with the same code as `queue get`. There is no follow-up read. A success response that names another item or queue, or no item, returns `outcome_unknown`.
+- `doctor` registers `queue.cancel` for the supported range only (version, cancel route, and image detail for the projection).
+- Live checks against InvokeAI 6.14.1 at `http://127.0.0.1:9090`:
+  - `doctor --json`: `queue.cancel` compatible.
+  - `queue cancel 87 --json` on a completed item: exit 0, status `completed` unchanged, with its Image Reference. `queue cancel 88 --json` on an already canceled item: exit 0, `canceled`.
+  - `queue cancel 99999 --json`: exit 6, `not_found`.
+  - Two one-output `generate --model "Anima Base 1.0" --width 768 --height 768 --no-wait` calls gave item 89 (`in_progress`) and item 90 (`pending`). `queue cancel 90 --json`: exit 0, `canceled`. `queue cancel 89 --json`: exit 0, `canceled`.
+  - In the InvokeAI queue UI: item 90 was CANCELED with no GPU or time, item 89 was CANCELED after 4.52 s, and item 87 was still COMPLETED. The counters showed 0 in progress and 0 pending. Neither canceled item produced a gallery image.
+
+### 2026-09-24 review
+
+- The standards and spec reviews found no blocker. The spec review checked the send-once path in the HTTP client and the already-terminal behavior in the installed 6.14.1 source.
+- Applied: the command's short help no longer says the whole chain is canceled, and the shared queue-item projection now returns an `Item` directly.
+- Open, not changed:
+  - After a successful cancel, a failed Image Reference read for an item with image outputs reports a read failure, although the cancellation was applied. The item is usually already completed in that case.
+  - A 403 for another user's item maps to `authentication_failed`, as it does for other commands.
+  - The 503 gateway case follows `.scratch/mutation-gateway-status`.
+  - "workflow-call chain" has no `CONTEXT.md` entry.
+  - The get and cancel argument parsing is duplicated.
