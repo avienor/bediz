@@ -26,6 +26,7 @@ const (
 	OperationBoards          = "boards"
 	OperationBoardsList      = "boards.list"
 	OperationBoardsGet       = "boards.get"
+	OperationBoardsCreate    = "boards.create"
 	OperationAuth            = "auth"
 	OperationAuthHuggingFace = "auth.huggingface"
 	OperationAuthHFStatus    = "auth.huggingface.status"

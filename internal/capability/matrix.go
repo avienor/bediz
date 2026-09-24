@@ -257,6 +257,15 @@ var Matrix = []Entry{
 			{Method: "GET", Path: "/api/v1/boards/"},
 		},
 	},
+	{
+		Operation:     result.OperationBoardsCreate,
+		VersionPolicy: VersionPolicySupportedRange,
+		Endpoints: []EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/app/version"},
+			{Method: "GET", Path: "/api/v1/boards/"},
+			{Method: "POST", Path: "/api/v1/boards/"},
+		},
+	},
 	AnimaGenerationEntry(),
 	SDXLGenerationEntry(),
 	FLUXGenerationEntry(),

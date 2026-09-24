@@ -91,6 +91,17 @@ func (*BoardSelectionError) Error() string {
 	return "board name requires one exact board selection"
 }
 
+// BoardNameExistsError reports visible boards that already have the exact name
+// a create request asked for. BoardIDs are sorted by board identifier.
+type BoardNameExistsError struct {
+	BoardName string
+	BoardIDs  []string
+}
+
+func (e *BoardNameExistsError) Error() string {
+	return fmt.Sprintf("a visible board is already named %q", e.BoardName)
+}
+
 // NotFoundError reports that a selector resolved to no visible InvokeAI
 // resource.
 type NotFoundError struct {

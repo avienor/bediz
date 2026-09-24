@@ -41,7 +41,7 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 	for i, entry := range report.Capabilities {
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "boards.list", "boards.get", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
+	wantOperations := []string{"models.list", "models.install", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if !slices.Equal(operations, wantOperations) {
 		t.Fatalf("reported operations = %q, want implemented operations %q", operations, wantOperations)
 	}
@@ -177,7 +177,7 @@ func TestRunReportsInspectionAndUploadCapabilities(t *testing.T) {
 	for _, entry := range report.Capabilities {
 		got[entry.Operation] = entry.Compatible
 	}
-	for _, operation := range []string{"models.list", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "boards.list", "boards.get"} {
+	for _, operation := range []string{"models.list", "models.install", "models.status", "images.list", "images.get", "images.upload", "queue.list", "queue.get", "boards.list", "boards.get", "boards.create"} {
 		if !got[operation] {
 			t.Errorf("capability %q missing or incompatible: %#v", operation, report.Capabilities)
 		}
@@ -299,7 +299,7 @@ func TestRunAllowsReadOnlyInspectionOnEndpointCompatibleUntestedVersion(t *testi
 			t.Errorf("read-only capability %q should remain compatible: %#v", operation, report.Capabilities)
 		}
 	}
-	if compatibility["models.install"] || compatibility["images.upload"] || compatibility["generate"] {
+	if compatibility["models.install"] || compatibility["images.upload"] || compatibility["boards.create"] || compatibility["generate"] {
 		t.Fatalf("mutating and graph-producing capabilities should require the supported range: %#v", report.Capabilities)
 	}
 }

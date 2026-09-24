@@ -48,7 +48,8 @@
       "delete": {}
     },
     "/api/v1/boards/": {
-      "get": {}
+      "get": {},
+      "post": {}
     },
     "/api/v1/boards/{board_id}": {
       "get": {}

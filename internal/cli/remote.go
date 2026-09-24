@@ -210,6 +210,11 @@ func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, e
 	if _, ok := errors.AsType[*huggingface.UnchangedStateError](err); ok {
 		return fail(result.CodeInvokeAIOperationFailed, "InvokeAI did not clear the Hugging Face token", nil)
 	}
+	if exists, ok := errors.AsType[*operation.BoardNameExistsError](err); ok {
+		return fail(result.CodeInvalidRequest, exists.Error(), map[string]any{
+			"reason": "board_name_exists", "board_ids": exists.BoardIDs,
+		})
+	}
 	if invalid, ok := errors.AsType[*operation.InvalidRequestError](err); ok {
 		return fail(result.CodeInvalidRequest, invalid.Error(), nil)
 	}

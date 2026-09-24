@@ -24,10 +24,15 @@ type boardGetOptions struct {
 	requestPath string
 }
 
+type boardCreateOptions struct {
+	remoteOptions
+	requestPath string
+}
+
 func (c *CLI) newBoardsCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
 	command := &cobra.Command{
 		Use:         "boards",
-		Short:       "Inspect InvokeAI boards",
+		Short:       "Inspect and create InvokeAI boards",
 		Annotations: map[string]string{operationAnnotation: result.OperationBoards},
 		Run: func(_ *cobra.Command, _ []string) {
 			*exitCode = c.fail(result.OperationBoards, *jsonOutput, result.CodeInvalidRequest, "boards requires a subcommand", nil)
@@ -78,6 +83,33 @@ func (c *CLI) newBoardsCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
 	addRemoteFlags(getCommand, &getOptions.remoteOptions, requestTimeoutUsage)
 	getCommand.Flags().StringVar(&getOptions.requestPath, "request", "", "read a request document from a file or standard input with -")
 	command.AddCommand(getCommand)
+
+	createOptions := boardCreateOptions{remoteOptions: defaultRemoteOptions()}
+	createCommand := &cobra.Command{
+		Use:         "create NAME",
+		Short:       "Create a board with a name no visible board has",
+		Args:        cobra.MaximumNArgs(1),
+		Annotations: map[string]string{operationAnnotation: result.OperationBoardsCreate},
+		Run: func(cmd *cobra.Command, args []string) {
+			createOptions.captureRemoteFlags(cmd)
+			if createOptions.requestPath == "" && len(args) == 0 {
+				*exitCode = c.fail(result.OperationBoardsCreate, *jsonOutput, result.CodeInvalidRequest, "board name or --request is required", nil)
+				return
+			}
+			if createOptions.requestPath != "" && len(args) > 0 {
+				*exitCode = c.fail(result.OperationBoardsCreate, *jsonOutput, result.CodeInvalidRequest, "board name cannot be combined with --request", nil)
+				return
+			}
+			name := ""
+			if len(args) == 1 {
+				name = args[0]
+			}
+			*exitCode = c.executeBoardsCreate(cmd.Context(), *jsonOutput, createOptions, name)
+		},
+	}
+	addRemoteFlags(createCommand, &createOptions.remoteOptions, requestTimeoutUsage)
+	createCommand.Flags().StringVar(&createOptions.requestPath, "request", "", "read a request document from a file or standard input with -")
+	command.AddCommand(createCommand)
 	return command
 }
 
@@ -116,6 +148,18 @@ func (c *CLI) executeBoardsGet(ctx context.Context, jsonOutput bool, options boa
 		requestPath: options.requestPath,
 		invoke:      boards.Get,
 		render:      func(get boards.GetResult, w io.Writer) error { return renderBoardSummary(get.Board, w) },
+	}
+	return execution.run(ctx, c, jsonOutput)
+}
+
+func (c *CLI) executeBoardsCreate(ctx context.Context, jsonOutput bool, options boardCreateOptions, name string) int {
+	execution := remoteExecution[boards.CreateRequest, boards.CreateResult]{
+		operation:   result.OperationBoardsCreate,
+		connection:  options.remoteOptions,
+		request:     boards.CreateRequest{SchemaVersion: 1, BoardName: name},
+		requestPath: options.requestPath,
+		invoke:      boards.Create,
+		render:      func(create boards.CreateResult, w io.Writer) error { return renderBoardSummary(create.Board, w) },
 	}
 	return execution.run(ctx, c, jsonOutput)
 }

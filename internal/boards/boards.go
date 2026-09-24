@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/avienor/bediz/internal/capability"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/operation"
 )
@@ -47,6 +48,16 @@ type GetRequest struct {
 }
 
 type GetResult struct {
+	Board Summary `json:"board"`
+}
+
+// CreateRequest names one new board. The name is sent exactly as given.
+type CreateRequest struct {
+	SchemaVersion int    `json:"schema_version"`
+	BoardName     string `json:"board_name"`
+}
+
+type CreateResult struct {
 	Board Summary `json:"board"`
 }
 
@@ -123,18 +134,9 @@ func Get(ctx context.Context, client *httpclient.Client, request GetRequest) (Ge
 		return GetResult{}, err
 	}
 
-	query := url.Values{}
-	query.Set("all", "true")
-	query.Set("include_archived", "true")
-	var visible []boardRecord
-	if err := client.GetJSON(ctx, "/api/v1/boards/?"+query.Encode(), &visible); err != nil {
+	matches, err := boardsNamed(ctx, client, request.Board)
+	if err != nil {
 		return GetResult{}, err
-	}
-	var matches []boardRecord
-	for _, candidate := range visible {
-		if candidate.BoardName == request.Board {
-			matches = append(matches, candidate)
-		}
 	}
 	switch len(matches) {
 	case 0:
@@ -142,12 +144,79 @@ func Get(ctx context.Context, client *httpclient.Client, request GetRequest) (Ge
 	case 1:
 		return GetResult{Board: normalize(matches[0])}, nil
 	}
-	slices.SortFunc(matches, func(a, b boardRecord) int { return strings.Compare(a.BoardID, b.BoardID) })
 	candidates := make([]operation.BoardCandidate, 0, len(matches))
 	for _, match := range matches {
 		candidates = append(candidates, operation.BoardCandidate{BoardID: match.BoardID, BoardName: match.BoardName})
 	}
 	return GetResult{}, &operation.BoardSelectionError{Selector: request.Board, Candidates: candidates}
+}
+
+// Create requires a supported InvokeAI version and a name no visible board has,
+// archived boards included, then sends one create request and never retries it.
+func Create(ctx context.Context, client *httpclient.Client, request CreateRequest) (CreateResult, error) {
+	if request.SchemaVersion != 1 {
+		return CreateResult{}, operation.InvalidRequest(fmt.Sprintf("unsupported request schema version %d", request.SchemaVersion))
+	}
+	if strings.TrimSpace(request.BoardName) == "" {
+		return CreateResult{}, operation.InvalidRequest("board name must not be empty")
+	}
+
+	var version struct {
+		Version string `json:"version"`
+	}
+	if err := client.GetJSON(ctx, "/api/v1/app/version", &version); err != nil {
+		return CreateResult{}, err
+	}
+	supported, err := capability.SupportsInvokeAI(version.Version)
+	if err != nil {
+		return CreateResult{}, err
+	}
+	if !supported {
+		return CreateResult{}, operation.UnsupportedCapability(fmt.Sprintf("InvokeAI %s is outside the supported range %s", version.Version, capability.SupportedInvokeAIRange))
+	}
+
+	existing, err := boardsNamed(ctx, client, request.BoardName)
+	if err != nil {
+		return CreateResult{}, err
+	}
+	if len(existing) > 0 {
+		boardIDs := make([]string, 0, len(existing))
+		for _, board := range existing {
+			boardIDs = append(boardIDs, board.BoardID)
+		}
+		return CreateResult{}, &operation.BoardNameExistsError{BoardName: request.BoardName, BoardIDs: boardIDs}
+	}
+
+	query := url.Values{}
+	query.Set("board_name", request.BoardName)
+	var board boardRecord
+	if err := client.DoJSON(ctx, http.MethodPost, "/api/v1/boards/?"+query.Encode(), nil, &board); err != nil {
+		return CreateResult{}, err
+	}
+	if board.BoardID == "" {
+		return CreateResult{}, &httpclient.OutcomeUnknownError{Method: http.MethodPost, URL: "/api/v1/boards/", Err: errors.New("create response has no board identifier")}
+	}
+	return CreateResult{Board: normalize(board)}, nil
+}
+
+// boardsNamed reads every visible board, archived ones included, and returns
+// those with exactly the given case-sensitive name sorted by board identifier.
+func boardsNamed(ctx context.Context, client *httpclient.Client, name string) ([]boardRecord, error) {
+	query := url.Values{}
+	query.Set("all", "true")
+	query.Set("include_archived", "true")
+	var visible []boardRecord
+	if err := client.GetJSON(ctx, "/api/v1/boards/?"+query.Encode(), &visible); err != nil {
+		return nil, err
+	}
+	var matches []boardRecord
+	for _, candidate := range visible {
+		if candidate.BoardName == name {
+			matches = append(matches, candidate)
+		}
+	}
+	slices.SortFunc(matches, func(a, b boardRecord) int { return strings.Compare(a.BoardID, b.BoardID) })
+	return matches, nil
 }
 
 // invisibleBoard reports a board detail response meaning no board with that

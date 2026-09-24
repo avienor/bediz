@@ -14,7 +14,7 @@
 
 **Permanent records:** V1 spec §15 gains the create contract and the duplicate-name rule. The rule does not change accepted terminology, so `CONTEXT.md` stays unchanged. Tests record the contract.
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Accepted behavior
 
@@ -24,7 +24,24 @@
 - The create request is sent once and never retried automatically. An inconclusive transport result, or a success response without a board identifier, returns `outcome_unknown`, and the caller inspects `boards list` before trying again.
 - Creating a board requires a supported InvokeAI version.
 
-- [ ] Create works with a positional name and with a Request Document
-- [ ] A duplicate exact name is rejected before any mutation
-- [ ] The mutation is sent once, and an uncertain result returns `outcome_unknown`
-- [ ] Spec §15 is updated
+- [x] Create works with a positional name and with a Request Document
+- [x] A duplicate exact name is rejected before any mutation
+- [x] The mutation is sent once, and an uncertain result returns `outcome_unknown`
+- [x] Spec §15 is updated
+
+## Comments
+
+### 2026-09-24 implementation
+
+- Endpoint confirmed against the live 6.14.1 OpenAPI document: `POST /api/v1/boards/` takes `board_name` as a required query parameter (max length 300) and answers 201 with the created `BoardDTO`. The name travels in the query string of a single request, so the send-once guarantee is clear and no escalation was needed.
+- Order of work: local validation, then the supported-version check (`GET /api/v1/app/version`), then the duplicate-name check over `GET /api/v1/boards/?all=true&include_archived=true` (the unpaged every-visible-board mode `boards get` uses), then exactly one create request. The create goes through the non-retrying mutation path; a transport failure, an undecodable body, or a body without `board_id` returns `outcome_unknown`. Result: `{"board": <board summary>}`.
+- Bediz does not check the 300-character limit locally; InvokeAI's 422 is a conclusive rejection (`invokeai_operation_failed`).
+- Live checks against InvokeAI 6.14.1 at `http://127.0.0.1:9090` with throwaway boards, deleted afterward; the baseline has no boards again:
+  - `boards create bediz-live-create --json`: exit 0, board summary with a new identifier.
+  - The same command again: exit 2, `invalid_request`, `reason: "board_name_exists"`, `board_ids` holds the first board.
+  - `echo '{"schema_version":1,"board_name":"Bediz-Live-Create"}' | boards create --request - --json`: exit 0 (case-sensitive match).
+  - `boards create "   " --json`: exit 2, `invalid_request`.
+  - `boards create bediz-live-human`: exit 0, human output `<id>\tbediz-live-human\t0`.
+  - After archiving that board through the InvokeAI API, `boards create bediz-live-human --json`: exit 2, `board_name_exists` with the archived board's identifier.
+  - `doctor --json`: ok, `boards.create` compatible with no failures.
+  - InvokeAI web UI gallery at `http://127.0.0.1:9090`: `bediz-live-create` and `Bediz-Live-Create` appear in the board list; the archived board is hidden, which is the UI default.

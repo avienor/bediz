@@ -353,3 +353,263 @@ func TestBoardsHumanOutputListsIdentifiersAndNames(t *testing.T) {
 		t.Fatalf("exit code = %d, stderr = %q, stdout = %q", exitCode, stderr.String(), stdout.String())
 	}
 }
+
+type boardCreateServer struct {
+	*httptest.Server
+	requests atomic.Int32
+	creates  atomic.Int32
+}
+
+// newBoardCreateServer serves the 6.14.1 version route, the unpaged all-boards
+// listing used by the duplicate-name check, and the create route answered by
+// create. It counts every request and every create request.
+func newBoardCreateServer(t *testing.T, version string, boards []map[string]any, create http.HandlerFunc) *boardCreateServer {
+	t.Helper()
+	server := &boardCreateServer{}
+	server.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server.requests.Add(1)
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/app/version":
+			_ = json.NewEncoder(w).Encode(map[string]string{"version": version})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/boards/":
+			query := r.URL.Query()
+			if query.Get("all") != "true" || query.Get("include_archived") != "true" {
+				t.Errorf("duplicate check must list every visible board including archived ones: %v", query)
+			}
+			_ = json.NewEncoder(w).Encode(boards)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/boards/":
+			server.creates.Add(1)
+			create(w, r)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// createdBoard answers a create request with the BoardDTO InvokeAI 6.14.1
+// returns for the requested name.
+func createdBoard() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(boardRecord("board-new", r.URL.Query().Get("board_name"), false))
+	}
+}
+
+func TestBoardsCreateReturnsCreatedBoardSummary(t *testing.T) {
+	isolateUserConfigDir(t)
+	server := newBoardCreateServer(t, "6.14.1", []map[string]any{boardRecord("board-1", "portraits", false)}, createdBoard())
+
+	exitCode, envelope, stderr := runBoardsJSON(t, "", "boards", "create", " Portraits & Co ", "--url", server.URL)
+
+	if exitCode != result.ExitSuccess || stderr != "" {
+		t.Fatalf("exit code = %d, stderr = %q, envelope = %#v", exitCode, stderr, envelope)
+	}
+	want := map[string]any{
+		"schema_version": float64(1), "ok": true, "operation": "boards.create", "warnings": []any{},
+		"data": map[string]any{
+			"board": map[string]any{
+				"board_id": "board-new", "board_name": " Portraits & Co ", "image_count": float64(3), "archived": false,
+				"created_at": "2026-09-20 10:00:00.000", "updated_at": "2026-09-20 10:01:00.000",
+			},
+		},
+	}
+	if !reflect.DeepEqual(envelope, want) {
+		t.Fatalf("envelope = %#v\nwant %#v", envelope, want)
+	}
+	if creates := server.creates.Load(); creates != 1 {
+		t.Fatalf("sent %d create requests, want 1", creates)
+	}
+}
+
+func TestBoardsCreateAcceptsTypedRequestDocument(t *testing.T) {
+	isolateUserConfigDir(t)
+	server := newBoardCreateServer(t, "6.14.1", nil, createdBoard())
+
+	exitCode, envelope, stderr := runBoardsJSON(t, `{"schema_version":1,"board_name":"Landscapes"}`, "boards", "create", "--request", "-", "--url", server.URL)
+
+	if exitCode != result.ExitSuccess || stderr != "" {
+		t.Fatalf("exit code = %d, stderr = %q, envelope = %#v", exitCode, stderr, envelope)
+	}
+	board := envelope["data"].(map[string]any)["board"].(map[string]any)
+	if board["board_id"] != "board-new" || board["board_name"] != "Landscapes" || server.creates.Load() != 1 {
+		t.Fatalf("envelope = %#v, creates = %d", envelope, server.creates.Load())
+	}
+}
+
+func TestBoardsCreateRejectsInvalidRequestsBeforeNetwork(t *testing.T) {
+	isolateUserConfigDir(t)
+	tests := []struct {
+		name  string
+		stdin string
+		args  []string
+	}{
+		{name: "no name"},
+		{name: "empty name", args: []string{""}},
+		{name: "whitespace-only name", args: []string{" \t\n "}},
+		{name: "document without name", stdin: `{"schema_version":1}`, args: []string{"--request", "-"}},
+		{name: "document with whitespace-only name", stdin: `{"schema_version":1,"board_name":"  "}`, args: []string{"--request", "-"}},
+		{name: "document with unknown field", stdin: `{"schema_version":1,"board_name":"x","board_id":"x"}`, args: []string{"--request", "-"}},
+		{name: "document with unsupported schema version", stdin: `{"schema_version":2,"board_name":"x"}`, args: []string{"--request", "-"}},
+		{name: "name mixed with document", stdin: `{"schema_version":1,"board_name":"x"}`, args: []string{"x", "--request", "-"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := newBoardCreateServer(t, "6.14.1", nil, createdBoard())
+			args := append([]string{"boards", "create", "--url", server.URL}, test.args...)
+
+			exitCode, envelope, stderr := runBoardsJSON(t, test.stdin, args...)
+
+			if exitCode != result.ExitInvalidRequest || stderr != "" {
+				t.Fatalf("exit code = %d, stderr = %q, envelope = %#v", exitCode, stderr, envelope)
+			}
+			if envelope["operation"] != "boards.create" || envelope["error"].(map[string]any)["code"] != "invalid_request" {
+				t.Fatalf("unexpected envelope: %#v", envelope)
+			}
+			if requests := server.requests.Load(); requests != 0 {
+				t.Fatalf("sent %d requests, want none", requests)
+			}
+		})
+	}
+}
+
+func TestBoardsCreateRejectsExistingExactNameWithoutMutation(t *testing.T) {
+	isolateUserConfigDir(t)
+	tests := []struct {
+		name         string
+		boards       []map[string]any
+		wantBoardIDs []any
+	}{
+		{
+			name:         "one board",
+			boards:       []map[string]any{boardRecord("board-1", "Portraits", false), boardRecord("board-2", "portraits", false)},
+			wantBoardIDs: []any{"board-1"},
+		},
+		{
+			name:         "archived board",
+			boards:       []map[string]any{boardRecord("board-9", "Portraits", true)},
+			wantBoardIDs: []any{"board-9"},
+		},
+		{
+			name: "several boards",
+			boards: []map[string]any{
+				boardRecord("board-c", "Portraits", false), boardRecord("board-x", "Other", false),
+				boardRecord("board-a", "Portraits", true), boardRecord("board-b", "Portraits", false),
+			},
+			wantBoardIDs: []any{"board-a", "board-b", "board-c"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := newBoardCreateServer(t, "6.14.1", test.boards, createdBoard())
+
+			exitCode, envelope, stderr := runBoardsJSON(t, "", "boards", "create", "Portraits", "--url", server.URL)
+
+			if exitCode != result.ExitInvalidRequest || stderr != "" {
+				t.Fatalf("exit code = %d, stderr = %q, envelope = %#v", exitCode, stderr, envelope)
+			}
+			failure := envelope["error"].(map[string]any)
+			wantDetails := map[string]any{"reason": "board_name_exists", "board_ids": test.wantBoardIDs}
+			if envelope["operation"] != "boards.create" || failure["code"] != "invalid_request" || !reflect.DeepEqual(failure["details"], wantDetails) {
+				t.Fatalf("envelope = %#v, want details %#v", envelope, wantDetails)
+			}
+			if creates := server.creates.Load(); creates != 0 {
+				t.Fatalf("sent %d create requests, want none", creates)
+			}
+		})
+	}
+}
+
+func TestBoardsCreateSendsMutationOnceOnEveryFailure(t *testing.T) {
+	isolateUserConfigDir(t)
+	tests := []struct {
+		name     string
+		create   http.HandlerFunc
+		wantCode string
+	}{
+		{
+			name: "conclusive rejection",
+			create: func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, `{"detail":"invalid"}`, http.StatusUnprocessableEntity)
+			},
+			wantCode: "invokeai_operation_failed",
+		},
+		{
+			name: "transient gateway status",
+			create: func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			},
+			wantCode: "invokeai_operation_failed",
+		},
+		{
+			name: "lost response",
+			create: func(w http.ResponseWriter, _ *http.Request) {
+				connection, _, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					t.Errorf("hijack create connection: %v", err)
+					return
+				}
+				_ = connection.Close()
+			},
+			wantCode: "outcome_unknown",
+		},
+		{
+			name: "success without board identifier",
+			create: func(w http.ResponseWriter, r *http.Request) {
+				board := boardRecord("", r.URL.Query().Get("board_name"), false)
+				delete(board, "board_id")
+				w.WriteHeader(http.StatusCreated)
+				_ = json.NewEncoder(w).Encode(board)
+			},
+			wantCode: "outcome_unknown",
+		},
+		{
+			name: "undecodable success",
+			create: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"board_id":`))
+			},
+			wantCode: "outcome_unknown",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := newBoardCreateServer(t, "6.14.1", nil, test.create)
+
+			exitCode, envelope, stderr := runBoardsJSON(t, "", "boards", "create", "Portraits", "--url", server.URL)
+
+			if exitCode != result.ExitInvokeAIFailure || stderr != "" {
+				t.Fatalf("exit code = %d, stderr = %q, envelope = %#v", exitCode, stderr, envelope)
+			}
+			if envelope["operation"] != "boards.create" || envelope["error"].(map[string]any)["code"] != test.wantCode {
+				t.Fatalf("envelope = %#v, want code %q", envelope, test.wantCode)
+			}
+			if creates := server.creates.Load(); creates != 1 {
+				t.Fatalf("sent %d create requests, want exactly 1", creates)
+			}
+		})
+	}
+}
+
+func TestBoardsCreateRejectsUnsupportedInvokeAIVersionBeforeMutation(t *testing.T) {
+	isolateUserConfigDir(t)
+	for _, version := range []string{"6.14.0", "6.15.0"} {
+		t.Run(version, func(t *testing.T) {
+			server := newBoardCreateServer(t, version, nil, createdBoard())
+
+			exitCode, envelope, stderr := runBoardsJSON(t, "", "boards", "create", "Portraits", "--url", server.URL)
+
+			if exitCode != result.ExitUnsupportedCapability || stderr != "" {
+				t.Fatalf("exit code = %d, stderr = %q, envelope = %#v", exitCode, stderr, envelope)
+			}
+			if envelope["operation"] != "boards.create" || envelope["error"].(map[string]any)["code"] != "unsupported_capability" {
+				t.Fatalf("envelope = %#v", envelope)
+			}
+			if creates := server.creates.Load(); creates != 0 {
+				t.Fatalf("sent %d create requests, want none", creates)
+			}
+		})
+	}
+}
