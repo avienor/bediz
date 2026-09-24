@@ -160,3 +160,27 @@ Empty pre-existing model, image, and queue collections are valid. The URL must n
 credentials, a query, or a fragment; an authentication requirement causes the
 gate to fail instead of accepting or printing a real token. Use `-count=1` as
 shown so a live result is never served from the Go test cache.
+
+## Release
+
+Maintainers build a release from a clean checkout of its version tag:
+
+```text
+git checkout v1.0.0
+go run ./tools/release v1.0.0
+```
+
+The command writes `bediz_<version>_linux_amd64.tar.gz`, `bediz_<version>_darwin_arm64.tar.gz`, `bediz_<version>_windows_amd64.zip`, and `SHA256SUMS` to `dist/<version>`, or to the directory given with `-out`, which must not exist yet. It refuses to run unless all of these hold:
+
+- the version has the form `vX.Y.Z` or `vX.Y.Z-<prerelease>`;
+- a tag with that exact name points to the checked-out commit;
+- the working tree has no modified files and no untracked files that Git does not ignore;
+- `go env GOVERSION` equals the `toolchain` directive in `go.mod`.
+
+The command must run on Linux amd64, macOS arm64, or Windows amd64. It checks the finished archive for that host by running `bediz version --json` and comparing the reported version, commit, and date with the tag. Two runs on the same tag with the pinned toolchain produce byte-identical archives, so a published release can be rebuilt and compared with `SHA256SUMS`. See [ADR-0021](docs/adr/0021-build-releases-reproducibly-with-a-repository-local-command.md) for the fixed build and archive settings.
+
+A `go install github.com/avienor/bediz/cmd/bediz@vX.Y.Z` build reports `vX.Y.Z` without a commit or date. A local `go build` reports the version and VCS data that Go records, and `dev` when there is none.
+
+## License
+
+Bediz is licensed under the [Apache License 2.0](LICENSE).

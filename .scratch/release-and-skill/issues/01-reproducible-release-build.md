@@ -27,7 +27,7 @@ After building, it fails unless the extracted native binary's `version --json` r
 
 **Permanent records:** V1 spec §21 records the archive names, their contents, `SHA256SUMS`, and how a `go install` build reports its version. A new ADR records the reproducible repository-local build decision. README records the release command and its preconditions for maintainers. `go.mod` gains the pinned `toolchain` directive. The `LICENSE` file is added, and tests record the version precedence.
 
-**Status:** ready-for-agent
+**Status:** awaiting-review
 
 ## Accepted behavior
 
@@ -44,9 +44,27 @@ After building, it fails unless the extracted native binary's `version --json` r
 - The skill is not bundled in the archives.
 - The `version` JSON fields stay `version`, `commit`, and `date`, and `version` and `doctor` report the same values.
 
-- [ ] Version sources follow the accepted precedence
-- [ ] One command produces the three archives and `SHA256SUMS`
-- [ ] Repeated builds are byte-identical
-- [ ] The command refuses invalid versions, mismatched tags, dirty trees, and other toolchains
-- [ ] `LICENSE` is present in the repository and in every archive
-- [ ] Spec §21, the ADR, and README are updated
+- [x] Version sources follow the accepted precedence
+- [x] One command produces the three archives and `SHA256SUMS`
+- [x] Repeated builds are byte-identical
+- [x] The command refuses invalid versions, mismatched tags, dirty trees, and other toolchains
+- [x] `LICENSE` is present in the repository and in every archive
+- [x] Spec §21, the ADR, and README are updated
+
+## Comments
+
+**2026-09-24, implementation:** The release command is `go run ./tools/release [-out DIR] vX.Y.Z` (`internal/release`). Its default output is `dist/<version>`, and it refuses an output directory that already exists. `go.mod` pins `toolchain go1.27.1`. This evidence was gathered in scratch clones with the tag `v1.0.0-test.2`:
+
+- Two checkouts produced identical `SHA256SUMS`, and `sha256sum -c` passed.
+- `version --json` on the Linux binary reported the tag, commit, and commit date.
+- `go version -m` showed `CGO_ENABLED=0`, `-trimpath=true`, the target `GOOS`/`GOARCH`, and `vcs.modified=false`.
+- The archives hold exactly the binary, `LICENSE`, and `README.md`, with owner and group `0/0`.
+- The gzip header's modification time is zero and its OS byte is `ff`.
+- The zip entries have no extra fields.
+- No `/home`, `/tmp`, or user name appears in any binary or archive.
+- The command refused an invalid version, a mismatched tag, a dirty tree, and `GOTOOLCHAIN=go1.27.0`.
+- A `go install ...@v1.0.0-test.1` through a local file module proxy reported the tag without a commit or date.
+
+**Deviation for review:** zip entries store the commit time in MS-DOS format, which has two-second precision, so an odd-second commit time is stored one second earlier. Storing it exactly needs the extended-timestamp extra field, which this ticket forbids. Spec §21 and ADR-0021 record the rounding.
+
+**Constraint:** the command must run on a release-target host, because it executes the host's binary from the finished archive to check the reported version, commit, and date.
