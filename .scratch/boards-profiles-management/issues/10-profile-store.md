@@ -14,7 +14,7 @@
 
 **Permanent records:** V1 spec §16 records the Profile Document schema, the storage location, the name rule, and the command contracts. `CONTEXT.md`'s Generation Profile definition already matches and needs no change. Tests record the contract.
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Accepted behavior
 
@@ -26,7 +26,7 @@
 - Create stores the document exactly as validated. `profiles get` returns the stored document. `profiles list` returns `{"profiles":[{"name":..., "sections":["generate", ...]}]}` sorted by name, and ignores files whose names do not match the name rule.
 - Replacing an existing profile requires both `--replace` and `--yes`. It writes to a temporary file and renames it into place, with no revision history. Deleting requires `--yes`. Write failures return `configuration_write_failed`.
 
-- [ ] All four commands work locally with the strict document rules
-- [ ] Forbidden content cannot be stored
-- [ ] Replacement is gated and atomic
-- [ ] Spec §16 is updated
+- [x] All four commands work locally with the strict document rules
+- [x] Forbidden content cannot be stored
+- [x] Replacement is gated and atomic
+- [x] Spec §16 is updated

@@ -1,22 +1,17 @@
 package cli
 
 import (
-	"bytes"
 	"cmp"
 	"context"
-	"encoding/json"
-	"encoding/json/jsontext"
-	jsonv2 "encoding/json/v2"
-	"errors"
 	"fmt"
 	"io"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/avienor/bediz/internal/config"
 	"github.com/avienor/bediz/internal/doctor"
+	"github.com/avienor/bediz/internal/document"
 	"github.com/avienor/bediz/internal/result"
 	"github.com/avienor/bediz/internal/version"
 	"github.com/spf13/cobra"
@@ -100,6 +95,7 @@ func (c *CLI) newRootCommand(exitCode *int) *cobra.Command {
 	root.AddCommand(c.newImagesCommand(exitCode, &jsonOutput))
 	root.AddCommand(c.newQueueCommand(exitCode, &jsonOutput))
 	root.AddCommand(c.newBoardsCommand(exitCode, &jsonOutput))
+	root.AddCommand(c.newProfilesCommand(exitCode, &jsonOutput))
 	root.AddCommand(c.newAuthCommand(exitCode, &jsonOutput))
 	root.AddCommand(&cobra.Command{
 		Use:         "version",
@@ -126,63 +122,7 @@ func (c *CLI) loadRequestDocument(path string, target any) error {
 		reader = file
 	}
 
-	decoder := jsontext.NewDecoder(reader, requestDocumentOptions)
-	document, err := decoder.ReadValue()
-	if err != nil {
-		return fmt.Errorf("decode request document: %w", err)
-	}
-	if document.Kind() != '{' {
-		return errors.New("request document must be a JSON object")
-	}
-	document = document.Clone()
-	if _, err := decoder.ReadToken(); !errors.Is(err, io.EOF) {
-		if err != nil {
-			return fmt.Errorf("decode request document: %w", err)
-		}
-		return errors.New("request document must contain exactly one JSON value")
-	}
-	if err := rejectNulls(document); err != nil {
-		return err
-	}
-	if err := jsonv2.Unmarshal(document, target, requestDocumentOptions); err != nil {
-		return fmt.Errorf("decode request document: %w", err)
-	}
-	return nil
-}
-
-// requestDocumentOptions keep the legacy decoding semantics, except that member
-// names match exactly and unknown or repeated members are rejected at every
-// depth.
-var requestDocumentOptions = jsonv2.JoinOptions(json.DefaultOptionsV1(),
-	jsonv2.MatchCaseInsensitiveNames(false), jsontext.AllowDuplicateNames(false), jsonv2.RejectUnknownMembers(true))
-
-// rejectNulls reports the first explicit null member value or list element in
-// document order, so an optional field is always omitted rather than null and
-// the same document always names the same field.
-func rejectNulls(document jsontext.Value) error {
-	decoder := jsontext.NewDecoder(bytes.NewReader(document), requestDocumentOptions)
-	for {
-		token, err := decoder.ReadToken()
-		if errors.Is(err, io.EOF) {
-			return nil
-		} else if err != nil {
-			return fmt.Errorf("decode request document: %w", err)
-		}
-		if token.Kind() != 'n' {
-			continue
-		}
-		pointer := decoder.StackPointer()
-		switch parent, _ := decoder.StackIndex(decoder.StackDepth()); parent {
-		case '{':
-			return fmt.Errorf("field %q cannot be null", fieldPath(pointer))
-		case '[':
-			return fmt.Errorf("field %q cannot contain null", fieldPath(pointer.Parent()))
-		}
-	}
-}
-
-func fieldPath(pointer jsontext.Pointer) string {
-	return strings.Join(slices.Collect(pointer.Tokens()), ".")
+	return document.Decode("request document", reader, target)
 }
 
 func (c *CLI) newDoctorCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
