@@ -23,7 +23,7 @@ Before writing, read the repository's `writing-for-agents` skill and its `SKILL-
 
 **Permanent records:** V1 spec §19 records the skill format, its location, its declared version, and the verified tag-pinned `npx skills add` command. `CONTEXT.md` is updated only if the skill needs a new canonical term. The alignment test records the contract.
 
-**Status:** ready-for-agent
+**Status:** awaiting-review
 
 ## Accepted behavior
 
@@ -31,9 +31,45 @@ Before writing, read the repository's `writing-for-agents` skill and its `SKILL-
 - The skill uses canonical `CONTEXT.md` terms and public commands only.
 - `metadata.bediz-version` states which Bediz version the skill matches, so an agent can compare it with `bediz version`. It is updated to the new version before each release tag, and ticket 03's workflow enforces this.
 
-- [ ] The skill covers every §19 behavior
-- [ ] The alignment test guards commands and flags
-- [ ] The trigger check passes and is recorded
-- [ ] The skill is discoverable by `npx skills add`
-- [ ] The tag-pinned installation command is verified and recorded
-- [ ] Spec §19 is updated
+- [x] The skill covers every §19 behavior
+- [x] The alignment test guards commands and flags
+- [x] The trigger check passes and is recorded
+- [x] The skill is discoverable by `npx skills add`
+- [x] The tag-pinned installation command is verified and recorded
+- [x] Spec §19 is updated
+
+## Comments
+
+**2026-09-24, implementation:** The skill is `skills/bediz/SKILL.md`, plus `skills/bediz/installing-models.md`, which it links. The installation-only branch (consent, browser discovery, sources, protected downloads, and job tracking) is disclosed there. `metadata.bediz-version` is `v1.0.0`, the expected first release. Ticket 03 must set it to the tag being released, including any prerelease tag. The alignment test is `internal/cli/skill_alignment_external_test.go`. It walks the whole command tree through `bediz ... --help` and fails when any of these is not accepted by the CLI:
+- a `bediz` command path or long flag in any skill Markdown file;
+- a two-word code span naming a command, such as `queue clear`;
+- a long flag anywhere in the skill's code.
+
+- **Guard check:** renaming `models install --token-stdin` in the CLI failed the test. Renaming `queue clear` also failed it, after the test learned to read prose command spans. A synthetic-document test pins both failure modes.
+- **Discovery:** `npx skills add ./ --list` (skills CLI 1.7.0) listed exactly one skill, `bediz`. `npx skills add <repo path> --skill bediz -y` in a scratch project installed both `SKILL.md` and `installing-models.md`.
+- **Tag-pinned install:** `avienor/bediz` is public but has no tag yet, so the mechanism was checked against the tagged public repository `mattpocock/skills`. In a scratch project, `npx skills add https://github.com/mattpocock/skills/tree/v1.0.1/skills/engineering/tdd -y` installed a `SKILL.md` with git blob `1ce5d212…`. That blob equals the file at tag `v1.0.1`; `main` has `8fc08671…`. `skills-lock.json` recorded `"ref": "v1.0.1"`. The tree form works, so the archive form was not needed. The recorded Bediz command is `npx skills add https://github.com/avienor/bediz/tree/<tag>/skills/bediz`. It has not run against a real Bediz tag; ticket 04 exercises it after the first tag.
+- **Coverage check:** §18, §19, ADR-0014, and the `CONTEXT.md` terms were checked line by line, and an independent spec review cross-checked every command, field, error code, exit status, and result field against the code. The review found four inaccurate claims, and all four were fixed:
+  - `--token-stdin` scope;
+  - job IDs after an `outcome_unknown` install;
+  - an uninspected `recall` retry;
+  - "succeeded" versus "accepted" under `--no-wait`.
+  No new `CONTEXT.md` term was needed.
+
+**Trigger check:** Each prompt was judged against the final `description` by reading, not by an automated routing run. An automated skill-evaluation run can replace this record.
+
+| # | Prompt | Expected | Result |
+| --- | --- | --- | --- |
+| 1 | Generate a moody cyberpunk street at night on my InvokeAI | trigger | trigger |
+| 2 | Bediz ile SDXL modeliyle bir portre üret | trigger | trigger |
+| 3 | Upscale the last image in my InvokeAI gallery 2x | trigger | trigger |
+| 4 | Find a good anime FLUX model and install it for InvokeAI | trigger | trigger |
+| 5 | What's stuck in my InvokeAI queue? Cancel it | trigger | trigger |
+| 6 | Make a board called Moodboard in InvokeAI and put the next renders there | trigger | trigger |
+| 7 | Save these SDXL settings as a generation profile for Bediz | trigger | trigger |
+| 8 | Delete the blurry images from my InvokeAI gallery | trigger | trigger |
+| 9 | Fix the failing Go test in internal/cli | no trigger | no trigger ("developing Bediz itself") |
+| 10 | Remove the background from this photo | no trigger | no trigger ("other image editing") |
+| 11 | Inpaint the sky in this InvokeAI image | no trigger | no trigger ("inpainting"); if it fires anyway, the body sends the user to the web interface |
+| 12 | Resize these PNGs to 512px with ImageMagick | no trigger | no trigger ("other image editing") |
+| 13 | Write a Python script that calls the Stable Diffusion API | no trigger | no trigger (coding, no InvokeAI or Bediz) |
+| 14 | Generate a logo with DALL·E | no trigger | no trigger (not InvokeAI) |
