@@ -98,6 +98,13 @@ type coreMetadataNode struct {
 	Model          modelReference `json:"model"`
 	VAE            modelReference `json:"vae"`
 	Qwen3Encoder   modelReference `json:"qwen3_encoder"`
+	Strength       *float64       `json:"strength,omitempty"`
+	InitImage      string         `json:"init_image,omitempty"`
+}
+
+type animaImageToLatentsNode struct {
+	nodeAttributes
+	Image *imageField `json:"image,omitempty"`
 }
 
 type boardField = graphops.BoardField
@@ -188,6 +195,28 @@ func CompileAnima(resolved AnimaResolution) (EnqueueRequest, error) {
 		edge("seed", "value", "metadata", "seed"),
 		edge("positive_prompt", "value", "metadata", "positive_prompt"),
 		edge("metadata", "metadata", "decode", "metadata"),
+	}
+	if request.Source != nil {
+		if resolved.SourceImage.ImageName == "" || request.Strength == nil {
+			return EnqueueRequest{}, fmt.Errorf("compile Anima image-to-image graph: source and strength must be resolved")
+		}
+		metadata := nodes["metadata"].(coreMetadataNode)
+		metadata.GenerationMode = "anima_img2img"
+		metadata.Strength = request.Strength
+		metadata.InitImage = resolved.SourceImage.ImageName
+		nodes["metadata"] = metadata
+		denoise := nodes["denoise"].(animaDenoiseNode)
+		denoise.DenoisingStart = 1 - *request.Strength
+		nodes["denoise"] = denoise
+		encoder := animaImageToLatentsNode{nodeAttributes: nodeAttributes{ID: "i2l", IsIntermediate: true, UseCache: true, Type: "anima_i2l"}}
+		if resolved.SourceImage.Width != *request.Width || resolved.SourceImage.Height != *request.Height {
+			nodes["resize"] = imageResizeNode{ID: "resize", IsIntermediate: true, UseCache: true, Type: "img_resize", Image: imageField{ImageName: resolved.SourceImage.ImageName}, Width: *request.Width, Height: *request.Height, ResampleMode: "bicubic"}
+			edges = append(edges, edge("resize", "image", "i2l", "image"))
+		} else {
+			encoder.Image = &imageField{ImageName: resolved.SourceImage.ImageName}
+		}
+		nodes["i2l"] = encoder
+		edges = append(edges, edge("model_loader", "vae", "i2l", "vae"), edge("i2l", "latents", "denoise", "latents"))
 	}
 
 	return EnqueueRequest{Batch: Batch{

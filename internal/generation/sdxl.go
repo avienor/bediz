@@ -60,21 +60,11 @@ type sdxlVAELoaderNode struct {
 	VAEModel modelReference `json:"vae_model"`
 }
 
-type sdxlImageField struct {
-	ImageName string `json:"image_name"`
-}
-type sdxlResizeNode struct {
-	nodeAttributes
-	Image        sdxlImageField `json:"image"`
-	Width        int            `json:"width"`
-	Height       int            `json:"height"`
-	ResampleMode string         `json:"resample_mode"`
-}
 type sdxlImageToLatentsNode struct {
 	nodeAttributes
-	Image             *sdxlImageField `json:"image,omitempty"`
-	FP32              bool            `json:"fp32"`
-	ColorCompensation string          `json:"color_compensation"`
+	Image             *imageField `json:"image,omitempty"`
+	FP32              bool        `json:"fp32"`
+	ColorCompensation string      `json:"color_compensation"`
 }
 
 // CompileSDXL produces the stock InvokeAI 6.14.1 SDXL text-to-image graph.
@@ -148,10 +138,10 @@ func CompileSDXL(resolved Resolution) (EnqueueRequest, error) {
 		nodes["denoise"] = denoise
 		encoder := sdxlImageToLatentsNode{ID: "i2l", IsIntermediate: true, UseCache: true, Type: "i2l", FP32: true, ColorCompensation: "None"}
 		if resolved.SourceImage.Width != *request.Width || resolved.SourceImage.Height != *request.Height {
-			nodes["resize"] = sdxlResizeNode{ID: "resize", IsIntermediate: true, UseCache: true, Type: "img_resize", Image: sdxlImageField{ImageName: resolved.SourceImage.ImageName}, Width: *request.Width, Height: *request.Height, ResampleMode: "bicubic"}
+			nodes["resize"] = imageResizeNode{ID: "resize", IsIntermediate: true, UseCache: true, Type: "img_resize", Image: imageField{ImageName: resolved.SourceImage.ImageName}, Width: *request.Width, Height: *request.Height, ResampleMode: "bicubic"}
 			edges = append(edges, edge("resize", "image", "i2l", "image"))
 		} else {
-			encoder.Image = &sdxlImageField{ImageName: resolved.SourceImage.ImageName}
+			encoder.Image = &imageField{ImageName: resolved.SourceImage.ImageName}
 		}
 		nodes["i2l"] = encoder
 		edges = append(edges, edge(vaeSource, "vae", "i2l", "vae"), edge("i2l", "latents", "denoise", "latents"))

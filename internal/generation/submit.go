@@ -99,7 +99,7 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	if err != nil {
 		return ExecutionReceipt{}, err
 	}
-	if effective.Source != nil && main.Base != "sdxl" {
+	if effective.Source != nil && main.Base != "sdxl" && main.Base != "anima" {
 		return ExecutionReceipt{}, operation.UnsupportedCapability(fmt.Sprintf("image-to-image is not supported for %s main models", main.Base))
 	}
 	if profileGenerate != nil {
@@ -135,6 +135,9 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	}
 	if effective.Source != nil {
 		entry := capability.SDXLImageToImageEntry()
+		if main.Base == "anima" {
+			entry = capability.AnimaImageToImageEntry()
+		}
 		if err := graphops.CheckRequirements(ctx, client, entry.Endpoints, entry.Invocations); err != nil {
 			return ExecutionReceipt{}, err
 		}

@@ -41,7 +41,7 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 	for i, entry := range report.Capabilities {
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "models.scan", "models.install", "models.install", "models.status", "models.delete", "images.list", "images.get", "images.upload", "images.download", "images.delete", "queue.list", "queue.get", "queue.wait", "queue.cancel", "queue.clear", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
+	wantOperations := []string{"models.list", "models.scan", "models.install", "models.install", "models.status", "models.delete", "images.list", "images.get", "images.upload", "images.download", "images.delete", "queue.list", "queue.get", "queue.wait", "queue.cancel", "queue.clear", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if !slices.Equal(operations, wantOperations) {
 		t.Fatalf("reported operations = %q, want implemented operations %q", operations, wantOperations)
 	}
@@ -722,8 +722,8 @@ func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 						t.Fatalf("report should not be ready when %s is missing from %s", property, schemaName)
 					}
 					assertIssuePresent(t, report, "incompatible_invocation")
-					if schemaName == "CoreMetadataInvocation" && slices.Contains([]string{"strength", "init_image"}, property) {
-						assertCapabilityModeFailureFor(t, report, "sdxl", "img2img", "incompatible_invocation:"+typeName)
+					if (schemaName == "CoreMetadataInvocation" && slices.Contains([]string{"strength", "init_image"}, property)) || (schemaName == "AnimaDenoiseInvocation" && property == "latents") {
+						assertCapabilityModeFailureFor(t, report, "anima", "img2img", "incompatible_invocation:"+typeName)
 					} else {
 						assertCapabilityFailureFor(t, report, result.OperationGenerate, "anima", "incompatible_invocation:"+typeName)
 					}

@@ -324,6 +324,7 @@ var Matrix = []Entry{
 		},
 	},
 	AnimaGenerationEntry(),
+	AnimaImageToImageEntry(),
 	SDXLGenerationEntry(),
 	SDXLImageToImageEntry(),
 	FLUXGenerationEntry(),
@@ -467,6 +468,28 @@ func SDXLImageToImageEntry() Entry {
 	entry.Invocations = append(entry.Invocations,
 		InvocationRequirement{Schema: "ImageResizeInvocation", Type: "img_resize", Properties: append(slices.Clone(common), "image", "width", "height", "resample_mode")},
 		InvocationRequirement{Schema: "ImageToLatentsInvocation", Type: "i2l", Properties: append(slices.Clone(common), "image", "vae", "fp32", "color_compensation")},
+	)
+	return entry
+}
+
+// AnimaImageToImageEntry adds the tested source-image encoder path to Anima generation.
+func AnimaImageToImageEntry() Entry {
+	entry := AnimaGenerationEntry()
+	entry.Mode = "img2img"
+	entry.Endpoints = append(entry.Endpoints, EndpointRequirement{Method: "POST", Path: "/api/v1/images/upload"})
+	entry.Invocations = slices.Clone(entry.Invocations)
+	for index := range entry.Invocations {
+		switch entry.Invocations[index].Type {
+		case "anima_denoise":
+			entry.Invocations[index].Properties = append(slices.Clone(entry.Invocations[index].Properties), "latents")
+		case "core_metadata":
+			entry.Invocations[index].Properties = append(slices.Clone(entry.Invocations[index].Properties), "strength", "init_image")
+		}
+	}
+	common := []string{"id", "is_intermediate", "use_cache", "type"}
+	entry.Invocations = append(entry.Invocations,
+		InvocationRequirement{Schema: "ImageResizeInvocation", Type: "img_resize", Properties: append(slices.Clone(common), "image", "width", "height", "resample_mode")},
+		InvocationRequirement{Schema: "AnimaImageToLatentsInvocation", Type: "anima_i2l", Properties: append(slices.Clone(common), "image", "vae")},
 	)
 	return entry
 }

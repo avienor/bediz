@@ -136,10 +136,14 @@ type SyncSettings struct {
 }
 
 func (animaAdapter) synchronization(settings ResolvedSettings) (SyncSettings, []string) {
+	fields := []string{"scheduler", "guidance", "vae", "qwen3_encoder", "output_count", "board_id"}
+	if settings.Strength != nil {
+		fields = append(fields, "source_image", "strength")
+	}
 	return SyncSettings{
 		Model: settings.ModelKey, PositivePrompt: settings.PositivePrompt, NegativePrompt: settings.NegativePrompt,
 		Width: settings.Width, Height: settings.Height, Steps: settings.Steps, Seed: settings.Seeds[0],
-	}, []string{"scheduler", "guidance", "vae", "qwen3_encoder", "output_count", "board_id"}
+	}, fields
 }
 
 func adapterForBase(base string) (familyAdapter, error) {

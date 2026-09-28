@@ -308,13 +308,210 @@ func TestGenerateSDXLUploadedDimensionMismatchStopsEnqueue(t *testing.T) {
 
 func TestGenerateImageToImageRejectsOtherFamiliesBeforeUpload(t *testing.T) {
 	isolateUserConfigDir(t)
-	for _, inventory := range [][]map[string]any{animaModelInventory(), fluxCLIInventory()} {
+	for _, inventory := range [][]map[string]any{fluxCLIInventory()} {
 		server, requests, _ := img2imgServer(t, 512, 512, sdxlOpenAPIFixture(t), inventory)
 		model := inventory[0]["key"].(string)
 		code, envelope := runImg2Img(t, "--no-wait", "--model", model, "--prompt", "lighthouse", "--image", "source.png", "--seed", "41", "--url", server.URL)
 		if code != result.ExitUnsupportedCapability || envelope["error"].(map[string]any)["code"] != "unsupported_capability" || slices.Contains(*requests, uploadRequest) || slices.Contains(*requests, enqueueRequest) {
 			t.Fatalf("code=%d envelope=%#v requests=%q", code, envelope, *requests)
 		}
+	}
+}
+
+func TestGenerateAnimaImageSourceResolvesSizeAndReceipt(t *testing.T) {
+	isolateUserConfigDir(t)
+	server, requests, graph := img2imgServer(t, 1001, 750, sdxlOpenAPIFixture(t), animaModelInventory())
+	code, envelope := runImg2Img(t, "--no-wait", "--model", "main-key", "--prompt", "lighthouse", "--image", "source.png", "--strength", "0.6", "--seed", "41", "--url", server.URL)
+	if code != 0 || envelope["ok"] != true {
+		t.Fatalf("code=%d envelope=%#v", code, envelope)
+	}
+	data := envelope["data"].(map[string]any)
+	settings := data["resolved_settings"].(map[string]any)
+	if settings["width"] != float64(1000) || settings["height"] != float64(744) || settings["strength"] != 0.6 || data["source_uploaded"] != false || data["source_image"].(map[string]any)["image_name"] != "source.png" {
+		t.Fatalf("receipt=%#v", data)
+	}
+	components := settings["component_keys"].(map[string]any)
+	if components["vae"] != "vae-key" || components["qwen3_encoder"] != "encoder-key" {
+		t.Fatalf("components=%#v", components)
+	}
+	nodes := (*graph)["batch"].(map[string]any)["graph"].(map[string]any)["nodes"].(map[string]any)
+	if nodes["resize"].(map[string]any)["width"] != float64(1000) || nodes["metadata"].(map[string]any)["generation_mode"] != "anima_img2img" || nodes["denoise"].(map[string]any)["denoising_start"] != 0.4 {
+		t.Fatalf("graph=%#v", nodes)
+	}
+	if slices.Contains(*requests, uploadRequest) || !slices.Contains(*requests, enqueueRequest) {
+		t.Fatalf("requests=%q", *requests)
+	}
+	warnings := envelope["warnings"].([]any)
+	fields := warnings[0].(map[string]any)["details"].(map[string]any)["not_restored"].([]any)
+	if !slices.Equal(fields, []any{"scheduler", "guidance", "vae", "qwen3_encoder", "output_count", "board_id", "source_image", "strength"}) {
+		t.Fatalf("not_restored=%#v", fields)
+	}
+}
+
+func TestGenerateAnimaImageSourceUsesExplicitComponentsWithoutResize(t *testing.T) {
+	isolateUserConfigDir(t)
+	inventory := append(animaModelInventory(),
+		map[string]any{"key": "other-vae", "hash": "blake3:other-vae", "name": "Other Anima VAE", "base": "anima", "type": "vae"},
+		map[string]any{"key": "other-encoder", "hash": "blake3:other-encoder", "name": "Other Qwen3", "base": "any", "type": "qwen3_encoder"},
+	)
+	server, _, graph := img2imgServer(t, 768, 768, sdxlOpenAPIFixture(t), inventory)
+	code, envelope := runImg2Img(t, "--no-wait", "--model", "main-key", "--prompt", "lighthouse", "--image", "source.png", "--vae", "vae-key", "--qwen3-encoder", "encoder-key", "--seed", "41", "--url", server.URL)
+	if code != 0 || envelope["ok"] != true {
+		t.Fatalf("code=%d envelope=%#v", code, envelope)
+	}
+	settings := envelope["data"].(map[string]any)["resolved_settings"].(map[string]any)
+	components := settings["component_keys"].(map[string]any)
+	if components["vae"] != "vae-key" || components["qwen3_encoder"] != "encoder-key" || settings["strength"] != 0.75 {
+		t.Fatalf("resolved settings=%#v", settings)
+	}
+	nodes := (*graph)["batch"].(map[string]any)["graph"].(map[string]any)["nodes"].(map[string]any)
+	if _, resized := nodes["resize"]; resized {
+		t.Fatalf("aligned source unexpectedly resized: %#v", nodes["resize"])
+	}
+	if nodes["i2l"].(map[string]any)["image"].(map[string]any)["image_name"] != "source.png" || nodes["model_loader"].(map[string]any)["vae_model"].(map[string]any)["key"] != "vae-key" || nodes["model_loader"].(map[string]any)["qwen3_encoder_model"].(map[string]any)["key"] != "encoder-key" || nodes["denoise"].(map[string]any)["denoising_start"] != 0.25 {
+		t.Fatalf("graph=%#v", nodes)
+	}
+}
+
+func TestGenerateAnimaTooSmallSourceNeverUploadsOrEnqueues(t *testing.T) {
+	for _, source := range []string{"path", "image"} {
+		t.Run(source, func(t *testing.T) {
+			isolateUserConfigDir(t)
+			server, requests, _ := img2imgServer(t, 7, 8, sdxlOpenAPIFixture(t), animaModelInventory())
+			args := []string{"--no-wait", "--model", "main-key", "--prompt", "lighthouse", "--seed", "41", "--url", server.URL}
+			if source == "path" {
+				args = append(args, "--image-path", sourcePNG(t, 7, 8))
+			} else {
+				args = append(args, "--image", "source.png")
+			}
+			code, envelope := runImg2Img(t, args...)
+			if code != result.ExitInvalidRequest || envelope["error"].(map[string]any)["code"] != "invalid_request" || slices.Contains(*requests, uploadRequest) || slices.Contains(*requests, enqueueRequest) {
+				t.Fatalf("code=%d envelope=%#v requests=%q", code, envelope, *requests)
+			}
+		})
+	}
+}
+
+func TestDoctorAnimaImageToImageMatchesTextModelRequirements(t *testing.T) {
+	isolateUserConfigDir(t)
+	server, _, _ := img2imgServer(t, 768, 768, sdxlOpenAPIFixture(t), animaModelInventory())
+	var stdout, stderr bytes.Buffer
+	code := cli.New(&stdout, &stderr).Run(t.Context(), []string{"doctor", "--url", server.URL, "--json"})
+	if code != result.ExitUnsupportedCapability || stderr.Len() != 0 {
+		t.Fatalf("code=%d stderr=%q stdout=%s", code, stderr.String(), stdout.String())
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	report := envelope["error"].(map[string]any)["details"].(map[string]any)["report"].(map[string]any)
+	modes := map[string]map[string]any{}
+	for _, raw := range report["capabilities"].([]any) {
+		entry := raw.(map[string]any)
+		if entry["operation"] == "generate" && entry["family"] == "anima" {
+			modes[entry["mode"].(string)] = entry
+		}
+	}
+	for _, mode := range []string{"txt2img", "img2img"} {
+		entry := modes[mode]
+		if entry == nil || entry["compatible"] != true || entry["ui_sync"] != "partial" || len(entry["failures"].([]any)) != 0 {
+			t.Fatalf("Anima %s capability=%#v", mode, entry)
+		}
+	}
+}
+
+func TestAnimaImageToImageVocabularyGuardsGenerateAndDoctor(t *testing.T) {
+	type requirement struct{ schema, property, endpoint string }
+	var cases []requirement
+	for _, schema := range []string{"ImageResizeInvocation", "AnimaImageToLatentsInvocation"} {
+		cases = append(cases, requirement{schema: schema})
+		fields := "id is_intermediate use_cache type image vae"
+		if schema == "ImageResizeInvocation" {
+			fields = "id is_intermediate use_cache type image width height resample_mode"
+		}
+		for field := range strings.FieldsSeq(fields) {
+			cases = append(cases, requirement{schema: schema, property: field})
+		}
+	}
+	for _, item := range []requirement{
+		{schema: "AnimaDenoiseInvocation", property: "latents"},
+		{schema: "CoreMetadataInvocation", property: "strength"},
+		{schema: "CoreMetadataInvocation", property: "init_image"},
+		{endpoint: "/api/v1/images/upload"},
+	} {
+		cases = append(cases, item)
+	}
+	for _, tc := range cases {
+		name := tc.schema + "/" + tc.property + tc.endpoint
+		t.Run(name, func(t *testing.T) {
+			isolateUserConfigDir(t)
+			document := sdxlOpenAPIFixture(t)
+			if tc.endpoint != "" {
+				delete(document["paths"].(map[string]any), tc.endpoint)
+			} else {
+				schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
+				if tc.property == "" {
+					delete(schemas, tc.schema)
+				} else {
+					delete(schemas[tc.schema].(map[string]any)["properties"].(map[string]any), tc.property)
+				}
+			}
+			server, requests, _ := img2imgServer(t, 17, 10, document, animaModelInventory())
+			code, envelope := runImg2Img(t, "--no-wait", "--model", "main-key", "--prompt", "lighthouse", "--image-path", sourcePNG(t, 17, 10), "--seed", "41", "--url", server.URL)
+			failure := envelope["error"].(map[string]any)
+			if code != result.ExitUnsupportedCapability || failure["code"] != "unsupported_capability" || slices.Contains(*requests, uploadRequest) || slices.Contains(*requests, enqueueRequest) {
+				t.Fatalf("code=%d envelope=%#v requests=%q", code, envelope, *requests)
+			}
+			if tc.property != "" && !strings.Contains(failure["message"].(string), tc.property) {
+				t.Fatalf("missing property absent from generate error: %#v", failure)
+			}
+			var stdout, stderr bytes.Buffer
+			code = cli.New(&stdout, &stderr).Run(t.Context(), []string{"doctor", "--url", server.URL, "--json"})
+			if code != result.ExitUnsupportedCapability || stderr.Len() != 0 {
+				t.Fatalf("doctor code=%d stderr=%q stdout=%s", code, stderr.String(), stdout.String())
+			}
+			var doctorEnvelope map[string]any
+			if err := json.Unmarshal(stdout.Bytes(), &doctorEnvelope); err != nil {
+				t.Fatal(err)
+			}
+			report := doctorEnvelope["error"].(map[string]any)["details"].(map[string]any)["report"].(map[string]any)
+			var imageMode, textMode map[string]any
+			for _, raw := range report["capabilities"].([]any) {
+				entry := raw.(map[string]any)
+				if entry["operation"] == "generate" && entry["family"] == "anima" {
+					if entry["mode"] == "img2img" {
+						imageMode = entry
+					} else if entry["mode"] == "txt2img" {
+						textMode = entry
+					}
+				}
+			}
+			if imageMode == nil || textMode == nil || imageMode["compatible"] != false || textMode["compatible"] != true {
+				t.Fatalf("Anima doctor modes: image=%#v text=%#v", imageMode, textMode)
+			}
+			failures := imageMode["failures"].([]any)
+			wantFailure := "incompatible_invocation:"
+			if tc.endpoint != "" {
+				wantFailure = "missing_endpoint:POST " + tc.endpoint
+			} else {
+				wantFailure += map[string]string{"ImageResizeInvocation": "img_resize", "AnimaImageToLatentsInvocation": "anima_i2l", "AnimaDenoiseInvocation": "anima_denoise", "CoreMetadataInvocation": "core_metadata"}[tc.schema]
+			}
+			if !slices.Contains(failures, any(wantFailure)) {
+				t.Fatalf("failures=%#v, want %q", failures, wantFailure)
+			}
+			if tc.property != "" {
+				found := false
+				for _, raw := range report["openapi"].(map[string]any)["required_invocations"].([]any) {
+					check := raw.(map[string]any)
+					if check["schema"] == tc.schema && slices.Contains(check["missing_properties"].([]any), any(tc.property)) {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatalf("doctor did not name missing %s.%s", tc.schema, tc.property)
+				}
+			}
+		})
 	}
 }
 

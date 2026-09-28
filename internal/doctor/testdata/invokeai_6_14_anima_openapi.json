@@ -201,7 +201,20 @@
           "scheduler": {},
           "transformer": {},
           "positive_conditioning": {},
-          "negative_conditioning": {}
+          "negative_conditioning": {},
+          "latents": {}
+        }
+      },
+      "AnimaImageToLatentsInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "type": {
+            "const": "anima_i2l"
+          },
+          "image": {},
+          "vae": {}
         }
       },
       "CoreMetadataInvocation": {
