@@ -182,7 +182,8 @@ type PreparedUpload struct {
 	contentType string
 }
 
-// PrepareUpload requires an absolute path naming a readable regular file.
+// PrepareUpload requires an absolute path naming a readable regular file
+// whose content is detected as an image, regardless of its extension.
 func PrepareUpload(path string) (*PreparedUpload, error) {
 	if !filepath.IsAbs(path) {
 		return nil, operation.InvalidRequest("upload path must be absolute")
@@ -200,7 +201,7 @@ func PrepareUpload(path string) (*PreparedUpload, error) {
 		_ = file.Close()
 		return nil, operation.InvalidRequest("upload path must name a regular file")
 	}
-	contentType, err := uploadContentType(file, path)
+	contentType, err := uploadContentType(file)
 	if err != nil {
 		_ = file.Close()
 		return nil, operation.InvalidRequest(fmt.Sprintf("read upload file: %v", err))
@@ -266,7 +267,7 @@ func (u *PreparedUpload) Send(ctx context.Context, client *httpclient.Client) (R
 	return normalizeReference(client, response)
 }
 
-func uploadContentType(file *os.File, path string) (string, error) {
+func uploadContentType(file *os.File) (string, error) {
 	buffer := make([]byte, 512)
 	read, err := file.Read(buffer)
 	if err != nil && !errors.Is(err, io.EOF) {
@@ -276,11 +277,8 @@ func uploadContentType(file *os.File, path string) (string, error) {
 		return "", err
 	}
 	detected := http.DetectContentType(buffer[:read])
-	if strings.HasPrefix(detected, "image/") {
-		return detected, nil
-	}
-	if byExtension := mime.TypeByExtension(filepath.Ext(path)); strings.HasPrefix(byExtension, "image/") {
-		return byExtension, nil
+	if !strings.HasPrefix(detected, "image/") {
+		return "", fmt.Errorf("upload content must be an image, detected %s", detected)
 	}
 	return detected, nil
 }

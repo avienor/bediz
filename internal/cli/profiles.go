@@ -35,7 +35,7 @@ func (c *CLI) newProfilesCommand(exitCode *int, jsonOutput *bool) *cobra.Command
 			}
 			var doc profiles.Document
 			if err := c.loadRequestDocument(requestPath, &doc); err != nil {
-				*exitCode = c.fail(result.OperationProfilesCreate, *jsonOutput, result.CodeInvalidRequest, err.Error(), nil)
+				*exitCode = c.fail(result.OperationProfilesCreate, *jsonOutput, result.CodeInvalidRequest, err.Error(), invalidRequestDetails(err))
 				return
 			}
 			if err := profiles.Validate(doc); err != nil {

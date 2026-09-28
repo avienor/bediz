@@ -77,7 +77,7 @@ func resolveFLUX(request Request, main ModelIdentifier, inventory []ModelIdentif
 		return Resolution{}, operation.InvalidRequest("steps must be positive")
 	}
 	if !isFLUXScheduler(*resolved.Scheduler) {
-		return Resolution{}, operation.InvalidRequest("scheduler is not supported for FLUX.1")
+		return Resolution{}, operation.InvalidField("scheduler", "scheduler is not supported for FLUX.1")
 	}
 	if *resolved.OutputCount < 1 {
 		return Resolution{}, operation.InvalidRequest("output count must be positive")

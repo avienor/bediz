@@ -50,6 +50,8 @@ func (c *CLI) Run(ctx context.Context, args []string) int {
 			message = "invalid authentication command arguments"
 		case operationName == result.OperationModelsInstall:
 			message = "invalid model installation command arguments"
+		case operationName == result.OperationConfigSet:
+			message = "invalid configuration command arguments"
 		}
 		return c.fail(operationName, containsJSONFlag(args), result.CodeInvalidRequest, message, nil)
 	}
@@ -204,7 +206,8 @@ func (c *CLI) newConfigCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
 		},
 	}
 	setCommand.Flags().StringVar(&options.url, "url", "", "persist an InvokeAI base URL")
-	setCommand.Flags().StringVar(&options.token, "token", "", "persist an InvokeAI bearer token")
+	setCommand.Flags().StringVar(&options.token, "token", "", "persist an InvokeAI bearer token (visible in process arguments; prefer --token-stdin)")
+	setCommand.Flags().BoolVar(&options.tokenStdin, "token-stdin", false, "persist an InvokeAI bearer token from standard input")
 	setCommand.Flags().BoolVar(&options.unsetURL, "unset-url", false, "remove the persisted URL")
 	setCommand.Flags().BoolVar(&options.unsetToken, "unset-token", false, "remove the persisted token")
 	command.AddCommand(setCommand)
@@ -224,12 +227,13 @@ type configSetOptions struct {
 	urlSet     bool
 	token      string
 	tokenSet   bool
+	tokenStdin bool
 	unsetURL   bool
 	unsetToken bool
 }
 
 func (c *CLI) executeConfigSet(jsonOutput bool, options configSetOptions) int {
-	if !options.urlSet && !options.tokenSet && !options.unsetURL && !options.unsetToken {
+	if !options.urlSet && !options.tokenSet && !options.tokenStdin && !options.unsetURL && !options.unsetToken {
 		return c.fail(result.OperationConfigSet, jsonOutput, result.CodeInvalidRequest, "config set requires a value to set or unset", nil)
 	}
 	if options.urlSet && options.unsetURL {
@@ -237,6 +241,17 @@ func (c *CLI) executeConfigSet(jsonOutput bool, options configSetOptions) int {
 	}
 	if options.tokenSet && options.unsetToken {
 		return c.fail(result.OperationConfigSet, jsonOutput, result.CodeInvalidRequest, "--token and --unset-token cannot be combined", nil)
+	}
+	if options.tokenStdin && (options.tokenSet || options.unsetToken) {
+		return c.fail(result.OperationConfigSet, jsonOutput, result.CodeInvalidRequest, "--token-stdin cannot be combined with --token or --unset-token", nil)
+	}
+	if options.tokenStdin {
+		data, err := io.ReadAll(c.stdin)
+		if err != nil {
+			return c.fail(result.OperationConfigSet, jsonOutput, result.CodeInvalidRequest, "could not read InvokeAI token from standard input", nil)
+		}
+		options.token = strings.TrimSpace(string(data))
+		options.tokenSet = true
 	}
 
 	path, err := config.Path()

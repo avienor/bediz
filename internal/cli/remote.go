@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/avienor/bediz/internal/config"
+	"github.com/avienor/bediz/internal/document"
 	"github.com/avienor/bediz/internal/generation"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/huggingface"
@@ -48,7 +49,7 @@ func defaultRemoteOptions() remoteOptions {
 // implemented remote command.
 func addConnectionFlags(command *cobra.Command, options *remoteOptions) {
 	command.Flags().StringVar(&options.url, "url", "", "InvokeAI base URL")
-	command.Flags().StringVar(&options.token, "token", "", "InvokeAI bearer token")
+	command.Flags().StringVar(&options.token, "token", "", "InvokeAI bearer token (visible in process arguments; prefer BEDIZ_TOKEN or config set --token-stdin)")
 }
 
 // addRemoteFlags registers the connection flags and the deadline that bounds one
@@ -124,7 +125,7 @@ func (e remoteExecution[Request, Result]) run(ctx context.Context, c *CLI, jsonO
 	}
 	if e.requestPath != "" {
 		if err := c.loadRequestDocument(e.requestPath, &e.request); err != nil {
-			return c.fail(e.operation, jsonOutput, result.CodeInvalidRequest, err.Error(), nil)
+			return c.fail(e.operation, jsonOutput, result.CodeInvalidRequest, err.Error(), invalidRequestDetails(err))
 		}
 	}
 	value, err := e.invoke(ctx, client, e.request)
@@ -148,6 +149,16 @@ func (e remoteExecution[Request, Result]) run(ctx context.Context, c *CLI, jsonO
 		}
 	}
 	return result.ExitSuccess
+}
+
+func invalidRequestDetails(err error) map[string]any {
+	if invalid, ok := errors.AsType[*operation.InvalidRequestError](err); ok && invalid.Field != "" {
+		return map[string]any{"field": invalid.Field}
+	}
+	if field, ok := errors.AsType[*document.FieldError](err); ok && field.Field != "" {
+		return map[string]any{"field": field.Field}
+	}
+	return nil
 }
 
 // failRemote maps one domain failure to its public structured error code. It is
@@ -257,7 +268,7 @@ func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, e
 		return fail(result.CodeOutputWriteFailed, failed.Error(), map[string]any{"path": failed.Path})
 	}
 	if invalid, ok := errors.AsType[*operation.InvalidRequestError](err); ok {
-		return fail(result.CodeInvalidRequest, invalid.Error(), nil)
+		return fail(result.CodeInvalidRequest, invalid.Error(), invalidRequestDetails(err))
 	}
 	if invalid, ok := errors.AsType[*operation.InvalidInvokeAIVersionError](err); ok {
 		if invalid.Version == "" {
@@ -358,7 +369,11 @@ func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, e
 		case httpErr.StatusCode == http.StatusNotFound:
 			return fail(result.CodeNotFound, "the requested InvokeAI resource was not found", nil)
 		default:
-			return fail(result.CodeInvokeAIOperationFailed, "InvokeAI rejected the operation", map[string]any{"status": httpErr.StatusCode})
+			details := map[string]any{"status": httpErr.StatusCode}
+			if httpErr.Detail != nil {
+				details["invokeai_detail"] = httpErr.Detail
+			}
+			return fail(result.CodeInvokeAIOperationFailed, "InvokeAI rejected the operation", details)
 		}
 	}
 	return fail(result.CodeInvokeAIOperationFailed, err.Error(), nil)

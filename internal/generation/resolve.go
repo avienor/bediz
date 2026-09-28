@@ -81,7 +81,7 @@ func resolveSDXL(request Request, mainModel ModelIdentifier, inventory []ModelId
 		return Resolution{}, operation.InvalidRequest("steps must be positive")
 	}
 	if !graphops.IsSDXLScheduler(*resolved.Scheduler) {
-		return Resolution{}, operation.InvalidRequest("scheduler is not supported for SDXL")
+		return Resolution{}, operation.InvalidField("scheduler", "scheduler is not supported for SDXL")
 	}
 	if math.IsNaN(*resolved.Guidance) || math.IsInf(*resolved.Guidance, 0) || *resolved.Guidance < 1 {
 		return Resolution{}, operation.InvalidRequest("guidance must be finite and at least 1")
@@ -198,7 +198,11 @@ func validateCommonRequest(request Request) error {
 		return operation.InvalidRequest("positive prompt is required")
 	}
 	if (request.Width == nil) != (request.Height == nil) {
-		return operation.InvalidRequest("width and height must be supplied together or both omitted")
+		field := "height"
+		if request.Width == nil {
+			field = "width"
+		}
+		return operation.InvalidField(field, "width and height must be supplied together or both omitted")
 	}
 	return nil
 }
@@ -232,7 +236,7 @@ func validateAnimaSettings(request Request) error {
 		return operation.InvalidRequest("steps must be positive")
 	}
 	if !isAnimaScheduler(*request.Scheduler) {
-		return operation.InvalidRequest("scheduler is not supported for Anima")
+		return operation.InvalidField("scheduler", "scheduler is not supported for Anima")
 	}
 	if math.IsNaN(*request.Guidance) || math.IsInf(*request.Guidance, 0) || *request.Guidance < 1 {
 		return operation.InvalidRequest("guidance must be finite and at least 1")

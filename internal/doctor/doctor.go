@@ -40,8 +40,8 @@ type InvokeAIReport struct {
 
 type OpenAPIReport struct {
 	Available   bool              `json:"available"`
-	Endpoints   []EndpointCheck   `json:"required_endpoints"`
-	Invocations []InvocationCheck `json:"required_invocations"`
+	Endpoints   []EndpointCheck   `json:"required_endpoints,omitempty"`
+	Invocations []InvocationCheck `json:"required_invocations,omitempty"`
 }
 
 type EndpointCheck struct {
@@ -194,8 +194,8 @@ func Run(ctx context.Context, client *httpclient.Client, bedizVersion version.In
 	} else {
 		appendRequestIssue(&report, "openapi", openAPIErr)
 	}
-	report.OpenAPI.Endpoints, report.OpenAPI.Invocations = inspectOpenAPI(document)
 	if openAPIErr == nil {
+		report.OpenAPI.Endpoints, report.OpenAPI.Invocations = inspectOpenAPI(document)
 		for _, check := range report.OpenAPI.Endpoints {
 			if !check.Available {
 				report.Issues = append(report.Issues, Issue{

@@ -9,12 +9,19 @@ import (
 
 type InvalidRequestError struct {
 	Message string
+	Field   string
 }
 
 func (e *InvalidRequestError) Error() string { return e.Message }
 
 func InvalidRequest(message string) error {
 	return &InvalidRequestError{Message: message}
+}
+
+// InvalidField names the request-document key that needs correction, using
+// dotted member paths for nested fields.
+func InvalidField(field, message string) error {
+	return &InvalidRequestError{Message: message, Field: field}
 }
 
 type AuthenticationRequiredError struct {

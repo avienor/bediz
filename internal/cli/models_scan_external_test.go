@@ -152,14 +152,14 @@ func TestModelsScanAcceptsRequestDocumentAndRejectsMixedPathFlag(t *testing.T) {
 	}
 }
 
-func TestModelsScanReportsFolderRejectionWithoutBackendBody(t *testing.T) {
+func TestModelsScanReportsFolderRejectionWithSanitizedDetail(t *testing.T) {
 	isolateUserConfigDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Errorf("unexpected method: %s", r.Method)
 		}
 		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"detail":"private backend field"}`))
+		_, _ = w.Write([]byte(`{"detail":"The search path could not be scanned","backend_only":"private backend field"}`))
 	}))
 	defer server.Close()
 	var stdout, stderr bytes.Buffer
@@ -169,7 +169,7 @@ func TestModelsScanReportsFolderRejectionWithoutBackendBody(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if code != result.ExitInvokeAIFailure || envelope.Operation != "models.scan" || envelope.Error == nil || envelope.Error.Code != result.CodeInvokeAIOperationFailed || envelope.Error.Details["status"] != float64(http.StatusBadRequest) || bytes.Contains(stdout.Bytes(), []byte("private backend field")) || stderr.Len() != 0 {
+	if code != result.ExitInvokeAIFailure || envelope.Operation != "models.scan" || envelope.Error == nil || envelope.Error.Code != result.CodeInvokeAIOperationFailed || envelope.Error.Details["status"] != float64(http.StatusBadRequest) || envelope.Error.Details["invokeai_detail"] != "The search path could not be scanned" || bytes.Contains(stdout.Bytes(), []byte("private backend field")) || stderr.Len() != 0 {
 		t.Fatalf("exit = %d, stdout = %q, stderr = %q", code, stdout.String(), stderr.String())
 	}
 }
