@@ -24,7 +24,7 @@ Bediz covers text-to-image generation, generative upscale, and the model, galler
 | Exit | Meaning | Your move |
 | --- | --- | --- |
 | 0 | Success | Read `data` and `warnings`. |
-| 2 | Invalid request | Fix the field named in `error.details`, or ask the user when that field is one they fixed. |
+| 2 | Invalid request | Use `error.details.field` when present; otherwise inspect the other details and `error.message`. Ask the user before changing a field they fixed. |
 | 3 | Selection required | See [Selection Required](#selection-required). |
 | 4 | Unsupported capability or missing component | Pick a supported family or model, or install the component (see [Models](#models)). |
 | 5 | Connection or authentication failure | Check the target with `bediz config get --json`; ask the user to start InvokeAI or supply access. |

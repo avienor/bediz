@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/avienor/bediz/internal/config"
+	"github.com/avienor/bediz/internal/document"
 	"github.com/avienor/bediz/internal/generation"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/huggingface"
@@ -124,7 +125,7 @@ func (e remoteExecution[Request, Result]) run(ctx context.Context, c *CLI, jsonO
 	}
 	if e.requestPath != "" {
 		if err := c.loadRequestDocument(e.requestPath, &e.request); err != nil {
-			return c.fail(e.operation, jsonOutput, result.CodeInvalidRequest, err.Error(), nil)
+			return c.fail(e.operation, jsonOutput, result.CodeInvalidRequest, err.Error(), invalidRequestDetails(err))
 		}
 	}
 	value, err := e.invoke(ctx, client, e.request)
@@ -148,6 +149,16 @@ func (e remoteExecution[Request, Result]) run(ctx context.Context, c *CLI, jsonO
 		}
 	}
 	return result.ExitSuccess
+}
+
+func invalidRequestDetails(err error) map[string]any {
+	if invalid, ok := errors.AsType[*operation.InvalidRequestError](err); ok && invalid.Field != "" {
+		return map[string]any{"field": invalid.Field}
+	}
+	if field, ok := errors.AsType[*document.FieldError](err); ok && field.Field != "" {
+		return map[string]any{"field": field.Field}
+	}
+	return nil
 }
 
 // failRemote maps one domain failure to its public structured error code. It is
@@ -257,7 +268,7 @@ func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, e
 		return fail(result.CodeOutputWriteFailed, failed.Error(), map[string]any{"path": failed.Path})
 	}
 	if invalid, ok := errors.AsType[*operation.InvalidRequestError](err); ok {
-		return fail(result.CodeInvalidRequest, invalid.Error(), nil)
+		return fail(result.CodeInvalidRequest, invalid.Error(), invalidRequestDetails(err))
 	}
 	if invalid, ok := errors.AsType[*operation.InvalidInvokeAIVersionError](err); ok {
 		if invalid.Version == "" {
