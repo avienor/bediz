@@ -94,11 +94,13 @@ Manage the saved settings with:
 ```sh
 bediz config get
 bediz config set --url http://127.0.0.1:9090
-bediz config set --token TOKEN
+printf '%s' "$BEDIZ_TOKEN" | bediz config set --token-stdin
 bediz config set --unset-token
 ```
 
 A single-user InvokeAI needs no token. Tokens are never included in command output. The configuration file is written atomically with user-only permissions.
+
+For authentication, prefer `BEDIZ_TOKEN` from your credential source or a stored token. The example above saves an existing environment token through standard input. `--token` remains supported, but exposes its value in process arguments and can put a literal token in shell history. `config set --token-stdin` trims surrounding whitespace, rejects empty input, and cannot accompany `--token` or `--unset-token`.
 
 ## Documentation
 

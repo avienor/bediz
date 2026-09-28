@@ -17,9 +17,10 @@ Bediz covers text-to-image generation, generative upscale, and the model, galler
 
 - Add `--json`. Standard output then holds exactly one Result Envelope; standard error holds diagnostics only.
 - Branch on the envelope, not on prose: `ok`, then `data` on success or `error.code`, `error.message`, and `error.details` on failure. Also read `warnings` on success.
-- Send operation inputs as a **Request Document** on standard input with `--request -`. It avoids shell quoting, and it compiles to the same operation as the flags. Operation flags and `--request` never mix; `--json`, `--url`, `--token`, `--no-wait`, `--timeout`, and `--yes` may accompany it.
+- Send operation inputs as a **Request Document** on standard input with `--request -`. It avoids shell quoting, and it compiles to the same operation as the flags. Operation flags and `--request` never mix; `--json`, `--url`, `--no-wait`, `--timeout`, and `--yes` may accompany it.
 - Every Request Document carries `"schema_version": 1`. Unknown, misspelled, `null`, or inapplicable fields are rejected, so send only fields you mean. The command's `--help` lists its flags.
-- Bediz connects to `http://127.0.0.1:9090` unless `--url`, `BEDIZ_URL`, or `bediz config set --url` says otherwise. Keep tokens out of commands you show, files you write, and replies.
+- Bediz connects to `http://127.0.0.1:9090` unless `--url`, `BEDIZ_URL`, or `bediz config set --url` says otherwise.
+- For InvokeAI authentication, use an existing `BEDIZ_TOKEN` or stored configuration. When setup is needed, ask the user to run `bediz config set --token-stdin` in their terminal with the token on standard input. Keep tokens out of process arguments, commands you show, files you write, and replies.
 
 | Exit | Meaning | Your move |
 | --- | --- | --- |

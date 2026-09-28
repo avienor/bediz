@@ -49,7 +49,7 @@ func defaultRemoteOptions() remoteOptions {
 // implemented remote command.
 func addConnectionFlags(command *cobra.Command, options *remoteOptions) {
 	command.Flags().StringVar(&options.url, "url", "", "InvokeAI base URL")
-	command.Flags().StringVar(&options.token, "token", "", "InvokeAI bearer token")
+	command.Flags().StringVar(&options.token, "token", "", "InvokeAI bearer token (visible in process arguments; prefer BEDIZ_TOKEN or config set --token-stdin)")
 }
 
 // addRemoteFlags registers the connection flags and the deadline that bounds one
