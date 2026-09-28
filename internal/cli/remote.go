@@ -22,6 +22,7 @@ import (
 	"github.com/avienor/bediz/internal/operation"
 	queueops "github.com/avienor/bediz/internal/queue"
 	"github.com/avienor/bediz/internal/result"
+	"github.com/avienor/bediz/internal/sourceimage"
 	"github.com/avienor/bediz/internal/upscale"
 	"github.com/avienor/bediz/internal/version"
 	"github.com/spf13/cobra"
@@ -164,11 +165,11 @@ func invalidRequestDetails(err error) map[string]any {
 // failRemote maps one domain failure to its public structured error code. It is
 // the single place command failures become structured error codes; doctor
 // classifies its own diagnostic issues before it reports one. A failure after
-// an uploaded upscale source keeps the code of its cause and adds the complete
+// an uploaded Source Image keeps the code of its cause and adds the complete
 // uploaded Image Reference to the details, and a failure after an applied queue
 // cancellation keeps the code of its cause and adds the canceled item.
 func (c *CLI) failRemote(operationName string, jsonOutput bool, err error) int {
-	if uploaded, ok := errors.AsType[*upscale.UploadedSourceError](err); ok {
+	if uploaded, ok := errors.AsType[*sourceimage.UploadedError](err); ok {
 		return c.classifyRemote(operationName, jsonOutput, uploaded.Err, map[string]any{
 			"source_image":    uploaded.Source,
 			"source_uploaded": true,

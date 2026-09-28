@@ -8,17 +8,14 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"path/filepath"
 	"slices"
 
 	"github.com/avienor/bediz/internal/graphops"
 	"github.com/avienor/bediz/internal/operation"
+	"github.com/avienor/bediz/internal/sourceimage"
 )
 
-type Source struct {
-	Type      string `json:"type"`
-	Reference string `json:"reference"`
-}
+type Source = sourceimage.Source
 
 type Components struct {
 	UpscaleModel   *string `json:"upscale_model,omitempty"`
@@ -81,17 +78,8 @@ func validateRequest(request Request, requireModel bool) error {
 	if request.SchemaVersion != 1 {
 		return operation.InvalidRequest(fmt.Sprintf("unsupported request schema version %d", request.SchemaVersion))
 	}
-	switch request.Source.Type {
-	case "image":
-		if request.Source.Reference == "" {
-			return operation.InvalidRequest("image source must name an existing InvokeAI image")
-		}
-	case "path":
-		if !filepath.IsAbs(request.Source.Reference) {
-			return operation.InvalidRequest("path source must be an absolute local image path")
-		}
-	default:
-		return operation.InvalidRequest("source requires an existing InvokeAI image or an absolute local image path")
+	if err := request.Source.Validate(); err != nil {
+		return err
 	}
 	if requireModel && request.Model == "" {
 		return operation.InvalidRequest("model is required")

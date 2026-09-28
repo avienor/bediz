@@ -35,8 +35,15 @@ This is a prefactor: no command, flag, Request Document member, result field, er
 
 **Permanent records:** None. Terminology, accepted design, and behavior stay unchanged, and the existing public tests remain the contract evidence.
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] Upscale uses the shared Source Image module, and its public behavior is byte-for-byte unchanged at the CLI seam.
-- [ ] The shared module is independent of the CLI parser and ready for `generate` to consume.
-- [ ] All verification commands pass and the absence of a live check is recorded.
+- [x] Upscale uses the shared Source Image module, and its public behavior is byte-for-byte unchanged at the CLI seam.
+- [x] The shared module is independent of the CLI parser and ready for `generate` to consume.
+- [x] All verification commands pass and the absence of a live check is recorded.
+
+## Comments
+
+- Implemented shared Source Image shape validation, local path preparation, existing-image confirmation, single upload, and post-upload error reporting in `internal/sourceimage`. Upscale consumes it without changing public test assertions or network request order.
+- Independent standards and spec reviews of `61cad69...3c4e2a0` found no blocking issues. The spec review confirmed upload ordering and complete `source_image` plus `source_uploaded: true` details after post-upload failures.
+- Verification passed: `go test ./internal/cli ./internal/upscale ./internal/images ./internal/sourceimage`, `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify`.
+- No live InvokeAI check was required because this prefactor does not change any request InvokeAI receives.
