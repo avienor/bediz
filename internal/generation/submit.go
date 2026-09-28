@@ -99,9 +99,6 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	if err != nil {
 		return ExecutionReceipt{}, err
 	}
-	if effective.Source != nil && main.Base != "sdxl" && main.Base != "anima" {
-		return ExecutionReceipt{}, operation.UnsupportedCapability(fmt.Sprintf("image-to-image is not supported for %s main models", main.Base))
-	}
 	if profileGenerate != nil {
 		if err := validateProfileApplicability(request.Profile, *profileGenerate, main); err != nil {
 			return ExecutionReceipt{}, err
@@ -116,16 +113,20 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	if err != nil {
 		return ExecutionReceipt{}, err
 	}
+	alignment := 8
+	if main.Base == "flux" {
+		alignment = 16
+	}
 	if effective.Source != nil {
 		if effective.Strength == nil {
 			effective.Strength = new(0.75)
 		}
 		if request.Source.Type == "path" {
-			if err := checkSourceSize(localWidth, localHeight); err != nil {
+			if err := checkSourceSize(localWidth, localHeight, alignment); err != nil {
 				return ExecutionReceipt{}, err
 			}
 			if effective.Width == nil {
-				effective.Width, effective.Height = new(localWidth/8*8), new(localHeight/8*8)
+				effective.Width, effective.Height = new(localWidth/alignment*alignment), new(localHeight/alignment*alignment)
 			}
 		}
 	}
@@ -137,6 +138,8 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 		entry := capability.SDXLImageToImageEntry()
 		if main.Base == "anima" {
 			entry = capability.AnimaImageToImageEntry()
+		} else if main.Base == "flux" {
+			entry = capability.FLUXImageToImageEntry()
 		}
 		if err := graphops.CheckRequirements(ctx, client, entry.Endpoints, entry.Invocations); err != nil {
 			return ExecutionReceipt{}, err
@@ -153,11 +156,11 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 		if source.Uploaded && (source.Image.Width != localWidth || source.Image.Height != localHeight) {
 			return ExecutionReceipt{}, &sourceimage.UploadedError{Source: source.Image, Err: &httpclient.InvalidResponseError{Err: fmt.Errorf("uploaded source dimensions %d × %d differ from local image dimensions %d × %d", source.Image.Width, source.Image.Height, localWidth, localHeight)}}
 		}
-		if err := checkSourceSize(source.Image.Width, source.Image.Height); err != nil {
+		if err := checkSourceSize(source.Image.Width, source.Image.Height, alignment); err != nil {
 			return ExecutionReceipt{}, err
 		}
 		if request.Width == nil {
-			resolved.Request.Width, resolved.Request.Height = new(source.Image.Width/8*8), new(source.Image.Height/8*8)
+			resolved.Request.Width, resolved.Request.Height = new(source.Image.Width/alignment*alignment), new(source.Image.Height/alignment*alignment)
 		}
 		resolved.SourceImage = source.Image
 	}
@@ -206,9 +209,9 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	return receipt, nil
 }
 
-func checkSourceSize(width, height int) error {
-	if width < 8 || height < 8 {
-		return operation.InvalidRequest("source image width and height must each be at least 8 pixels")
+func checkSourceSize(width, height, alignment int) error {
+	if width < alignment || height < alignment {
+		return operation.InvalidRequest(fmt.Sprintf("source image width and height must each be at least %d pixels", alignment))
 	}
 	return nil
 }

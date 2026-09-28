@@ -328,6 +328,7 @@ var Matrix = []Entry{
 	SDXLGenerationEntry(),
 	SDXLImageToImageEntry(),
 	FLUXGenerationEntry(),
+	FLUXImageToImageEntry(),
 	SDXLUpscaleEntry(),
 	SD1UpscaleEntry(),
 	{
@@ -427,6 +428,28 @@ func FLUXGenerationEntry() Entry {
 			{Name: "FLUX.1 CLIP Embed", Types: []string{"clip_embed"}, Bases: []string{"any"}, MinimumCount: 1},
 		},
 	}
+}
+
+// FLUXImageToImageEntry adds the tested source-image encoder path to FLUX.1 generation.
+func FLUXImageToImageEntry() Entry {
+	entry := FLUXGenerationEntry()
+	entry.Mode = "img2img"
+	entry.Endpoints = append(entry.Endpoints, EndpointRequirement{Method: "POST", Path: "/api/v1/images/upload"})
+	entry.Invocations = slices.Clone(entry.Invocations)
+	for index := range entry.Invocations {
+		switch entry.Invocations[index].Type {
+		case "flux_denoise":
+			entry.Invocations[index].Properties = append(slices.Clone(entry.Invocations[index].Properties), "latents", "denoising_start", "denoising_end", "add_noise")
+		case "core_metadata":
+			entry.Invocations[index].Properties = append(slices.Clone(entry.Invocations[index].Properties), "strength", "init_image")
+		}
+	}
+	common := []string{"id", "is_intermediate", "use_cache", "type"}
+	entry.Invocations = append(entry.Invocations,
+		InvocationRequirement{Schema: "ImageResizeInvocation", Type: "img_resize", Properties: append(slices.Clone(common), "image", "width", "height", "resample_mode")},
+		InvocationRequirement{Schema: "FluxVaeEncodeInvocation", Type: "flux_vae_encode", Properties: append(slices.Clone(common), "image", "vae")},
+	)
+	return entry
 }
 
 // SDXLGenerationEntry records the tested stock 6.14.1 text-to-image graph.

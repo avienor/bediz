@@ -308,7 +308,7 @@ func TestGenerateSDXLUploadedDimensionMismatchStopsEnqueue(t *testing.T) {
 
 func TestGenerateImageToImageRejectsOtherFamiliesBeforeUpload(t *testing.T) {
 	isolateUserConfigDir(t)
-	for _, inventory := range [][]map[string]any{fluxCLIInventory()} {
+	for _, inventory := range [][]map[string]any{{{"key": "sd3-main", "hash": "sd3-hash", "name": "SD3 main", "base": "sd-3", "type": "main", "format": "checkpoint"}}} {
 		server, requests, _ := img2imgServer(t, 512, 512, sdxlOpenAPIFixture(t), inventory)
 		model := inventory[0]["key"].(string)
 		code, envelope := runImg2Img(t, "--no-wait", "--model", model, "--prompt", "lighthouse", "--image", "source.png", "--seed", "41", "--url", server.URL)

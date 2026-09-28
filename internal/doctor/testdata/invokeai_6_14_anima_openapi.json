@@ -218,7 +218,7 @@
         }
       },
       "CoreMetadataInvocation": {
-		"additionalProperties": true,
+        "additionalProperties": true,
         "properties": {
           "id": {},
           "is_intermediate": {},
@@ -623,7 +623,9 @@
           "width": {},
           "height": {},
           "resample_mode": {},
-          "type": {"const": "img_resize"}
+          "type": {
+            "const": "img_resize"
+          }
         }
       },
       "ImageToLatentsInvocation": {
@@ -717,6 +719,28 @@
           "mask": {},
           "type": {
             "const": "compel"
+          }
+        }
+      },
+      "FluxVaeEncodeInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "image": {},
+          "vae": {},
+          "type": {
+            "const": "flux_vae_encode"
+          }
+        }
+      },
+      "ImageOutput": {
+        "properties": {
+          "image": {},
+          "width": {},
+          "height": {},
+          "type": {
+            "const": "image_output"
           }
         }
       }

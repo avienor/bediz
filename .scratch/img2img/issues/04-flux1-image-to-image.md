@@ -68,9 +68,55 @@
 - `CHANGELOG.md` under Unreleased. Tests.
 - No ADR or glossary change: ADR-0023 records the strength meaning.
 
-**Status:** ready-for-agent
+**Status:** implemented
 
-- [ ] `generate` with a supported FLUX.1 dev or schnell main model and a Source Image produces image-to-image outputs through one tested enqueue, using the recorded strength mapping.
-- [ ] Unsupported variants and formats fail before any upload, and no model is classified by display name.
-- [ ] Doctor, `ui_sync_partial`, the V1 spec, and `CHANGELOG.md` reflect the behavior verified live.
-- [ ] The independent review found no acceptance-blocking issue.
+- [x] `generate` with a supported FLUX.1 dev or schnell main model and a Source Image produces image-to-image outputs through one tested enqueue, using the recorded strength mapping.
+- [x] Unsupported variants and formats fail before any upload, and no model is classified by display name.
+- [x] Doctor, `ui_sync_partial`, the V1 spec, and `CHANGELOG.md` reflect the behavior verified live.
+- [x] The independent review found no acceptance-blocking issue.
+
+## Comments
+
+### 2026-09-28 — Implementation and worker evidence
+
+- Public seams: `generation.CompileFLUX`, the CLI's argv/stdout/stderr/exit status and HTTP boundary, and `doctor` output. Compiler, generation acceptance, and synchronization tests were observed failing before their implementations. The existing shared Source Image path remains the upload and waiting boundary.
+- Four versioned image-to-image fixtures cover dev and schnell, each with and without resize. The built 6.14.1 frontend (`index-BRHi9LIu.js`) records optimized denoising enabled by default and `1-n**(t?.2:1)`. Frontend results pinned in the fixtures are: strength 1 → 0; 0.75 → 0.05591248870509802; 0.5 → 0.12944943670387588; 0.01 → 0.6018928294465027.
+- The Go result at strength 0.01 is 0.6018928294465028, one ULP from the frontend. Escalated to the user, who approved an absolute tolerance of 1e-15 for fixture comparisons of `denoising_start` only. Production retains `1 - math.Pow(strength, 0.2)`; every other fixture member is compared exactly.
+- Checked all eight FLUX text/image enqueue fixtures' node fields and edge vocabulary against live `/openapi.json`. The fixture projection adds `FluxVaeEncodeInvocation` and `ImageOutput` from that document. The four text-to-image fixture files are unchanged.
+- CLI tests cover all supported variant/format pairs, Kontext and Krea names, unsupported variants/formats, negative prompts, schnell guidance, small sources on either axis and for either source kind, source rounding, explicit dimensions, flags/documents, profile dimension precedence, component selection, no-resize sources, and the dev/schnell warning lists. Missing schemas and every required invocation property stop generation before upload; doctor names the requirement and preserves text-to-image compatibility for image-only requirements. Recall absence does not remove Direct Execution compatibility. Text-to-image receipts omit the Source Image members and strength.
+- Local baseline: `curl -fsS http://127.0.0.1:9090/api/v1/app/version` → 6.14.1; RTX 4060, 8188 MiB VRAM; queue initially idle. Installed NF4 dev/schnell, FLUX VAE, T5 int8, and CLIP Embed were used without installation.
+- Built with `go build -o /tmp/bediz-flux1-img2img-ijZbe7/bediz ./cmd/bediz`. Test source `/tmp/bediz-flux1-img2img-ijZbe7/source.png` is a 768 × 768 RGB PNG.
+- Waited schnell: `/tmp/bediz-flux1-img2img-ijZbe7/bediz generate --model 385ce753-8fb8-46fc-ab74-aac4924a9663 --prompt 'a small red teacup on a softly lit table' --image-path /tmp/bediz-flux1-img2img-ijZbe7/source.png --strength 0.75 --seed 4040 --timeout 15m --json` → success, 768 × 768, 4 steps, queue item 129, batch `054f69cd-24aa-4496-8c95-8ddc087201b5`. Metadata verified through `GET /api/v1/images/i/7c813dbc-2165-4b8b-9617-02d8d5eb4688.png/metadata`: seed 4040, `flux_img2img`, strength 0.75, matching `init_image`.
+- Waited dev: `/tmp/bediz-flux1-img2img-ijZbe7/bediz generate --model 6b6e6ba3-368f-42ee-b6e5-033bba37aa7b --prompt 'a small red teacup on a softly lit table' --image-path /tmp/bediz-flux1-img2img-ijZbe7/source.png --strength 0.75 --steps 4 --seed 4041 --timeout 15m --json` → success, 768 × 768, guidance 4, queue item 130, batch `02b494b3-3608-46a5-a800-25523c282099`. Metadata verified through `GET /api/v1/images/i/e9f43dc9-f972-4817-82b8-fbc167bc6f62.png/metadata`: seed 4041, `flux_img2img`, strength 0.75, matching `init_image`.
+- `/tmp/bediz-flux1-img2img-ijZbe7/bediz doctor --json` → ready, both FLUX modes compatible with `ui_sync: partial`. Receipts, metadata, OpenAPI, and verification logs are under `/tmp/bediz-flux1-img2img-ijZbe7/` for the independent reviewer.
+- Ad hoc gallery images retained: schnell uploaded source `1f994ce9-befd-4237-8c13-0f5678007aa0.png`, schnell output `7c813dbc-2165-4b8b-9617-02d8d5eb4688.png`, dev uploaded source `9d76308f-6c78-4cd0-b1ec-3255b5607d85.png`, dev output `e9f43dc9-f972-4817-82b8-fbc167bc6f62.png`.
+- `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify` pass. The first full test pass exposed a stale doctor capability/invocation count expectation; it was updated for the sixth generation mode and the FLUX encoder before the successful full rerun.
+- `BEDIZ_E2E_URL=http://127.0.0.1:9090 go test -count=1 -v ./e2e` passes (203.755 seconds), including the registered FLUX image mode, a waited schnell image-to-image, seed/metadata checks, and cleanup of the E2E-created images. All required live steps completed on the 8 GB baseline.
+
+### Independent Standards review
+
+Fixed base `97178289fe902388d04c804a813c37aac7454caa`, review snapshot `c1fbc4b399dc69d4919bae7bb6ffc4451d155e10` (created without moving the branch).
+
+No documented-standard breaches or material baseline smells found. Tests use public compiler, CLI, doctor, and HTTP boundaries; request counts observe external mutations. Fixture expectations come from the frontend and the approved tolerance is confined to `denoising_start`. The CLI adapter seam, shared Source Image path, deterministic model resolution, and family conventions are preserved. Go 1.27 guidance was checked. Standards: **0 findings**.
+
+### Independent Spec review
+
+Same fixed base and review snapshot. **0 Spec findings; no acceptance blocker.**
+
+The reviewer independently checked the installed 6.14.1 frontend's optimized-denoising default and formula, recomputed all four pinned values, and compared the encoder/VAE/latent edges, dimensions, resize behavior, and metadata to the agreed frontend image-to-image path. All eight FLUX fixtures passed against live OpenAPI node and edge vocabulary; the four text-to-image fixture files are unchanged. Public tests cover the requested schema/property failures, rounding, small sources, model acceptance/rejection, receipts, and variant-specific synchronization lists. The approved tolerance affects only fixture `denoising_start`.
+
+Independent public tests passed:
+
+```sh
+go test ./internal/generation ./internal/cli -run 'FLUX' -count=1
+```
+
+Independent waited generation passed with exit 0 and empty stderr:
+
+```sh
+/tmp/bediz-flux1-img2img-ijZbe7/bediz generate --model 385ce753-8fb8-46fc-ab74-aac4924a9663 --prompt 'a small red teacup on a softly lit table' --image 1f994ce9-befd-4237-8c13-0f5678007aa0.png --strength 0.75 --seed 4042 --timeout 15m --url http://127.0.0.1:9090 --json
+```
+
+Item 139, batch `e740673c-beee-479d-aa17-ada24f687f3f`, produced ad hoc gallery image `00438c95-4667-46f9-add9-aa77f9bdfde3.png`, retained in addition to the four worker images listed above. Exact receipt assertions passed; direct HTTP metadata confirms seed 4042, `flux_img2img`, strength 0.75, and matching `init_image`. Independent `doctor` reports both FLUX modes compatible with partial UI Synchronization. Evidence files `reviewer-schnell-{receipt,stderr,metadata,queue}` and `reviewer-doctor.json` are in the worker evidence directory.
+
+Review totals: Standards **0**, Spec **0**; neither axis has a blocking finding. After the fixed review snapshot, only this ticket's verification evidence and completion status changed.

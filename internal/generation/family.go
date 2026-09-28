@@ -53,6 +53,9 @@ func (fluxAdapter) synchronization(settings ResolvedSettings) (SyncSettings, []s
 		fields = append(fields, "guidance")
 	}
 	fields = append(fields, "vae", "t5_encoder", "clip_embed", "output_count", "board_id")
+	if settings.Strength != nil {
+		fields = append(fields, "source_image", "strength")
+	}
 	return SyncSettings{Model: settings.ModelKey, PositivePrompt: settings.PositivePrompt, NegativePrompt: settings.NegativePrompt, Width: settings.Width, Height: settings.Height, Steps: settings.Steps, Seed: settings.Seeds[0]}, fields
 }
 

@@ -41,7 +41,7 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 	for i, entry := range report.Capabilities {
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "models.scan", "models.install", "models.install", "models.status", "models.delete", "images.list", "images.get", "images.upload", "images.download", "images.delete", "queue.list", "queue.get", "queue.wait", "queue.cancel", "queue.clear", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
+	wantOperations := []string{"models.list", "models.scan", "models.install", "models.install", "models.status", "models.delete", "images.list", "images.get", "images.upload", "images.download", "images.delete", "queue.list", "queue.get", "queue.wait", "queue.cancel", "queue.clear", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if !slices.Equal(operations, wantOperations) {
 		t.Fatalf("reported operations = %q, want implemented operations %q", operations, wantOperations)
 	}
