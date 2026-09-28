@@ -542,6 +542,135 @@ func TestModelsInstallProtectedURLUsesTemporaryStdinToken(t *testing.T) {
 	}
 }
 
+func TestModelsInstallProtectedURLRejectsPlainHTTPBeforeMutation(t *testing.T) {
+	isolateUserConfigDir(t)
+	const sourceToken = "source-token-sentinel-742"
+	var installed atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(huggingFaceInstallOpenAPI))
+		case "/api/v2/models/install":
+			installed.Store(true)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":9,"status":"waiting"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	for _, source := range []string{
+		"http://example.org/protected.safetensors",
+		"http://192.168.0.5/protected.safetensors",
+		"http://[2001:db8::1]/protected.safetensors",
+		"http://localhost.example.org/protected.safetensors",
+	} {
+		t.Run(source, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "request.json")
+			if err := os.WriteFile(path, []byte(`{"schema_version":1,"source":{"type":"url","reference":"`+source+`"}}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			for _, input := range []struct {
+				name string
+				args []string
+			}{
+				{"flags", []string{"--source-type", "url", "--source", source}},
+				{"document", []string{"--request", path}},
+			} {
+				t.Run(input.name, func(t *testing.T) {
+					args := append([]string{"models", "install"}, input.args...)
+					args = append(args, "--token-stdin", "--url", server.URL, "--json")
+					code, stdout, stderr := runModelCommand(t, sourceToken+"\n", args...)
+					var envelope result.Envelope
+					if err := json.Unmarshal([]byte(stdout), &envelope); err != nil {
+						t.Fatal(err)
+					}
+					if err := envelope.Validate(); err != nil {
+						t.Fatal(err)
+					}
+					if code != result.ExitInvalidRequest || stderr != "" || envelope.OK || envelope.Operation != result.OperationModelsInstall || envelope.Error == nil || envelope.Error.Code != result.CodeInvalidRequest || installed.Load() || strings.Contains(stdout+stderr, sourceToken) || strings.Contains(stdout+stderr, source) {
+						t.Fatalf("code=%d stdout=%q stderr=%q installed=%t", code, stdout, stderr, installed.Load())
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestModelsInstallAllowsLoopbackArtifactTokensAndUnprotectedHTTP(t *testing.T) {
+	isolateUserConfigDir(t)
+	const sourceToken = "source-token-sentinel-742"
+	for _, test := range []struct {
+		source string
+		token  string
+	}{
+		{"http://LOCALHOST/protected.safetensors", sourceToken},
+		{"http://127.0.0.2:8080/protected.safetensors", sourceToken},
+		{"http://[::1]:8080/protected.safetensors", sourceToken},
+		{"http://example.org/public.safetensors", ""},
+	} {
+		t.Run(test.source, func(t *testing.T) {
+			var installed atomic.Bool
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/app/version":
+					_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+				case "/openapi.json":
+					_, _ = w.Write([]byte(huggingFaceInstallOpenAPI))
+				case "/api/v2/models/install":
+					if r.Method != http.MethodPost || r.URL.Query().Get("source") != test.source || r.URL.Query().Get("access_token") != test.token {
+						t.Error("incorrect artifact installation request")
+					}
+					installed.Store(true)
+					w.WriteHeader(http.StatusCreated)
+					_, _ = w.Write([]byte(`{"id":9,"status":"waiting"}`))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(server.Close)
+			args := []string{"models", "install", "--source-type", "url", "--source", test.source, "--url", server.URL, "--json"}
+			if test.token != "" {
+				args = append(args, "--token-stdin")
+			}
+			code, stdout, stderr := runModelCommand(t, test.token, args...)
+			if code != result.ExitSuccess || stderr != "" || !strings.Contains(stdout, `"job_id":9`) || !installed.Load() || strings.Contains(stdout+stderr, sourceToken) || strings.Contains(stdout+stderr, test.source) {
+				t.Fatalf("code=%d stdout=%q stderr=%q installed=%t", code, stdout, stderr, installed.Load())
+			}
+		})
+	}
+}
+
+func TestModelsInstallProtectedStarterRejectsPlainHTTPBeforeAnyMutation(t *testing.T) {
+	isolateUserConfigDir(t)
+	const sourceToken = "source-token-sentinel-742"
+	const source = "http://example.org/main.safetensors"
+	var installed atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/app/version":
+			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
+		case "/openapi.json":
+			_, _ = w.Write([]byte(strings.Replace(starterOpenAPI, `{"name":"source","in":"query","required":true}`, `{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}`, 1)))
+		case "/api/v2/models/starter_models":
+			_, _ = w.Write([]byte(`{"starter_models":[{"source":"http://example.org/main.safetensors","is_installed":false,"dependencies":[{"source":"http://example.org/dep.safetensors","is_installed":false}]}]}`))
+		case "/api/v2/models/install":
+			installed.Store(true)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":9,"status":"waiting"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	code, stdout, stderr := runModelCommand(t, sourceToken+"\n", "models", "install", "--source-type", "starter", "--source", source, "--token-stdin", "--url", server.URL, "--json")
+	if code != result.ExitUnsupportedCapability || stderr != "" || !strings.Contains(stdout, `"code":"unsupported_capability"`) || installed.Load() || strings.Contains(stdout+stderr, sourceToken) || strings.Contains(stdout+stderr, source) {
+		t.Fatalf("code=%d stdout=%q stderr=%q installed=%t", code, stdout, stderr, installed.Load())
+	}
+}
+
 func TestModelsInstallProtectedURLRejectsMissingTokenAndStdinConflictBeforeNetwork(t *testing.T) {
 	isolateUserConfigDir(t)
 	var requests atomic.Int32

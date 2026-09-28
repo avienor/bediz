@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -145,7 +146,7 @@ func (installer Installer) Install(ctx context.Context, request InstallRequest) 
 	source := request.Source.Reference
 	switch request.Source.Type {
 	case "url":
-		if err := validateArtifactURL(source); err != nil {
+		if err := validateArtifactURL(source, request.SourceToken != ""); err != nil {
 			return InstallResult{}, err
 		}
 	case "huggingface":
@@ -273,7 +274,7 @@ func (installer Installer) installStarter(ctx context.Context, request InstallRe
 		source, repoErr := normalizeHuggingFaceReference(entry.Source)
 		isRepository := repoErr == nil
 		if !isRepository {
-			if err := validateArtifactURL(entry.Source); err != nil {
+			if err := validateArtifactURL(entry.Source, request.SourceToken != ""); err != nil {
 				return operation.UnsupportedCapability("starter catalog entry has an unsupported source reference")
 			}
 			source = entry.Source
@@ -643,7 +644,7 @@ func checkHuggingFaceRepository(ctx context.Context, client *httpclient.Client, 
 	}
 	candidates := make([]operation.SelectionCandidate, 0, len(metadata.URLs))
 	for _, artifact := range metadata.URLs {
-		if !strings.HasPrefix(artifact, canonical+"/resolve/") || validateArtifactURL(artifact) != nil {
+		if !strings.HasPrefix(artifact, canonical+"/resolve/") || validateArtifactURL(artifact, false) != nil {
 			return "", &httpclient.InvalidResponseError{Err: errors.New("Hugging Face metadata contains an unsafe artifact URL")}
 		}
 		parsed, _ := url.Parse(artifact)
@@ -692,10 +693,13 @@ func Status(ctx context.Context, client *httpclient.Client, request StatusReques
 	return result, nil
 }
 
-func validateArtifactURL(reference string) error {
+func validateArtifactURL(reference string, hasSourceToken bool) error {
 	parsed, err := url.Parse(reference)
 	if err != nil || parsed == nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.Opaque != "" || parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || strings.Contains(reference, "#") {
 		return operation.InvalidRequest("source reference must be an exact HTTP(S) artifact URL without credentials, query, or fragment")
+	}
+	if hasSourceToken && parsed.Scheme != "https" && !strings.EqualFold(parsed.Hostname(), "localhost") && !net.ParseIP(parsed.Hostname()).IsLoopback() {
+		return operation.InvalidRequest("source token requires HTTPS or a loopback artifact URL")
 	}
 	return nil
 }
