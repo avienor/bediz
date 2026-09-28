@@ -6,6 +6,7 @@ Each release lists the changes that affect users of the `bediz` binary, its JSON
 
 ### Added
 
+- SDXL image-to-image generation through `generate --image` or `--image-path`, with `--strength`, source-aware dimensions, an Execution Receipt, and a separate `doctor` mode.
 - `invalid_request` errors name the Request Document member in `error.details.field` when the decoder or validator knows it, for flags as well as documents.
 - `invokeai_operation_failed` may include a sanitized, size-bounded `error.details.invokeai_detail` for InvokeAI 4xx rejections.
 - `bediz config set --token-stdin` stores the InvokeAI token from standard input, keeping it out of process arguments and shell history.

@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -182,6 +186,28 @@ type PreparedUpload struct {
 	contentType string
 }
 
+// Dimensions reads the header of a PNG, JPEG, or GIF prepared for generation.
+// It leaves the file positioned for the later upload.
+func (u *PreparedUpload) Dimensions() (int, int, error) {
+	if u.file == nil {
+		return 0, 0, operation.InvalidRequest("source upload is no longer available")
+	}
+	if u.contentType != "image/png" && u.contentType != "image/jpeg" && u.contentType != "image/gif" {
+		return 0, 0, operation.InvalidRequest("this image format cannot be a path source; use images upload followed by an image source")
+	}
+	if _, err := u.file.Seek(0, io.SeekStart); err != nil {
+		return 0, 0, operation.InvalidRequest(fmt.Sprintf("seek source image: %v", err))
+	}
+	config, _, err := image.DecodeConfig(u.file)
+	if _, seekErr := u.file.Seek(0, io.SeekStart); seekErr != nil {
+		return 0, 0, operation.InvalidRequest(fmt.Sprintf("seek source image: %v", seekErr))
+	}
+	if err != nil {
+		return 0, 0, operation.InvalidRequest(fmt.Sprintf("read source image dimensions: %v", err))
+	}
+	return config.Width, config.Height, nil
+}
+
 // PrepareUpload requires an absolute path naming a readable regular file
 // whose content is detected as an image, regardless of its extension.
 func PrepareUpload(path string) (*PreparedUpload, error) {
@@ -221,7 +247,7 @@ func (u *PreparedUpload) Close() error {
 
 // Send uploads the file once as a non-intermediate user image without a
 // board, resizing, or injected metadata. It is never retried: a transport
-// failure or an incomplete response is an OutcomeUnknownError.
+// failure or a response without an image name is an OutcomeUnknownError.
 func (u *PreparedUpload) Send(ctx context.Context, client *httpclient.Client) (Reference, error) {
 	if u.file == nil {
 		return Reference{}, errors.New("upload file was already sent or closed")
@@ -284,18 +310,10 @@ func uploadContentType(file *os.File) (string, error) {
 }
 
 func normalizeReference(client *httpclient.Client, image imageRecord) (Reference, error) {
-	imageURL, err := client.ResolveURL(image.ImageURL)
-	if err != nil {
-		return Reference{}, fmt.Errorf("resolve image url: %w", err)
-	}
-	thumbnailURL, err := client.ResolveURL(image.ThumbnailURL)
-	if err != nil {
-		return Reference{}, fmt.Errorf("resolve thumbnail url: %w", err)
-	}
-	return Reference{
+	reference := Reference{
 		ImageName:      image.ImageName,
-		ImageURL:       imageURL,
-		ThumbnailURL:   thumbnailURL,
+		ImageURL:       image.ImageURL,
+		ThumbnailURL:   image.ThumbnailURL,
 		ImageOrigin:    image.ImageOrigin,
 		ImageCategory:  image.ImageCategory,
 		Width:          image.Width,
@@ -308,5 +326,16 @@ func normalizeReference(client *httpclient.Client, image imageRecord) (Reference
 		Starred:        image.Starred,
 		HasWorkflow:    image.HasWorkflow,
 		BoardID:        image.BoardID,
-	}, nil
+	}
+	imageURL, err := client.ResolveURL(image.ImageURL)
+	if err != nil {
+		return reference, &httpclient.InvalidResponseError{Err: fmt.Errorf("resolve image url: %w", err)}
+	}
+	thumbnailURL, err := client.ResolveURL(image.ThumbnailURL)
+	if err != nil {
+		return reference, &httpclient.InvalidResponseError{Err: fmt.Errorf("resolve thumbnail url: %w", err)}
+	}
+	reference.ImageURL = imageURL
+	reference.ThumbnailURL = thumbnailURL
+	return reference, nil
 }

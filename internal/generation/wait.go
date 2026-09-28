@@ -7,6 +7,7 @@ import (
 	"github.com/avienor/bediz/internal/graphops"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/operation"
+	"github.com/avienor/bediz/internal/sourceimage"
 )
 
 type WaitOptions = graphops.WaitOptions
@@ -23,8 +24,14 @@ func Wait(ctx context.Context, client *httpclient.Client, accepted ExecutionRece
 			accepted.ResolvedSettings.OutputCount, len(accepted.Queue.ItemIDs), len(accepted.ResolvedSettings.Seeds),
 		))
 	}
+	if accepted.SourceImage != nil {
+		options.OnlyNonIntermediateImages = true
+	}
 	outputs, err := graphops.Wait(ctx, client, accepted.Queue, accepted.ResolvedSettings.Seeds,
 		graphops.SeedField{NodePath: "seed", FieldName: "value"}, options)
 	accepted.Outputs = outputs
+	if err != nil && accepted.SourceUploaded != nil && *accepted.SourceUploaded {
+		return accepted, &sourceimage.UploadedError{Source: *accepted.SourceImage, Err: err}
+	}
 	return accepted, err
 }

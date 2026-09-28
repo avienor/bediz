@@ -65,6 +65,14 @@ func (prepared *Prepared) Close() error {
 	return prepared.upload.Close()
 }
 
+// LocalDimensions reads a prepared path source without making a network request.
+func (prepared *Prepared) LocalDimensions() (int, int, error) {
+	if prepared.upload == nil {
+		return 0, 0, operation.InvalidRequest("source is not a local path")
+	}
+	return prepared.upload.Dimensions()
+}
+
 type Resolved struct {
 	Image    images.Reference
 	Uploaded bool
@@ -76,6 +84,9 @@ func (prepared *Prepared) Resolve(ctx context.Context, client *httpclient.Client
 	if prepared.upload != nil {
 		image, err := prepared.upload.Send(ctx, client)
 		if err != nil {
+			if image.ImageName != "" {
+				return Resolved{}, &UploadedError{Source: image, Err: err}
+			}
 			return Resolved{}, err
 		}
 		return Resolved{Image: image, Uploaded: true}, nil

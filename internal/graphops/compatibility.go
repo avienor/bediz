@@ -11,6 +11,7 @@ import (
 )
 
 type openAPIDocument struct {
+	Paths      map[string]map[string]any `json:"paths"`
 	Components struct {
 		Schemas map[string]struct {
 			AdditionalProperties bool `json:"additionalProperties"`
@@ -23,9 +24,19 @@ type openAPIDocument struct {
 
 // CheckInvocations verifies the operation's invocation vocabulary in live OpenAPI.
 func CheckInvocations(ctx context.Context, client *httpclient.Client, requirements []capability.InvocationRequirement) error {
+	return CheckRequirements(ctx, client, nil, requirements)
+}
+
+// CheckRequirements verifies graph vocabulary and endpoints before a source upload.
+func CheckRequirements(ctx context.Context, client *httpclient.Client, endpoints []capability.EndpointRequirement, requirements []capability.InvocationRequirement) error {
 	var document openAPIDocument
 	if err := client.GetJSON(ctx, "/openapi.json", &document); err != nil {
 		return err
+	}
+	for _, endpoint := range endpoints {
+		if _, ok := document.Paths[endpoint.Path][strings.ToLower(endpoint.Method)]; !ok {
+			return operation.UnsupportedCapability(fmt.Sprintf("InvokeAI does not provide required endpoint %s %s", endpoint.Method, endpoint.Path))
+		}
 	}
 	for _, requirement := range requirements {
 		schema, ok := document.Components.Schemas[requirement.Schema]

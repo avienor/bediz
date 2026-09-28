@@ -136,7 +136,7 @@ No installation is needed, and none is consented. Source images come from Bediz 
 ## Known live risks
 
 - A Recall that changes the main model triggers asynchronous model loading in the open web interface, which may reset other controls. Record the final observed state.
-- Recall of width and height also drives the Canvas bounding box in the stock frontend. Record what the Generate tab and the Canvas show.
+- Recall of width and height can interact with Canvas bounding-box state. Ticket 02 live observation on an empty Canvas found its existing 2512 × 416 bounding box unchanged after Recall changed Generate dimensions to 768 × 512 and then 512 × 512. Record both surfaces for each future mode and Canvas state tested.
 - 8 GB VRAM can fail FLUX.1 or large-source generations. A resource failure is a live-environment limit to report, not a graph defect.
 - Output dimensions differ from the source when the family alignment rounds them down. Receipts must show the resolved values.
 

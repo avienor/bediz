@@ -226,7 +226,9 @@
           "seed": {},
           "positive_prompt": {},
           "cfg_rescale_multiplier": {},
-          "rand_device": {}
+          "rand_device": {},
+          "strength": {},
+          "init_image": {}
         }
       },
       "RecallParameter": {
@@ -597,6 +599,18 @@
           "type": {
             "const": "unsharp_mask"
           }
+        }
+      },
+      "ImageResizeInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "image": {},
+          "width": {},
+          "height": {},
+          "resample_mode": {},
+          "type": {"const": "img_resize"}
         }
       },
       "ImageToLatentsInvocation": {

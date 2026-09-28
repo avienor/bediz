@@ -101,6 +101,7 @@ type ModelRequirement struct {
 type CapabilityReport struct {
 	Operation  string   `json:"operation"`
 	Family     string   `json:"family,omitempty"`
+	Mode       string   `json:"mode,omitempty"`
 	Compatible bool     `json:"compatible"`
 	UISync     string   `json:"ui_sync,omitempty"`
 	Failures   []string `json:"failures"`
@@ -387,6 +388,7 @@ func buildCapabilities(report Report, document openAPIDocument) []CapabilityRepo
 		capabilities = append(capabilities, CapabilityReport{
 			Operation:  entry.Operation,
 			Family:     entry.Family,
+			Mode:       entry.Mode,
 			Compatible: len(failures) == 0,
 			Failures:   failures,
 		})
@@ -592,6 +594,9 @@ func (r Report) Human(w io.Writer) error {
 		name := entry.Operation
 		if entry.Family != "" {
 			name += "/" + entry.Family
+		}
+		if entry.Mode == "img2img" {
+			name += "/img2img"
 		}
 		if entry.UISync != "" {
 			if _, err := fmt.Fprintf(w, "%s compatible: %t (UI sync: %s)\n", name, entry.Compatible, entry.UISync); err != nil {

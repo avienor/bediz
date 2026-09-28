@@ -8,15 +8,17 @@ import (
 	"slices"
 
 	"github.com/avienor/bediz/internal/graphops"
+	"github.com/avienor/bediz/internal/images"
 	"github.com/avienor/bediz/internal/operation"
 )
 
 // Resolution contains the complete generation values and exact installed
 // model identifiers needed to compile a family execution graph.
 type Resolution struct {
-	Request Request
-	Models  ResolvedModels
-	Seeds   []uint32
+	Request     Request
+	Models      ResolvedModels
+	Seeds       []uint32
+	SourceImage images.Reference
 }
 
 // AnimaResolution is the Anima compiler's resolution value.
@@ -203,6 +205,16 @@ func validateCommonRequest(request Request) error {
 			field = "width"
 		}
 		return operation.InvalidField(field, "width and height must be supplied together or both omitted")
+	}
+	if request.Source != nil {
+		if err := request.Source.Validate(); err != nil {
+			return err
+		}
+	}
+	if request.Strength != nil {
+		if request.Source == nil || math.IsNaN(*request.Strength) || math.IsInf(*request.Strength, 0) || *request.Strength <= 0 || *request.Strength > 1 {
+			return operation.InvalidField("strength", "strength requires a source and must be finite, greater than 0, and at most 1")
+		}
 	}
 	return nil
 }

@@ -48,6 +48,14 @@ _Avoid_: Local audit log, raw execution graph
 A self-contained description of one generation operation whose resolved behavior does not depend on transient browser state.
 _Avoid_: Current UI settings, implicit browser defaults
 
+**Generation Mode**:
+The kind of generation inferred from a Generation Request: text-to-image without a Source Image, or image-to-image with one.
+_Avoid_: Canvas mode, UI tab
+
+**Denoising Strength**:
+The portion of an image-to-image denoising schedule regenerated from its Source Image, with InvokeAI's web-interface meaning. Values near 0 retain more of the source; 1 regenerates it completely.
+_Avoid_: Creativity, denoising start, image weight
+
 **Prompt Pair**:
 A required positive prompt and an optional negative prompt within a generation request. A non-empty negative prompt is valid only for model families whose supported capability includes it.
 _Avoid_: Prompt template, silently ignored negative prompt
@@ -181,7 +189,7 @@ A stable InvokeAI image identifier paired with its metadata and an accessible lo
 _Avoid_: Screen position, gallery index
 
 **Source Image**:
-The exact InvokeAI image used as an operation input. A local image path is first uploaded and resolved to an InvokeAI image identifier, and that upload is recorded in the execution receipt.
+The exact InvokeAI image used as a generation or upscale input. A local image path is uploaded and resolved to an InvokeAI image identifier, and that upload is recorded in the execution receipt.
 _Avoid_: Selected gallery thumbnail, browser file input
 
 **Generative Upscale**:

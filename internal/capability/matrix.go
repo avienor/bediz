@@ -164,6 +164,7 @@ const (
 type Entry struct {
 	Operation     string
 	Family        string
+	Mode          string
 	UISync        string
 	VersionPolicy VersionPolicy
 	Endpoints     []EndpointRequirement
@@ -324,6 +325,7 @@ var Matrix = []Entry{
 	},
 	AnimaGenerationEntry(),
 	SDXLGenerationEntry(),
+	SDXLImageToImageEntry(),
 	FLUXGenerationEntry(),
 	SDXLUpscaleEntry(),
 	SD1UpscaleEntry(),
@@ -406,7 +408,7 @@ func upscaleEntry(base, label string, conditioning []InvocationRequirement) Entr
 // FLUXGenerationEntry records the tested stock 6.14.1 FLUX.1 graph.
 func FLUXGenerationEntry() Entry {
 	return Entry{
-		Operation: result.OperationGenerate, Family: "flux", UISync: "partial", VersionPolicy: VersionPolicySupportedRange,
+		Operation: result.OperationGenerate, Family: "flux", Mode: "txt2img", UISync: "partial", VersionPolicy: VersionPolicySupportedRange,
 		Endpoints: slices.Clone(AnimaGenerationEntry().Endpoints),
 		Invocations: []InvocationRequirement{
 			{Schema: "FluxModelLoaderInvocation", Type: "flux_model_loader", Properties: []string{"id", "is_intermediate", "use_cache", "type", "model", "vae_model", "t5_encoder_model", "clip_embed_model"}},
@@ -429,7 +431,7 @@ func FLUXGenerationEntry() Entry {
 // SDXLGenerationEntry records the tested stock 6.14.1 text-to-image graph.
 func SDXLGenerationEntry() Entry {
 	return Entry{
-		Operation: result.OperationGenerate, Family: "sdxl", UISync: "partial", VersionPolicy: VersionPolicySupportedRange,
+		Operation: result.OperationGenerate, Family: "sdxl", Mode: "txt2img", UISync: "partial", VersionPolicy: VersionPolicySupportedRange,
 		Endpoints: slices.Clone(AnimaGenerationEntry().Endpoints),
 		Invocations: []InvocationRequirement{
 			{Schema: "SDXLModelLoaderInvocation", Type: "sdxl_model_loader", Properties: []string{"id", "is_intermediate", "use_cache", "type", "model"}},
@@ -447,12 +449,35 @@ func SDXLGenerationEntry() Entry {
 	}
 }
 
+// SDXLImageToImageEntry adds the tested source-image encoder path to SDXL generation.
+func SDXLImageToImageEntry() Entry {
+	entry := SDXLGenerationEntry()
+	entry.Mode = "img2img"
+	entry.Endpoints = append(entry.Endpoints, EndpointRequirement{Method: "POST", Path: "/api/v1/images/upload"})
+	entry.Invocations = slices.Clone(entry.Invocations)
+	for index := range entry.Invocations {
+		switch entry.Invocations[index].Type {
+		case "denoise_latents":
+			entry.Invocations[index].Properties = append(slices.Clone(entry.Invocations[index].Properties), "latents")
+		case "core_metadata":
+			entry.Invocations[index].Properties = append(slices.Clone(entry.Invocations[index].Properties), "strength", "init_image")
+		}
+	}
+	common := []string{"id", "is_intermediate", "use_cache", "type"}
+	entry.Invocations = append(entry.Invocations,
+		InvocationRequirement{Schema: "ImageResizeInvocation", Type: "img_resize", Properties: append(slices.Clone(common), "image", "width", "height", "resample_mode")},
+		InvocationRequirement{Schema: "ImageToLatentsInvocation", Type: "i2l", Properties: append(slices.Clone(common), "image", "vae", "fp32", "color_compensation")},
+	)
+	return entry
+}
+
 // AnimaGenerationEntry returns the tested InvokeAI requirements shared by
 // capability reporting and direct execution validation.
 func AnimaGenerationEntry() Entry {
 	return Entry{
 		Operation:     result.OperationGenerate,
 		Family:        "anima",
+		Mode:          "txt2img",
 		UISync:        "partial",
 		VersionPolicy: VersionPolicySupportedRange,
 		Endpoints: []EndpointRequirement{

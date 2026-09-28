@@ -81,11 +81,16 @@ func (sdxlAdapter) validateRecall(_ ModelIdentifier, width, height, steps *int) 
 }
 
 func (sdxlAdapter) synchronization(settings ResolvedSettings) (SyncSettings, []string) {
-	return SyncSettings{
+	patch := SyncSettings{
 		Model: settings.ModelKey, PositivePrompt: settings.PositivePrompt, NegativePrompt: settings.NegativePrompt,
 		Width: settings.Width, Height: settings.Height, Steps: settings.Steps, Seed: settings.Seeds[0],
 		Additional: []capability.RecallPatchField{{Requirement: capability.SDXLCFGRecallField, Value: settings.Guidance}},
-	}, []string{"scheduler", "vae", "output_count", "board_id"}
+	}
+	fields := []string{"scheduler", "vae", "output_count", "board_id"}
+	if settings.Strength != nil {
+		fields = append(fields, "source_image", "strength")
+	}
+	return patch, fields
 }
 
 func (animaAdapter) resolve(request Request, main ModelIdentifier, inventory []ModelIdentifier, random io.Reader) (Resolution, error) {

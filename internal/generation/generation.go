@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/avienor/bediz/internal/graphops"
+	"github.com/avienor/bediz/internal/sourceimage"
 )
 
 type Components struct {
@@ -14,20 +15,22 @@ type Components struct {
 }
 
 type Request struct {
-	SchemaVersion  int         `json:"schema_version"`
-	Model          string      `json:"model,omitempty"`
-	Profile        string      `json:"profile,omitempty"`
-	PositivePrompt string      `json:"positive_prompt"`
-	NegativePrompt string      `json:"negative_prompt,omitempty"`
-	Width          *int        `json:"width,omitempty"`
-	Height         *int        `json:"height,omitempty"`
-	Steps          *int        `json:"steps,omitempty"`
-	Scheduler      *string     `json:"scheduler,omitempty"`
-	Guidance       *float64    `json:"guidance,omitempty"`
-	Seed           *uint32     `json:"seed,omitempty"`
-	OutputCount    *int        `json:"output_count,omitempty"`
-	BoardID        string      `json:"board_id,omitempty"`
-	Components     *Components `json:"components,omitempty"`
+	SchemaVersion  int                 `json:"schema_version"`
+	Model          string              `json:"model,omitempty"`
+	Profile        string              `json:"profile,omitempty"`
+	PositivePrompt string              `json:"positive_prompt"`
+	NegativePrompt string              `json:"negative_prompt,omitempty"`
+	Width          *int                `json:"width,omitempty"`
+	Height         *int                `json:"height,omitempty"`
+	Steps          *int                `json:"steps,omitempty"`
+	Scheduler      *string             `json:"scheduler,omitempty"`
+	Guidance       *float64            `json:"guidance,omitempty"`
+	Seed           *uint32             `json:"seed,omitempty"`
+	OutputCount    *int                `json:"output_count,omitempty"`
+	BoardID        string              `json:"board_id,omitempty"`
+	Components     *Components         `json:"components,omitempty"`
+	Source         *sourceimage.Source `json:"source,omitempty"`
+	Strength       *float64            `json:"strength,omitempty"`
 }
 
 type ModelIdentifier = graphops.ModelIdentifier

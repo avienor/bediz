@@ -45,6 +45,10 @@ func (c *CLI) Run(ctx context.Context, args []string) int {
 	if err != nil {
 		operationName := commandOperation(executed)
 		message := err.Error()
+		var details map[string]any
+		if operationName == result.OperationGenerate && (strings.Contains(message, "for \"--strength\" flag") || strings.Contains(message, "flag needs an argument: --strength")) {
+			details = map[string]any{"field": "strength"}
+		}
 		switch {
 		case operationName == result.OperationAuth || strings.HasPrefix(operationName, result.OperationAuthHuggingFace):
 			message = "invalid authentication command arguments"
@@ -53,7 +57,7 @@ func (c *CLI) Run(ctx context.Context, args []string) int {
 		case operationName == result.OperationConfigSet:
 			message = "invalid configuration command arguments"
 		}
-		return c.fail(operationName, containsJSONFlag(args), result.CodeInvalidRequest, message, nil)
+		return c.fail(operationName, containsJSONFlag(args), result.CodeInvalidRequest, message, details)
 	}
 	return exitCode
 }

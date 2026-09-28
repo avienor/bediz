@@ -93,9 +93,19 @@
 - `CHANGELOG.md` under Unreleased. Tests.
 - The live-verification guide's installed-families list.
 
-**Status:** ready-for-agent
+**Status:** implemented
 
-- [ ] `generate` with an SDXL main model and a Source Image produces image-to-image outputs through one tested enqueue, with the recorded dimensions, strength, metadata, and receipt.
-- [ ] A `path` source is uploaded once, only after every check, and is reported on every later failure without being deleted.
-- [ ] Anima and FLUX.1 sources fail as `unsupported_capability` before any upload, and text-to-image behavior and receipts are unchanged.
-- [ ] `doctor`, `ui_sync_partial`, ADR-0023, `CONTEXT.md`, the V1 spec, and `CHANGELOG.md` reflect the behavior verified live, and every unavailable live step is reported.
+- [x] `generate` with an SDXL main model and a Source Image produces image-to-image outputs through one tested enqueue, with the recorded dimensions, strength, metadata, and receipt.
+- [x] A `path` source is uploaded once, only after every check, and is reported on every later failure without being deleted.
+- [x] Anima and FLUX.1 sources fail as `unsupported_capability` before any upload, and text-to-image behavior and receipts are unchanged.
+- [x] `doctor`, `ui_sync_partial`, ADR-0023, `CONTEXT.md`, the V1 spec, and `CHANGELOG.md` reflect the behavior verified live, and every unavailable live step is reported.
+
+## Comments
+
+- 2026-09-28: `curl -fsS http://127.0.0.1:9090/api/v1/app/version` returned 6.14.1. The live OpenAPI exposes the required `img_resize`, `i2l`, `denoise_latents.latents`, and `core_metadata` source fields. Four versioned SDXL enqueue fixtures cover no resize, resize, VAE override, and Output Board.
+- 2026-09-28: `go run ./cmd/bediz generate --model ba02e32a-bc3b-41e7-bb18-ed7678ee5765 --prompt 'soft watercolor landscape' --image 1980d1e5-0db0-4cc0-975a-2f0e39f11780.png --strength 0.55 --steps 10 --seed 12345 --timeout 5m --url http://127.0.0.1:9090 --json` completed. Output `fe440f14-a9e1-49eb-8d58-75254f7054fa.png` was 1536 × 256, matching the receipt; metadata recorded `sdxl_img2img`, strength 0.55, and the source image name.
+- 2026-09-28: PNG path `/tmp/bediz-img2img-02-live/source-nonaligned.png` (769 × 513) was uploaded once as `2c134f5a-ed10-44b6-b7b0-8d05851ed851.png`; waited output `dbd08026-30ff-4125-b8fb-0d3aa3f3b135.png` was resized to 768 × 512. JPEG path `/tmp/bediz-img2img-02-live/source-aligned.jpg` (768 × 768) was uploaded once as `022e859c-e33e-48e4-bde0-1d5fbf4deaf4.png`; waited output `ffbfe475-e674-4703-b9a6-2156d95ab9d7.png` stayed 768 × 768. Both receipts recorded the locally read dimensions. The commands used the same model and prompt as above with `--image-path`, `--strength 0.6`, `--steps 8`, and seeds 20001 and 20002 respectively.
+- 2026-09-28: A waited `--image 1980d1e5-0db0-4cc0-975a-2f0e39f11780.png --width 768 --height 512 --strength 0.7 --steps 8 --seed 30001 --output-count 2` request completed in one batch. Item/seed/image order was 113/30001/`d5f3ad41-35a4-4fb7-8d3e-f63ba4270d0a.png`, then 112/30002/`84b9168b-c960-46a3-98f2-3035f9eef50c.png`; both outputs were 768 × 512.
+- 2026-09-28: `go run ./cmd/bediz doctor --url http://127.0.0.1:9090 --json` reported `generate/sdxl/img2img` compatible with `ui_sync: partial` and all three text-to-image entries compatible. The Brave automation tab showed Generate after Recall with `Juggernaut-XL-v9`, prompt `img2img recall verification`, 768 × 512, 8 steps, and seed 30001. A second Recall changed Generate to 512 × 512; the empty Canvas retained its existing 2512 × 416 bounding box. The output metadata panel displayed `Image to image strength: 0.7` with a Recall action; the strength's internal UI state was not directly observable after pressing it.
+- 2026-09-28: `BEDIZ_E2E_URL=http://127.0.0.1:9090 go test -count=1 -v ./e2e -run '^TestLiveGate$'` passed all subtests. Its new SDXL image-to-image case cleaned uploaded source `fb79a6f5-ef4f-487e-bce9-d26799747952.png` and output `9904ac82-a771-4526-ab2e-71d5300067c1.png`. No live step was unavailable. Ad hoc gallery images left for optional removal are `fe440f14-a9e1-49eb-8d58-75254f7054fa.png`, `2c134f5a-ed10-44b6-b7b0-8d05851ed851.png`, `dbd08026-30ff-4125-b8fb-0d3aa3f3b135.png`, `022e859c-e33e-48e4-bde0-1d5fbf4deaf4.png`, `ffbfe475-e674-4703-b9a6-2156d95ab9d7.png`, `d5f3ad41-35a4-4fb7-8d3e-f63ba4270d0a.png`, and `84b9168b-c960-46a3-98f2-3035f9eef50c.png`.
+- 2026-09-28: `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify` passed.

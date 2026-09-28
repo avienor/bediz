@@ -7,7 +7,7 @@ Read this before exercising Bediz against the local InvokeAI baseline. The opt-i
 - InvokeAI 6.14.1 at `http://127.0.0.1:9090`, root `/home/nyx/Workspace/image-studio/invokeai`, Python environment managed by `uv` in its `.venv`.
 - Check `curl -fsS http://127.0.0.1:9090/api/v1/app/version` first; an `invokeai-web` process is usually already running. Start one only when port 9090 is free, with `/home/nyx/Workspace/image-studio/start-invokeai.sh`, and wait for that endpoint to answer.
 - GPU: RTX 4060 with 8 GB VRAM. Use 768 × 768 and one output for ad-hoc generations; use larger sizes only when the behaviour under test needs them. An out-of-memory failure is an environment limit to report, not a graph defect.
-- Installed families: Anima (main, VAE, Qwen3 encoder, two LLLite ControlNets) and SDXL (main `Juggernaut-XL-v9` and VAE `sdxl-vae-fp16-fix`, both in diffusers format, installed from the `Juggernaut XL v9` starter). `bediz models list --json` is the current truth.
+- Installed families: Anima (main, VAE, Qwen3 encoder, two LLLite ControlNets); SDXL (main `Juggernaut-XL-v9` and VAE `sdxl-vae-fp16-fix`, both in diffusers format, installed from the `Juggernaut XL v9` starter); and FLUX.1 dev and schnell BnB NF4, with a T5 int8 encoder, CLIP Embed, and `FLUX.1-schnell_ae`. `bediz models list --json` is the current truth.
 
 ## InvokeAI source of truth
 
