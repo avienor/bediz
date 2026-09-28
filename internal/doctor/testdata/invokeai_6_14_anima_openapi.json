@@ -201,11 +201,24 @@
           "scheduler": {},
           "transformer": {},
           "positive_conditioning": {},
-          "negative_conditioning": {}
+          "negative_conditioning": {},
+          "latents": {}
+        }
+      },
+      "AnimaImageToLatentsInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "type": {
+            "const": "anima_i2l"
+          },
+          "image": {},
+          "vae": {}
         }
       },
       "CoreMetadataInvocation": {
-		"additionalProperties": true,
+        "additionalProperties": true,
         "properties": {
           "id": {},
           "is_intermediate": {},
@@ -226,7 +239,9 @@
           "seed": {},
           "positive_prompt": {},
           "cfg_rescale_multiplier": {},
-          "rand_device": {}
+          "rand_device": {},
+          "strength": {},
+          "init_image": {}
         }
       },
       "RecallParameter": {
@@ -599,6 +614,20 @@
           }
         }
       },
+      "ImageResizeInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "image": {},
+          "width": {},
+          "height": {},
+          "resample_mode": {},
+          "type": {
+            "const": "img_resize"
+          }
+        }
+      },
       "ImageToLatentsInvocation": {
         "properties": {
           "id": {},
@@ -690,6 +719,28 @@
           "mask": {},
           "type": {
             "const": "compel"
+          }
+        }
+      },
+      "FluxVaeEncodeInvocation": {
+        "properties": {
+          "id": {},
+          "is_intermediate": {},
+          "use_cache": {},
+          "image": {},
+          "vae": {},
+          "type": {
+            "const": "flux_vae_encode"
+          }
+        }
+      },
+      "ImageOutput": {
+        "properties": {
+          "image": {},
+          "width": {},
+          "height": {},
+          "type": {
+            "const": "image_output"
           }
         }
       }

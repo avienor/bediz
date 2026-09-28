@@ -98,6 +98,7 @@ type doctorData struct {
 	Capabilities []struct {
 		Operation  string   `json:"operation"`
 		Family     string   `json:"family"`
+		Mode       string   `json:"mode"`
 		Compatible *bool    `json:"compatible"`
 		UISync     string   `json:"ui_sync"`
 		Failures   []string `json:"failures"`
@@ -234,11 +235,14 @@ type resolvedGenerationSettingsData struct {
 	ModelKey       string            `json:"model_key"`
 	ComponentKeys  map[string]string `json:"component_keys"`
 	Seeds          []uint32          `json:"seeds"`
+	Strength       float64           `json:"strength"`
 }
 
 type executionReceiptData struct {
 	SubmittedRequest generationRequestData          `json:"submitted_request"`
 	ResolvedSettings resolvedGenerationSettingsData `json:"resolved_settings"`
+	SourceImage      imageReference                 `json:"source_image"`
+	SourceUploaded   bool                           `json:"source_uploaded"`
 	Queue            struct {
 		QueueID string `json:"queue_id"`
 		BatchID string `json:"batch_id"`
@@ -382,9 +386,10 @@ func TestLiveGate(t *testing.T) {
 				t.Errorf("doctor returned an unsatisfied or incomplete model requirement: %#v", requirement)
 			}
 		}
-		wantOperations := []string{"auth.huggingface.login", "auth.huggingface.logout", "auth.huggingface.status", "boards.create", "boards.get", "boards.list", "generate", "generate", "generate", "images.delete", "images.download", "images.get", "images.list", "images.upload", "models.delete", "models.install", "models.install", "models.list", "models.scan", "models.status", "queue.cancel", "queue.clear", "queue.get", "queue.list", "queue.wait", "recall", "upscale", "upscale"}
+		wantOperations := []string{"auth.huggingface.login", "auth.huggingface.logout", "auth.huggingface.status", "boards.create", "boards.get", "boards.list", "generate", "generate", "generate", "generate", "generate", "generate", "images.delete", "images.download", "images.get", "images.list", "images.upload", "models.delete", "models.install", "models.install", "models.list", "models.scan", "models.status", "queue.cancel", "queue.clear", "queue.get", "queue.list", "queue.wait", "recall", "upscale", "upscale"}
 		operations := make([]string, 0, len(data.Capabilities))
 		generateFamilies := map[string]bool{}
+		generateModes := map[string]bool{}
 		upscaleFamilies := map[string]bool{}
 		for _, capability := range data.Capabilities {
 			if capability.Compatible == nil || !*capability.Compatible || capability.Failures == nil || len(capability.Failures) != 0 {
@@ -393,6 +398,7 @@ func TestLiveGate(t *testing.T) {
 			operations = append(operations, capability.Operation)
 			if capability.Operation == "generate" {
 				generateFamilies[capability.Family] = true
+				generateModes[capability.Family+"/"+capability.Mode] = true
 				if capability.UISync != "partial" {
 					t.Errorf("generate ui_sync = %q, want partial", capability.UISync)
 				}
@@ -409,6 +415,9 @@ func TestLiveGate(t *testing.T) {
 		}
 		if !generateFamilies["anima"] || !generateFamilies["sdxl"] || !generateFamilies["flux"] || len(generateFamilies) != 3 {
 			t.Errorf("doctor generate families = %#v, want Anima, SDXL, and FLUX.1", generateFamilies)
+		}
+		if !generateModes["anima/txt2img"] || !generateModes["anima/img2img"] || !generateModes["sdxl/txt2img"] || !generateModes["sdxl/img2img"] || !generateModes["flux/txt2img"] || !generateModes["flux/img2img"] || len(generateModes) != 6 {
+			t.Errorf("doctor generate modes = %#v, want text and image modes for all three families", generateModes)
 		}
 		if data.UISync["generate"] != "partial" || data.UISync["upscale"] != "partial" {
 			t.Errorf("doctor UI synchronization = %#v, want partial generation and upscale", data.UISync)
@@ -698,6 +707,109 @@ func TestLiveGate(t *testing.T) {
 	}) {
 		return
 	}
+	if !t.Run("SDXL image-to-image uploads a source and self-cleans", func(t *testing.T) {
+		fixture := writeUniquePNGSize(t, 768)
+		envelope, exitCode := executeJSONCommandContext(t, t.Context(), binary, target, "generate", "--model", sdxlMain,
+			"--prompt", "a tiny blue teacup on white background", "--image-path", fixture.Path,
+			"--strength", "0.75", "--steps", "2", "--seed", "47")
+		registerGeneratedImageCleanup(t, binary, target, envelope.Data)
+		var source struct {
+			SourceImage    imageReference `json:"source_image"`
+			SourceUploaded bool           `json:"source_uploaded"`
+			Outputs        []struct {
+				Image imageReference `json:"image"`
+				Seed  uint32         `json:"seed"`
+			} `json:"outputs"`
+			ResolvedSettings struct {
+				Width    int     `json:"width"`
+				Height   int     `json:"height"`
+				Strength float64 `json:"strength"`
+			} `json:"resolved_settings"`
+		}
+		_ = json.Unmarshal(envelope.Data, &source)
+		if source.SourceImage.ImageName == "" && len(envelope.Error) > 0 {
+			var failure struct {
+				Details struct {
+					SourceImage imageReference `json:"source_image"`
+				} `json:"details"`
+			}
+			_ = json.Unmarshal(envelope.Error, &failure)
+			source.SourceImage = failure.Details.SourceImage
+		}
+		if source.SourceImage.ImageName != "" {
+			imageName := source.SourceImage.ImageName
+			t.Logf("uploaded source cleanup evidence: image_name=%q", imageName)
+			t.Cleanup(func() { deleteBackendImage(t, target, imageName); assertImageRemoved(t, binary, target, imageName) })
+		}
+		if exitCode != 0 {
+			t.Fatalf("image-to-image exit %d: %#v", exitCode, envelope)
+		}
+		assertSuccessEnvelope(t, envelope, "generate", "ui_sync_partial")
+		if !source.SourceUploaded || source.SourceImage.Width != 768 || source.SourceImage.Height != 768 || source.ResolvedSettings.Width != 768 || source.ResolvedSettings.Height != 768 || source.ResolvedSettings.Strength != 0.75 || len(source.Outputs) != 1 || source.Outputs[0].Seed != 47 {
+			t.Fatalf("image-to-image receipt: %#v", source)
+		}
+		assertGeneratedImageReference(t, target, source.Outputs[0].Image, 768, 768)
+	}) {
+		return
+	}
+	if !t.Run("Anima image-to-image uploads a source and self-cleans", func(t *testing.T) {
+		fixture := writeUniquePNGSize(t, 768)
+		envelope, exitCode := executeJSONCommandContext(t, t.Context(), binary, target, "generate", "--model", animaModels.Main,
+			"--prompt", "a bright red dot on a white field", "--image-path", fixture.Path,
+			"--strength", "0.75", "--steps", "2", "--seed", "48")
+		registerGeneratedImageCleanup(t, binary, target, envelope.Data)
+		var source struct {
+			SourceImage    imageReference `json:"source_image"`
+			SourceUploaded bool           `json:"source_uploaded"`
+			Outputs        []struct {
+				Image imageReference `json:"image"`
+				Seed  uint32         `json:"seed"`
+			} `json:"outputs"`
+			ResolvedSettings struct {
+				Width         int               `json:"width"`
+				Height        int               `json:"height"`
+				Strength      float64           `json:"strength"`
+				ComponentKeys map[string]string `json:"component_keys"`
+			} `json:"resolved_settings"`
+		}
+		_ = json.Unmarshal(envelope.Data, &source)
+		if source.SourceImage.ImageName == "" && len(envelope.Error) > 0 {
+			var failure struct {
+				Details struct {
+					SourceImage imageReference `json:"source_image"`
+				} `json:"details"`
+			}
+			_ = json.Unmarshal(envelope.Error, &failure)
+			source.SourceImage = failure.Details.SourceImage
+		}
+		if source.SourceImage.ImageName != "" {
+			imageName := source.SourceImage.ImageName
+			t.Logf("uploaded Anima source cleanup evidence: image_name=%q", imageName)
+			t.Cleanup(func() { deleteBackendImage(t, target, imageName); assertImageRemoved(t, binary, target, imageName) })
+		}
+		if exitCode != 0 {
+			t.Fatalf("Anima image-to-image exit %d: %#v", exitCode, envelope)
+		}
+		assertSuccessEnvelope(t, envelope, "generate", "ui_sync_partial")
+		if !source.SourceUploaded || source.SourceImage.Width != 768 || source.SourceImage.Height != 768 || source.ResolvedSettings.Width != 768 || source.ResolvedSettings.Height != 768 || source.ResolvedSettings.Strength != 0.75 || source.ResolvedSettings.ComponentKeys["vae"] != animaModels.VAE || source.ResolvedSettings.ComponentKeys["qwen3_encoder"] != animaModels.Qwen3Encoder || len(source.Outputs) != 1 || source.Outputs[0].Seed != 48 {
+			t.Fatalf("Anima image-to-image receipt: %#v", source)
+		}
+		assertGeneratedImageReference(t, target, source.Outputs[0].Image, 768, 768)
+		response := requestImageBackend(t, t.Context(), http.MethodGet, target, source.Outputs[0].Image.ImageName, "metadata")
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("Anima image metadata: %s: %s", response.Status, response.Body)
+		}
+		var metadata struct {
+			GenerationMode string  `json:"generation_mode"`
+			Strength       float64 `json:"strength"`
+			InitImage      string  `json:"init_image"`
+		}
+		if err := json.Unmarshal(response.Body, &metadata); err != nil || metadata.GenerationMode != "anima_img2img" || metadata.Strength != 0.75 || metadata.InitImage != source.SourceImage.ImageName {
+			t.Fatalf("Anima image metadata=%#v error=%v", metadata, err)
+		}
+	}) {
+		return
+	}
 	if !t.Run("SDXL upscale produces a verified receipt and self-cleans", func(t *testing.T) {
 		runLiveUpscale(t, binary, target, sdxlMain, upscaleModel, tileControlNet, 45)
 	}) {
@@ -735,6 +847,54 @@ func TestLiveGate(t *testing.T) {
 			t.Fatalf("FLUX.1 Handoff warning = %#v", receipt.Warnings)
 		}
 		assertGeneratedImageReference(t, target, receipt.Outputs[0].Image, 768, 768)
+	}) {
+		return
+	}
+	if !t.Run("FLUX.1 schnell image-to-image uploads a source and self-cleans", func(t *testing.T) {
+		fixture := writeUniquePNGSize(t, 768)
+		envelope, exitCode := executeJSONCommandContext(t, t.Context(), binary, target, "generate", "--model", fluxSchnell,
+			"--prompt", "a tiny red teacup on white background", "--image-path", fixture.Path, "--strength", "0.75", "--seed", "49")
+		registerGeneratedImageCleanup(t, binary, target, envelope.Data)
+		var receipt executionReceiptData
+		_ = json.Unmarshal(envelope.Data, &receipt)
+		if receipt.SourceImage.ImageName == "" && len(envelope.Error) > 0 {
+			var failure struct {
+				Details struct {
+					SourceImage imageReference `json:"source_image"`
+				} `json:"details"`
+			}
+			_ = json.Unmarshal(envelope.Error, &failure)
+			receipt.SourceImage = failure.Details.SourceImage
+		}
+		if receipt.SourceImage.ImageName != "" {
+			imageName := receipt.SourceImage.ImageName
+			t.Logf("uploaded FLUX.1 source cleanup evidence: image_name=%q", imageName)
+			t.Cleanup(func() { deleteBackendImage(t, target, imageName); assertImageRemoved(t, binary, target, imageName) })
+		}
+		if exitCode != 0 {
+			t.Fatalf("FLUX.1 image-to-image exit %d: %#v", exitCode, envelope)
+		}
+		assertSuccessEnvelope(t, envelope, "generate", "ui_sync_partial")
+		if !receipt.SourceUploaded || receipt.SourceImage.Width != 768 || receipt.SourceImage.Height != 768 || receipt.ResolvedSettings.Width != 768 || receipt.ResolvedSettings.Height != 768 || receipt.ResolvedSettings.Strength != 0.75 || receipt.ResolvedSettings.ModelKey != fluxSchnell || receipt.ResolvedSettings.Steps != 4 || len(receipt.ResolvedSettings.ComponentKeys) != 3 || !slices.Equal(receipt.ResolvedSettings.Seeds, []uint32{49}) || len(receipt.Outputs) != 1 || receipt.Outputs[0].Seed != 49 || receipt.Outputs[0].ItemID != receipt.Queue.ItemIDs[0] {
+			t.Fatalf("FLUX.1 image-to-image receipt: %#v", receipt)
+		}
+		if len(receipt.Warnings) != 1 || !slices.Equal(receipt.Warnings[0].Details.NotRestored, []string{"scheduler", "vae", "t5_encoder", "clip_embed", "output_count", "board_id", "source_image", "strength"}) {
+			t.Fatalf("FLUX.1 image-to-image warning: %#v", receipt.Warnings)
+		}
+		assertGeneratedImageReference(t, target, receipt.Outputs[0].Image, 768, 768)
+		response := requestImageBackend(t, t.Context(), http.MethodGet, target, receipt.Outputs[0].Image.ImageName, "metadata")
+		var metadata struct {
+			GenerationMode string  `json:"generation_mode"`
+			Strength       float64 `json:"strength"`
+			InitImage      string  `json:"init_image"`
+			Seed           uint32  `json:"seed"`
+		}
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("FLUX.1 image metadata: %s", response.Status)
+		}
+		if err := json.Unmarshal(response.Body, &metadata); err != nil || metadata.GenerationMode != "flux_img2img" || metadata.Strength != 0.75 || metadata.InitImage != receipt.SourceImage.ImageName || metadata.Seed != 49 {
+			t.Fatalf("FLUX.1 image metadata=%#v error=%v", metadata, err)
+		}
 	}) {
 		return
 	}

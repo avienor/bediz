@@ -101,6 +101,14 @@ func TestGenerateFLUXFlagsAndDocumentMatchWithVariantReceipts(t *testing.T) {
 				}
 				data := envelope["data"].(map[string]any)
 				settings := data["resolved_settings"].(map[string]any)
+				for _, field := range []string{"source_image", "source_uploaded"} {
+					if _, added := data[field]; added {
+						t.Errorf("text-to-image receipt contains %s", field)
+					}
+				}
+				if _, added := settings["strength"]; added {
+					t.Error("text-to-image settings contain strength")
+				}
 				_, hasGuidance := settings["guidance"]
 				if settings["steps"] != float64(tc.steps) || hasGuidance != tc.guidance {
 					t.Errorf("settings = %#v", settings)

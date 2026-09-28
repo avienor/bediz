@@ -2,6 +2,7 @@ package generation
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/avienor/bediz/internal/graphops"
 )
@@ -43,6 +44,13 @@ type fluxMetadataNode struct {
 	Scheduler      string         `json:"scheduler"`
 	Model          modelReference `json:"model"`
 	VAE            modelReference `json:"vae"`
+	Strength       *float64       `json:"strength,omitzero"`
+	InitImage      string         `json:"init_image,omitempty"`
+}
+
+type fluxEncodeNode struct {
+	nodeAttributes
+	Image *imageField `json:"image,omitzero"`
 }
 
 type fluxDecodeNode struct {
@@ -50,7 +58,7 @@ type fluxDecodeNode struct {
 	Board *boardField `json:"board,omitempty"`
 }
 
-// CompileFLUX produces the stock InvokeAI 6.14.1 FLUX.1 text-to-image graph.
+// CompileFLUX produces the tested InvokeAI 6.14.1 FLUX.1 generation graph.
 func CompileFLUX(resolved Resolution) (EnqueueRequest, error) {
 	r := resolved.Request
 	if r.Width == nil || r.Height == nil || r.Steps == nil || r.Scheduler == nil || r.Seed == nil || r.OutputCount == nil {
@@ -90,6 +98,28 @@ func CompileFLUX(resolved Resolution) (EnqueueRequest, error) {
 		edge("seed", "value", "metadata", "seed"),
 		edge("positive_prompt", "value", "metadata", "positive_prompt"),
 		edge("metadata", "metadata", "decode", "metadata"),
+	}
+	if r.Source != nil {
+		if resolved.SourceImage.ImageName == "" || r.Strength == nil {
+			return EnqueueRequest{}, fmt.Errorf("compile FLUX.1 image-to-image graph: source and strength must be resolved")
+		}
+		metadata := nodes["metadata"].(fluxMetadataNode)
+		metadata.GenerationMode = "flux_img2img"
+		metadata.Strength = r.Strength
+		metadata.InitImage = resolved.SourceImage.ImageName
+		nodes["metadata"] = metadata
+		denoise := nodes["denoise"].(fluxDenoiseNode)
+		denoise.DenoisingStart = 1 - math.Pow(*r.Strength, 0.2)
+		nodes["denoise"] = denoise
+		encoder := fluxEncodeNode{ID: "i2l", IsIntermediate: true, UseCache: true, Type: "flux_vae_encode"}
+		if resolved.SourceImage.Width != *r.Width || resolved.SourceImage.Height != *r.Height {
+			nodes["resize"] = imageResizeNode{ID: "resize", IsIntermediate: true, UseCache: true, Type: "img_resize", Image: imageField{ImageName: resolved.SourceImage.ImageName}, Width: *r.Width, Height: *r.Height, ResampleMode: "bicubic"}
+			edges = append(edges, edge("resize", "image", "i2l", "image"))
+		} else {
+			encoder.Image = new(imageField{ImageName: resolved.SourceImage.ImageName})
+		}
+		nodes["i2l"] = encoder
+		edges = append(edges, edge("model_loader", "vae", "i2l", "vae"), edge("i2l", "latents", "denoise", "latents"))
 	}
 	return EnqueueRequest{Batch: Batch{Origin: "generate", Destination: "generate", Graph: Graph{ID: "bediz_flux_v1", Nodes: nodes, Edges: edges}, Data: graphops.SeedBatchData("seed", "value", resolved.Seeds), Runs: 1}}, nil
 }

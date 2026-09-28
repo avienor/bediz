@@ -14,6 +14,7 @@ import (
 	"github.com/avienor/bediz/internal/operation"
 	"github.com/avienor/bediz/internal/profiles"
 	"github.com/avienor/bediz/internal/result"
+	"github.com/avienor/bediz/internal/sourceimage"
 )
 
 type QueueReceipt = graphops.QueueReceipt
@@ -79,14 +80,11 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	if err := ValidateRequest(effective); err != nil {
 		return ExecutionReceipt{}, err
 	}
-	var upload *images.PreparedUpload
-	if request.Source.Type == "path" {
-		var err error
-		if upload, err = images.PrepareUpload(request.Source.Reference); err != nil {
-			return ExecutionReceipt{}, err
-		}
-		defer func() { _ = upload.Close() }()
+	prepared, err := sourceimage.Prepare(request.Source)
+	if err != nil {
+		return ExecutionReceipt{}, err
 	}
+	defer func() { _ = prepared.Close() }()
 	if err := capability.RequireSupportedVersion(ctx, client); err != nil {
 		return ExecutionReceipt{}, err
 	}
@@ -110,41 +108,16 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	if err := graphops.CheckInvocations(ctx, client, family.entry().Invocations); err != nil {
 		return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
 	}
-	if upload != nil {
-		source, err := upload.Send(ctx, client)
-		if err != nil {
-			return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
-		}
-		receipt, err := submitSource(ctx, client, request, resolved, source, true, profileWarnings)
-		if err != nil {
-			return receipt, &UploadedSourceError{Source: source, Err: withProfileWarnings(err, profileWarnings)}
-		}
-		return receipt, nil
-	}
-	imageResult, err := images.Get(ctx, client, images.GetRequest{SchemaVersion: 1, ImageName: request.Source.Reference})
+	source, err := prepared.Resolve(ctx, client)
 	if err != nil {
 		return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
 	}
-	source := imageResult.Image
-	if source.ImageName != request.Source.Reference {
-		return ExecutionReceipt{}, withProfileWarnings(&httpclient.InvalidResponseError{Err: fmt.Errorf("source image has contradictory name %q; expected %q", source.ImageName, request.Source.Reference)}, profileWarnings)
+	receipt, err := submitSource(ctx, client, request, resolved, source.Image, source.Uploaded, profileWarnings)
+	if err != nil && source.Uploaded {
+		return receipt, &sourceimage.UploadedError{Source: source.Image, Err: withProfileWarnings(err, profileWarnings)}
 	}
-	receipt, err := submitSource(ctx, client, request, resolved, source, false, profileWarnings)
 	return receipt, withProfileWarnings(err, profileWarnings)
 }
-
-// UploadedSourceError reports a failure after Bediz uploaded the local source
-// image. The uploaded image is retained and never deleted automatically.
-type UploadedSourceError struct {
-	Source images.Reference
-	Err    error
-}
-
-func (e *UploadedSourceError) Error() string {
-	return fmt.Sprintf("%v (uploaded source image %s was retained)", e.Err, e.Source.ImageName)
-}
-
-func (e *UploadedSourceError) Unwrap() error { return e.Err }
 
 func submitSource(ctx context.Context, client *httpclient.Client, request Request, resolved Resolution, source images.Reference, uploaded bool, warnings []result.Warning) (ExecutionReceipt, error) {
 	if source.Width < 1 || source.Height < 1 || source.Width > math.MaxInt / *resolved.Request.Scale || source.Height > math.MaxInt / *resolved.Request.Scale {
@@ -205,7 +178,7 @@ func (e *ScaleNotAppliedError) Error() string {
 func Wait(ctx context.Context, client *httpclient.Client, accepted ExecutionReceipt, options WaitOptions) (ExecutionReceipt, error) {
 	receipt, err := wait(ctx, client, accepted, options)
 	if err != nil && accepted.SourceUploaded {
-		return receipt, &UploadedSourceError{Source: accepted.SourceImage, Err: err}
+		return receipt, &sourceimage.UploadedError{Source: accepted.SourceImage, Err: err}
 	}
 	return receipt, err
 }

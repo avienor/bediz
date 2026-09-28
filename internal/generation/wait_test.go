@@ -10,7 +10,9 @@ import (
 
 	"github.com/avienor/bediz/internal/generation"
 	"github.com/avienor/bediz/internal/httpclient"
+	"github.com/avienor/bediz/internal/images"
 	"github.com/avienor/bediz/internal/operation"
+	"github.com/avienor/bediz/internal/sourceimage"
 )
 
 func TestWaitRejectsMissingOrContradictorySeedMetadata(t *testing.T) {
@@ -98,6 +100,50 @@ func TestWaitReportsACompletedThenFailedBatchAsFailure(t *testing.T) {
 	failure, ok := errors.AsType[*operation.ItemFailureError](err)
 	if !ok || failure.ItemID != 22 || failure.Status != "failed" || len(receipt.Outputs) != 1 {
 		t.Fatalf("receipt = %#v, error = %#v", receipt, err)
+	}
+	accepted := acceptedBatchReceipt([]int{23, 22}, []uint32{42, 43})
+	accepted.SourceImage = &images.Reference{ImageName: "uploaded.png"}
+	accepted.SourceUploaded = new(true)
+	_, err = generation.Wait(t.Context(), client, accepted, generation.WaitOptions{})
+	uploaded, hasSource := errors.AsType[*sourceimage.UploadedError](err)
+	if !hasSource || uploaded.Source.ImageName != "uploaded.png" {
+		t.Fatalf("post-upload wait error = %#v", err)
+	}
+}
+
+func TestWaitImageToImageIgnoresIntermediateResizeOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/queue/default/i/23":
+			_ = json.MarshalWrite(w, map[string]any{
+				"item_id": 23, "queue_id": "default", "batch_id": "batch-2", "session_id": "session-23",
+				"status": "completed", "priority": 0, "created_at": "2026-01-01", "updated_at": "2026-01-01",
+				"field_values": []map[string]any{{"node_path": "seed", "field_name": "value", "value": 42}},
+				"session": map[string]any{"results": map[string]any{
+					"resize": map[string]any{"type": "image_output", "image": map[string]any{"image_name": "resize.png"}},
+					"decode": map[string]any{"type": "image_output", "image": map[string]any{"image_name": "final.png"}},
+				}},
+			})
+		case "/api/v1/images/i/resize.png":
+			image := testImagePayload("resize.png")
+			image["is_intermediate"] = true
+			_ = json.MarshalWrite(w, image)
+		case "/api/v1/images/i/final.png":
+			_ = json.MarshalWrite(w, testImagePayload("final.png"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := acceptedBatchReceipt([]int{23}, []uint32{42})
+	receipt.SourceImage = &images.Reference{ImageName: "source.png"}
+	completed, err := generation.Wait(t.Context(), client, receipt, generation.WaitOptions{})
+	if err != nil || len(completed.Outputs) != 1 || completed.Outputs[0].Image.ImageName != "final.png" {
+		t.Fatalf("receipt=%#v err=%v", completed, err)
 	}
 }
 

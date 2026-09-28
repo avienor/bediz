@@ -2,12 +2,15 @@ package generation_test
 
 import (
 	json "encoding/json/v2"
+	"math"
 	"os"
 	"reflect"
 	"slices"
 	"testing"
 
 	"github.com/avienor/bediz/internal/generation"
+	"github.com/avienor/bediz/internal/images"
+	"github.com/avienor/bediz/internal/sourceimage"
 )
 
 func TestCompileFLUXMatchesInvokeAI614Fixtures(t *testing.T) {
@@ -50,6 +53,55 @@ func TestCompileFLUXMatchesInvokeAI614Fixtures(t *testing.T) {
 	}
 }
 
+func TestCompileFLUXImageToImageMatchesInvokeAI614Fixtures(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		main         generation.ModelIdentifier
+		guidance     *float64
+		sourceWidth  int
+		sourceHeight int
+		strength     float64
+	}{
+		{"dev_no_resize", fluxDev, new(4.0), 768, 512, 0.75},
+		{"dev_resize", fluxDev, new(4.0), 1001, 750, 1},
+		{"schnell_no_resize", fluxSchnell, nil, 768, 512, 0.01},
+		{"schnell_resize", fluxSchnell, nil, 1001, 750, 0.5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := generation.Request{SchemaVersion: 1, Model: tc.main.Key, PositivePrompt: "a lighthouse", Width: new(768), Height: new(512), Steps: new(4), Scheduler: new("euler"), Guidance: tc.guidance, Seed: new(uint32(41)), OutputCount: new(1), Source: &sourceimage.Source{Type: "image", Reference: "source.png"}, Strength: new(tc.strength)}
+			compiled, err := generation.CompileFLUX(generation.Resolution{Request: request, Models: generation.ResolvedModels{Main: tc.main, VAE: fluxVAE, T5Encoder: fluxT5, CLIPEmbed: fluxCLIP}, Seeds: []uint32{41}, SourceImage: images.Reference{ImageName: "source.png", Width: tc.sourceWidth, Height: tc.sourceHeight}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := json.Marshal(compiled)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixture, err := os.ReadFile("testdata/flux_6_14_img2img_" + tc.name + "_enqueue.json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var actual, expected map[string]any
+			if err := json.Unmarshal(encoded, &actual); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(fixture, &expected); err != nil {
+				t.Fatal(err)
+			}
+			actualDenoise := actual["batch"].(map[string]any)["graph"].(map[string]any)["nodes"].(map[string]any)["denoise"].(map[string]any)
+			expectedDenoise := expected["batch"].(map[string]any)["graph"].(map[string]any)["nodes"].(map[string]any)["denoise"].(map[string]any)
+			// Frontend exponentiation and Go math.Pow can differ by one ULP.
+			if math.Abs(actualDenoise["denoising_start"].(float64)-expectedDenoise["denoising_start"].(float64)) > 1e-15 {
+				t.Fatalf("denoising_start=%v, want frontend value %v", actualDenoise["denoising_start"], expectedDenoise["denoising_start"])
+			}
+			actualDenoise["denoising_start"] = expectedDenoise["denoising_start"]
+			if !reflect.DeepEqual(actual, expected) {
+				t.Fatalf("graph differs from InvokeAI 6.14.1 %s fixture\ngot: %s\nwant: %s", tc.name, encoded, fixture)
+			}
+		})
+	}
+}
+
 func TestFLUXFixturesUseInvokeAI614OpenAPIVocabulary(t *testing.T) {
 	encoded, err := os.ReadFile("../doctor/testdata/invokeai_6_14_anima_openapi.json")
 	if err != nil {
@@ -65,9 +117,9 @@ func TestFLUXFixturesUseInvokeAI614OpenAPIVocabulary(t *testing.T) {
 	if err := json.Unmarshal(encoded, &vocabulary); err != nil {
 		t.Fatal(err)
 	}
-	inputSchema := map[string]string{"model_loader": "FluxModelLoaderInvocation", "positive_prompt": "StringInvocation", "positive_conditioning": "FluxTextEncoderInvocation", "seed": "IntegerInvocation", "denoise": "FluxDenoiseInvocation", "metadata": "CoreMetadataInvocation", "decode": "FluxVaeDecodeInvocation"}
-	outputSchema := map[string]string{"model_loader": "FluxModelLoaderOutput", "positive_prompt": "StringOutput", "positive_conditioning": "FluxConditioningOutput", "seed": "IntegerOutput", "denoise": "LatentsOutput", "metadata": "MetadataOutput"}
-	for _, path := range []string{"testdata/flux_6_14_dev_enqueue.json", "testdata/flux_6_14_dev_board_enqueue.json", "testdata/flux_6_14_schnell_enqueue.json", "testdata/flux_6_14_schnell_board_enqueue.json"} {
+	inputSchema := map[string]string{"model_loader": "FluxModelLoaderInvocation", "positive_prompt": "StringInvocation", "positive_conditioning": "FluxTextEncoderInvocation", "seed": "IntegerInvocation", "denoise": "FluxDenoiseInvocation", "metadata": "CoreMetadataInvocation", "decode": "FluxVaeDecodeInvocation", "i2l": "FluxVaeEncodeInvocation", "resize": "ImageResizeInvocation"}
+	outputSchema := map[string]string{"model_loader": "FluxModelLoaderOutput", "positive_prompt": "StringOutput", "positive_conditioning": "FluxConditioningOutput", "seed": "IntegerOutput", "denoise": "LatentsOutput", "metadata": "MetadataOutput", "i2l": "LatentsOutput", "resize": "ImageOutput"}
+	for _, path := range []string{"testdata/flux_6_14_dev_enqueue.json", "testdata/flux_6_14_dev_board_enqueue.json", "testdata/flux_6_14_schnell_enqueue.json", "testdata/flux_6_14_schnell_board_enqueue.json", "testdata/flux_6_14_img2img_dev_no_resize_enqueue.json", "testdata/flux_6_14_img2img_dev_resize_enqueue.json", "testdata/flux_6_14_img2img_schnell_no_resize_enqueue.json", "testdata/flux_6_14_img2img_schnell_resize_enqueue.json"} {
 		t.Run(path, func(t *testing.T) {
 			encoded, err := os.ReadFile(path)
 			if err != nil {

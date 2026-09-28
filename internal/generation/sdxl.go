@@ -45,6 +45,8 @@ type sdxlMetadataNode struct {
 	RandDevice           string          `json:"rand_device"`
 	Model                modelReference  `json:"model"`
 	VAE                  *modelReference `json:"vae,omitempty"`
+	Strength             *float64        `json:"strength,omitempty"`
+	InitImage            string          `json:"init_image,omitempty"`
 }
 
 type sdxlDecodeNode struct {
@@ -56,6 +58,13 @@ type sdxlDecodeNode struct {
 type sdxlVAELoaderNode struct {
 	nodeAttributes
 	VAEModel modelReference `json:"vae_model"`
+}
+
+type sdxlImageToLatentsNode struct {
+	nodeAttributes
+	Image             *imageField `json:"image,omitempty"`
+	FP32              bool        `json:"fp32"`
+	ColorCompensation string      `json:"color_compensation"`
 }
 
 // CompileSDXL produces the stock InvokeAI 6.14.1 SDXL text-to-image graph.
@@ -116,5 +125,26 @@ func CompileSDXL(resolved Resolution) (EnqueueRequest, error) {
 	nodes["metadata"] = metadata
 	nodes["decode"] = decode
 	edges = append(edges, edge(vaeSource, "vae", "decode", "vae"))
+	if request.Source != nil {
+		if resolved.SourceImage.ImageName == "" || request.Strength == nil {
+			return EnqueueRequest{}, fmt.Errorf("compile SDXL image-to-image graph: source and strength must be resolved")
+		}
+		metadata.GenerationMode = "sdxl_img2img"
+		metadata.Strength = request.Strength
+		metadata.InitImage = resolved.SourceImage.ImageName
+		nodes["metadata"] = metadata
+		denoise := nodes["denoise"].(sdxlDenoiseNode)
+		denoise.DenoisingStart = 1 - *request.Strength
+		nodes["denoise"] = denoise
+		encoder := sdxlImageToLatentsNode{ID: "i2l", IsIntermediate: true, UseCache: true, Type: "i2l", FP32: true, ColorCompensation: "None"}
+		if resolved.SourceImage.Width != *request.Width || resolved.SourceImage.Height != *request.Height {
+			nodes["resize"] = imageResizeNode{ID: "resize", IsIntermediate: true, UseCache: true, Type: "img_resize", Image: imageField{ImageName: resolved.SourceImage.ImageName}, Width: *request.Width, Height: *request.Height, ResampleMode: "bicubic"}
+			edges = append(edges, edge("resize", "image", "i2l", "image"))
+		} else {
+			encoder.Image = &imageField{ImageName: resolved.SourceImage.ImageName}
+		}
+		nodes["i2l"] = encoder
+		edges = append(edges, edge(vaeSource, "vae", "i2l", "vae"), edge("i2l", "latents", "denoise", "latents"))
+	}
 	return EnqueueRequest{Batch: Batch{Origin: "generate", Destination: "generate", Graph: Graph{ID: "bediz_sdxl_v1", Nodes: nodes, Edges: edges}, Data: graphops.SeedBatchData("seed", "value", resolved.Seeds), Runs: 1}}, nil
 }

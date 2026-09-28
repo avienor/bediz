@@ -9,6 +9,7 @@ import (
 	"github.com/avienor/bediz/internal/generation"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/result"
+	"github.com/avienor/bediz/internal/sourceimage"
 	"github.com/avienor/bediz/internal/synchronization"
 	"github.com/spf13/cobra"
 )
@@ -34,6 +35,9 @@ type generateOptions struct {
 	qwen3Encoder   string
 	t5Encoder      string
 	clipEmbed      string
+	image          string
+	imagePath      string
+	strength       float64
 }
 
 func (c *CLI) newGenerateCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
@@ -68,10 +72,16 @@ func (c *CLI) newGenerateCommand(exitCode *int, jsonOutput *bool) *cobra.Command
 	command.Flags().StringVar(&options.qwen3Encoder, "qwen3-encoder", "", "Qwen3 encoder key or unique name")
 	command.Flags().StringVar(&options.t5Encoder, "t5-encoder", "", "T5 encoder key or unique name")
 	command.Flags().StringVar(&options.clipEmbed, "clip-embed", "", "CLIP Embed key or unique name")
+	command.Flags().StringVar(&options.image, "image", "", "existing InvokeAI source image name")
+	command.Flags().StringVar(&options.imagePath, "image-path", "", "absolute local source image path")
+	command.Flags().Float64Var(&options.strength, "strength", 0, "image-to-image denoising strength")
 	return command
 }
 
 func (c *CLI) executeGenerate(ctx context.Context, jsonOutput bool, command *cobra.Command, options generateOptions) int {
+	if command.Flags().Changed("image") && command.Flags().Changed("image-path") {
+		return c.fail(result.OperationGenerate, jsonOutput, result.CodeInvalidRequest, "--image and --image-path cannot be combined", nil)
+	}
 	if options.waitTimeout < 0 {
 		return c.fail(result.OperationGenerate, jsonOutput, result.CodeInvalidRequest, "timeout cannot be negative", nil)
 	}
@@ -80,7 +90,7 @@ func (c *CLI) executeGenerate(ctx context.Context, jsonOutput bool, command *cob
 	}
 	operationFlags := []string{
 		"model", "profile", "prompt", "negative-prompt", "width", "height", "steps", "scheduler", "guidance",
-		"seed", "output-count", "board", "vae", "qwen3-encoder", "t5-encoder", "clip-embed",
+		"seed", "output-count", "board", "vae", "qwen3-encoder", "t5-encoder", "clip-embed", "image", "image-path", "strength",
 	}
 	fieldsSet := false
 	for _, name := range operationFlags {
@@ -94,6 +104,15 @@ func (c *CLI) executeGenerate(ctx context.Context, jsonOutput bool, command *cob
 		request.PositivePrompt = options.prompt
 		request.NegativePrompt = options.negativePrompt
 		request.BoardID = options.boardID
+		if command.Flags().Changed("image") {
+			request.Source = &sourceimage.Source{Type: "image", Reference: options.image}
+		}
+		if command.Flags().Changed("image-path") {
+			request.Source = &sourceimage.Source{Type: "path", Reference: options.imagePath}
+		}
+		if command.Flags().Changed("strength") {
+			request.Strength = new(options.strength)
+		}
 		if command.Flags().Changed("width") {
 			request.Width = new(options.width)
 		}

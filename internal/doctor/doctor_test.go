@@ -41,7 +41,7 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 	for i, entry := range report.Capabilities {
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "models.scan", "models.install", "models.install", "models.status", "models.delete", "images.list", "images.get", "images.upload", "images.download", "images.delete", "queue.list", "queue.get", "queue.wait", "queue.cancel", "queue.clear", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
+	wantOperations := []string{"models.list", "models.scan", "models.install", "models.install", "models.status", "models.delete", "images.list", "images.get", "images.upload", "images.download", "images.delete", "queue.list", "queue.get", "queue.wait", "queue.cancel", "queue.clear", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if !slices.Equal(operations, wantOperations) {
 		t.Fatalf("reported operations = %q, want implemented operations %q", operations, wantOperations)
 	}
@@ -63,6 +63,47 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 	}
 	if report.UISync["generate"] != "partial" {
 		t.Fatalf("doctor UI synchronization = %#v, want partial generation", report.UISync)
+	}
+}
+
+func assertCapabilityModeFailureFor(t *testing.T, report Report, family, mode, failure string) {
+	t.Helper()
+	for _, entry := range report.Capabilities {
+		if entry.Operation == result.OperationGenerate && entry.Family == family && entry.Mode == mode {
+			if entry.Compatible || !slices.Contains(entry.Failures, failure) {
+				t.Fatalf("capability generate/%s/%s is compatible or does not contain %q: %#v", family, mode, failure, entry)
+			}
+			return
+		}
+	}
+	t.Fatalf("capability generate/%s/%s absent", family, mode)
+}
+
+func TestSDXLImageToImageCapabilityRequiresSourceVocabularyWithoutChangingTextMode(t *testing.T) {
+	cases := []struct{ schema, property string }{
+		{"ImageResizeInvocation", "image"}, {"ImageResizeInvocation", "width"}, {"ImageResizeInvocation", "height"}, {"ImageResizeInvocation", "resample_mode"},
+		{"ImageToLatentsInvocation", "image"}, {"ImageToLatentsInvocation", "vae"}, {"ImageToLatentsInvocation", "fp32"}, {"ImageToLatentsInvocation", "color_compensation"},
+		{"DenoiseLatentsInvocation", "latents"}, {"CoreMetadataInvocation", "strength"}, {"CoreMetadataInvocation", "init_image"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.schema+"."+tc.property, func(t *testing.T) {
+			document := openAPIFixture(t)
+			properties := document["components"].(map[string]any)["schemas"].(map[string]any)[tc.schema].(map[string]any)["properties"].(map[string]any)
+			delete(properties, tc.property)
+			server := newCustomInvokeAIServer(t, "6.14.1", document, baselineModels)
+			defer server.Close()
+			client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			report := Run(t.Context(), client, version.Info{Version: "test"})
+			assertCapabilityModeFailureFor(t, report, "sdxl", "img2img", "incompatible_invocation:"+map[string]string{"ImageResizeInvocation": "img_resize", "ImageToLatentsInvocation": "i2l", "DenoiseLatentsInvocation": "denoise_latents", "CoreMetadataInvocation": "core_metadata"}[tc.schema])
+			for _, entry := range report.Capabilities {
+				if entry.Operation == result.OperationGenerate && entry.Family == "sdxl" && entry.Mode == "txt2img" && !entry.Compatible {
+					t.Fatalf("text mode changed: %#v", entry)
+				}
+			}
+		})
 	}
 }
 
@@ -681,7 +722,11 @@ func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 						t.Fatalf("report should not be ready when %s is missing from %s", property, schemaName)
 					}
 					assertIssuePresent(t, report, "incompatible_invocation")
-					assertCapabilityFailureFor(t, report, result.OperationGenerate, "anima", "incompatible_invocation:"+typeName)
+					if (schemaName == "CoreMetadataInvocation" && slices.Contains([]string{"strength", "init_image"}, property)) || (schemaName == "AnimaDenoiseInvocation" && property == "latents") {
+						assertCapabilityModeFailureFor(t, report, "anima", "img2img", "incompatible_invocation:"+typeName)
+					} else {
+						assertCapabilityFailureFor(t, report, result.OperationGenerate, "anima", "incompatible_invocation:"+typeName)
+					}
 				})
 			}
 		}

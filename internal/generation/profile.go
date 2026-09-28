@@ -85,7 +85,7 @@ func validateProfileApplicability(name string, profile profiles.Generate, main M
 }
 
 func applyProfileSettings(request Request, profile profiles.Generate) Request {
-	if request.Width == nil {
+	if request.Width == nil && request.Source == nil {
 		request.Width, request.Height = profile.Width, profile.Height
 	}
 	if request.Steps == nil {

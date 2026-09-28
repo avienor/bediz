@@ -1,6 +1,6 @@
 ---
 name: bediz
-description: Drive a local InvokeAI through the Bediz CLI. Use when the user wants images generated or upscaled with InvokeAI or Bediz, models found or installed for InvokeAI, or its queue, gallery, boards, or generation profiles inspected or managed. Not for inpainting, img2img, or other image editing, or for developing Bediz itself.
+description: Drive a local InvokeAI through the Bediz CLI. Use when the user wants text-to-image or image-to-image (img2img) generation or upscale with InvokeAI or Bediz, models found or installed for InvokeAI, or its queue, gallery, boards, or generation profiles inspected or managed. Not for inpainting or other image editing, or for developing Bediz itself.
 metadata:
   bediz-version: v1.0.0
 ---
@@ -11,7 +11,7 @@ Bediz is a deterministic controller for a local InvokeAI installation. You are t
 
 Bediz never builds prompts, picks creative settings, or guesses between candidates. You never build execution graphs or call InvokeAI's API yourself: every action goes through a `bediz` command.
 
-Bediz covers text-to-image generation, generative upscale, and the model, gallery, queue, board, and profile commands below. For inpainting, img2img, Canvas, LoRAs, reference images, or ControlNet-guided generation, tell the user Bediz cannot do it and that they can continue in the InvokeAI web interface.
+Bediz covers text-to-image and image-to-image generation for Anima, SDXL, and FLUX.1, generative upscale, and the model, gallery, queue, board, and profile commands below. For inpainting, outpainting, Canvas layers, LoRAs, reference images, or ControlNet-guided generation, tell the user Bediz cannot do it and that they can continue in the InvokeAI web interface.
 
 ## Every call
 
@@ -34,7 +34,7 @@ Bediz covers text-to-image generation, generative upscale, and the model, galler
 
 ## Workflow
 
-1. **Readiness.** When you do not yet know what this installation supports (first use in a session, after an exit status 4 or 5, or after the user changes InvokeAI), run `bediz doctor --json`. On success the report is in `data`; when `ok` is `false` (for example, when a model is missing), the same report is in `error.details.report`. Its `capabilities` field is the **Capability Matrix** for this installation: each entry has `operation`, an optional `family`, `compatible`, and `failures`. Request only compatible operation and family pairs. A failure naming `missing_component:<name>` means a model is absent; the report's `issues` carries the details. `ui_sync` tells you how much of each operation the InvokeAI web interface can restore. Compare the report's `bediz.version` with this skill's `metadata.bediz-version`; when they differ, tell the user this skill may not match their Bediz.
+1. **Readiness.** When you do not yet know what this installation supports (first use in a session, after an exit status 4 or 5, or after the user changes InvokeAI), run `bediz doctor --json`. On success the report is in `data`; when `ok` is `false` (for example, when a model is missing), the same report is in `error.details.report`. Its `capabilities` field is the **Capability Matrix** for this installation: each entry has `operation`, an optional `family`, `compatible`, and `failures`. Generation entries also have `mode`: `txt2img` or `img2img`. Request only compatible operation, family, and generation mode combinations. A failure naming `missing_component:<name>` means a model is absent; the report's `issues` carries the details. `ui_sync` tells you how much of each operation the InvokeAI web interface can restore. Compare the report's `bediz.version` with this skill's `metadata.bediz-version`; when they differ, tell the user this skill may not match their Bediz.
 2. **Model.** Run `bediz models list --json`, narrowing with `--base` or `--type` when the list is long. Select models by their exact `key` (the **Model Key**). Prefer an installed model that fits the request. When none fits, go to [Models](#models).
 3. **Request.** Write the Request Document under [Creative Discretion](#creative-discretion), using the [family rules](#families).
 4. **Run.** `generate` and `upscale` wait for completion by default. For long jobs, add `--no-wait`, then `bediz queue wait ITEM_ID --json` with the returned `data.queue.item_ids`.
@@ -45,8 +45,9 @@ Bediz covers text-to-image generation, generative upscale, and the model, galler
 You may improve prompts and choose every model and setting the user left open without asking about each minor choice. Every prompt, model, and setting the user fixed explicitly is sent exactly as given.
 
 - A prompt the user wrote as the prompt is fixed: send it verbatim. A description of what they want is intent: write the prompt yourself.
-- A named model, size, seed, step count, scheduler, guidance, output count, or board is fixed.
-- Omitting a field is a valid choice: the Generation Profile, then the model family's default, fills it.
+- A named model, size, seed, step count, scheduler, guidance, Denoising Strength, output count, or board is fixed.
+- For image-to-image, choose `strength` when the user left it open. Lower values retain more of the Source Image; the valid range is `0 < strength ≤ 1`, and omission defaults to 0.75. Preserve a strength the user stated exactly.
+- Omitting a technical field is a valid choice: the Generation Profile, then the model family's default, fills it, except for the image-to-image dimensions and strength described here.
 - When Bediz rejects a fixed value, tell the user why and ask; keep the rest of the request unchanged. Substituting a different value yourself overrides the user.
 
 ## Families
@@ -71,6 +72,27 @@ EOF
 ```
 
 The other generation fields are `profile`, `scheduler`, and `components` (for example `{"vae": "MODEL_KEY"}`). Without a seed, each output gets a random one; with a seed, later outputs count up from it.
+
+#### Image-to-image
+
+Use the same `generate` command with a **Source Image**. An InvokeAI image name reuses an image already in its gallery; an absolute local path uploads the file once. A source selects image-to-image; omitting it selects text-to-image, where `strength` is invalid.
+
+```sh
+bediz generate --model MODEL_KEY --prompt 'watercolor landscape' --image IMAGE_NAME --strength 0.35 --json
+bediz generate --model MODEL_KEY --prompt 'watercolor landscape' --image-path /absolute/path/source.png --strength 0.35 --json
+```
+
+Use exactly one of `--image` and `--image-path`. The equivalent Request Document adds `source` and optional `strength`:
+
+```sh
+bediz generate --request - --json <<'EOF'
+{"schema_version": 1, "model": "MODEL_KEY", "positive_prompt": "watercolor landscape", "source": {"type": "image", "reference": "IMAGE_NAME"}, "strength": 0.35}
+EOF
+```
+
+For a local file, use `{"type": "path", "reference": "/absolute/path/source.png"}` as `source`. Direct path sources support PNG, JPEG, and GIF. For WebP, BMP, or ICO, first run `bediz images upload /absolute/path/source.webp --json`, then pass the returned image's `image_name` as an `image` source.
+
+Without an explicit width and height pair, output dimensions follow the source, each rounded down to the family alignment in the table above. An explicit pair stretches the source to that exact size. Generation Profile dimensions do not apply to image-to-image. The Execution Receipt records `source_image`, `source_uploaded`, the resolved dimensions, and `resolved_settings.strength`.
 
 ### Upscale
 
@@ -98,22 +120,30 @@ Exit status 3 with `error.code` `selection_required` means one name or reference
 
 | After | Inspect |
 | --- | --- |
-| `generate`, `upscale`, `queue cancel`, `queue clear` | `bediz queue list --json`, then `bediz queue get ITEM_ID --json` |
+| `generate` or `upscale` enqueue, `queue cancel`, `queue clear` | `bediz queue list --json`, then `bediz queue get ITEM_ID --json` |
 | `models install` | `bediz models list --json`, and `bediz models status --job-id JOB_ID --json` for each job a starter install lists in `error.details.jobs` |
 | `models delete` | `bediz models list --json` |
-| `images upload`, `images delete` | `bediz images list --json` |
+| `images upload`, image-to-image source upload, `images delete` | `bediz images list --json` |
 | `boards create` | `bediz boards list --json` |
 | `auth huggingface login`, `auth huggingface logout` | `bediz auth huggingface status --json` |
 
 When the state shows the change happened, continue from it. Submit again only when it clearly did not, and the user still wants it.
 
-`wait_timeout` and `interrupted` are not failures of the job: the queue items keep running. Resume with `bediz queue wait ITEM_ID --json` for each ID in `error.details.pending_item_ids`. Cancel only when the user asks, with `bediz queue cancel ITEM_ID --json`.
+For image-to-image failures, decide from `error.code`, never from `error.details.source_uploaded` alone. `source_uploaded: true` only says the source image now exists; every failure after upload carries it, including an enqueue with an Unknown Outcome.
+
+- For a local `path` source, `outcome_unknown` with `source_uploaded: true` means enqueue may have happened. Inspect `bediz queue list --json` and `bediz queue get ITEM_ID --json` before any resubmission.
+- For a local `path` source, `outcome_unknown` without `source_uploaded` concerns the upload itself; nothing was enqueued. Inspect `bediz images list --json` before uploading again.
+- For an existing `image` source, `outcome_unknown` concerns enqueue. Inspect the queue as in the table, even when `source_uploaded` is absent.
+- Only after a conclusive failure following a successful upload, and when the user still wants the result, resubmit using `error.details.source_image.image_name` as an `image` source so the file is not uploaded twice. Examples are an `invokeai_operation_failed` enqueue rejection or a failed or canceled item. Inspect accepted batch items before replacing a failed or canceled item, since other items may still be running.
+
+`wait_timeout` and `interrupted` are not failures of the job: the queue items keep running. Resume with `bediz queue wait ITEM_ID --json` for each ID in `error.details.pending_item_ids`; never resubmit. Cancel only when the user asks, with `bediz queue cancel ITEM_ID --json`.
 
 ## UI Synchronization
 
 After `generate` and `upscale`, Bediz sends the resolved settings to the InvokeAI web interface (**Parameter Recall**). Report its warnings honestly:
 
 - `ui_sync_partial`: InvokeAI accepted the job and the settings Bediz could send. An open web interface restores only part of them: tell the user it does not restore the fields in `details.not_restored`. The Execution Receipt keeps every value. Bediz cannot tell whether a browser was open to receive the settings, so do not claim the user can see them.
+- Image-to-image adds `source_image` and `strength` to `ui_sync_partial`'s `details.not_restored` for every supported family. Tell the user automatic Recall does not restore the source or Denoising Strength in the web interface.
 - `ui_sync_failed`: InvokeAI accepted the job, but the interface did not receive its settings. Say so, rather than telling the user the interface shows them. After a generation, you can load its settings on request with `bediz recall --request - --json`, sending `model`, the prompts, `width`, `height`, `steps`, and the first `seed` from the receipt.
 
 ## Models

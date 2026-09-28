@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/avienor/bediz/internal/generation"
+	"github.com/avienor/bediz/internal/images"
+	"github.com/avienor/bediz/internal/sourceimage"
 )
 
 func TestCompileAnimaProducesInvokeAI614Graph(t *testing.T) {
@@ -80,5 +82,48 @@ func TestCompileAnimaAlignsBatchSeedsWithInvokeAIEnqueueOrder(t *testing.T) {
 	}}}
 	if got.Batch.Runs != 1 || !reflect.DeepEqual(got.Batch.Data, want) {
 		t.Fatalf("batch runs = %d, data = %#v, want one run with %#v", got.Batch.Runs, got.Batch.Data, want)
+	}
+}
+
+func TestCompileAnimaImageToImageMatchesInvokeAI614Fixtures(t *testing.T) {
+	models := generation.ResolvedModels{
+		Main:         generation.ModelIdentifier{Key: "main-key", Hash: "blake3:main", Name: "Anima Main", Base: "anima", Type: "main"},
+		VAE:          generation.ModelIdentifier{Key: "vae-key", Hash: "blake3:vae", Name: "Anima VAE", Base: "anima", Type: "vae"},
+		Qwen3Encoder: generation.ModelIdentifier{Key: "encoder-key", Hash: "blake3:encoder", Name: "Qwen3 Encoder", Base: "any", Type: "qwen3_encoder"},
+	}
+	for _, tc := range []struct {
+		name         string
+		sourceWidth  int
+		sourceHeight int
+		strength     float64
+	}{
+		{name: "no_resize", sourceWidth: 768, sourceHeight: 1024, strength: 0.6},
+		{name: "resize", sourceWidth: 769, sourceHeight: 1025, strength: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := generation.Request{SchemaVersion: 1, Model: "main-key", PositivePrompt: "a lighthouse in a storm", NegativePrompt: "text", Width: new(768), Height: new(1024), Steps: new(24), Scheduler: new("heun"), Guidance: new(4.25), Seed: new(uint32(42)), OutputCount: new(1), BoardID: "board-1", Source: &sourceimage.Source{Type: "image", Reference: "source.png"}, Strength: &tc.strength}
+			compiled, err := generation.CompileAnima(generation.AnimaResolution{Request: request, Models: models, Seeds: []uint32{42}, SourceImage: images.Reference{ImageName: "source.png", Width: tc.sourceWidth, Height: tc.sourceHeight}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			gotJSON, err := json.Marshal(compiled)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantJSON, err := os.ReadFile("testdata/anima_6_14_img2img_" + tc.name + "_enqueue.json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got, want any
+			if err := json.Unmarshal(gotJSON, &got); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(wantJSON, &want); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("graph differs from InvokeAI 6.14.1 %s fixture\ngot: %s\nwant: %s", tc.name, gotJSON, wantJSON)
+			}
+		})
 	}
 }

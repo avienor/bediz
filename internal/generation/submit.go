@@ -3,14 +3,17 @@ package generation
 import (
 	"context"
 	"crypto/rand"
+	"fmt"
 	"slices"
 
 	"github.com/avienor/bediz/internal/capability"
 	"github.com/avienor/bediz/internal/graphops"
 	"github.com/avienor/bediz/internal/httpclient"
+	"github.com/avienor/bediz/internal/images"
 	"github.com/avienor/bediz/internal/operation"
 	"github.com/avienor/bediz/internal/profiles"
 	"github.com/avienor/bediz/internal/result"
+	"github.com/avienor/bediz/internal/sourceimage"
 )
 
 type ResolvedSettings struct {
@@ -27,18 +30,21 @@ type ResolvedSettings struct {
 	ModelKey       string            `json:"model_key"`
 	ComponentKeys  map[string]string `json:"component_keys"`
 	Seeds          []uint32          `json:"seeds"`
+	Strength       *float64          `json:"strength,omitempty"`
 }
 
 type QueueReceipt = graphops.QueueReceipt
 type Output = graphops.Output
 
 type ExecutionReceipt struct {
-	Family           string           `json:"-"`
-	SubmittedRequest Request          `json:"submitted_request"`
-	ResolvedSettings ResolvedSettings `json:"resolved_settings"`
-	Queue            QueueReceipt     `json:"queue"`
-	Outputs          []Output         `json:"outputs"`
-	Warnings         []result.Warning `json:"warnings"`
+	Family           string            `json:"-"`
+	SubmittedRequest Request           `json:"submitted_request"`
+	ResolvedSettings ResolvedSettings  `json:"resolved_settings"`
+	Queue            QueueReceipt      `json:"queue"`
+	Outputs          []Output          `json:"outputs"`
+	Warnings         []result.Warning  `json:"warnings"`
+	SourceImage      *images.Reference `json:"source_image,omitempty"`
+	SourceUploaded   *bool             `json:"source_uploaded,omitempty"`
 }
 
 func Submit(ctx context.Context, client *httpclient.Client, request Request) (ExecutionReceipt, error) {
@@ -66,6 +72,22 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	if effective.Model == "" {
 		return ExecutionReceipt{}, operation.InvalidRequest("model is required")
 	}
+	var prepared *sourceimage.Prepared
+	var localWidth, localHeight int
+	if request.Source != nil {
+		var err error
+		prepared, err = sourceimage.Prepare(*request.Source)
+		if err != nil {
+			return ExecutionReceipt{}, err
+		}
+		defer func() { _ = prepared.Close() }()
+		if request.Source.Type == "path" {
+			localWidth, localHeight, err = prepared.LocalDimensions()
+			if err != nil {
+				return ExecutionReceipt{}, err
+			}
+		}
+	}
 	if err := capability.RequireSupportedVersion(ctx, client); err != nil {
 		return ExecutionReceipt{}, err
 	}
@@ -91,23 +113,73 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	if err != nil {
 		return ExecutionReceipt{}, err
 	}
-	if err := graphops.CheckInvocations(ctx, client, adapter.invocations()); err != nil {
-		return ExecutionReceipt{}, err
+	alignment := 8
+	if main.Base == "flux" {
+		alignment = 16
+	}
+	if effective.Source != nil {
+		if effective.Strength == nil {
+			effective.Strength = new(0.75)
+		}
+		if request.Source.Type == "path" {
+			if err := checkSourceSize(localWidth, localHeight, alignment); err != nil {
+				return ExecutionReceipt{}, err
+			}
+			if effective.Width == nil {
+				effective.Width, effective.Height = new(localWidth/alignment*alignment), new(localHeight/alignment*alignment)
+			}
+		}
 	}
 	resolved, err := adapter.resolve(effective, main, inventory, rand.Reader)
 	if err != nil {
 		return ExecutionReceipt{}, err
 	}
+	if effective.Source != nil {
+		entry := capability.SDXLImageToImageEntry()
+		if main.Base == "anima" {
+			entry = capability.AnimaImageToImageEntry()
+		} else if main.Base == "flux" {
+			entry = capability.FLUXImageToImageEntry()
+		}
+		if err := graphops.CheckRequirements(ctx, client, entry.Endpoints, entry.Invocations); err != nil {
+			return ExecutionReceipt{}, err
+		}
+	} else if err := graphops.CheckInvocations(ctx, client, adapter.invocations()); err != nil {
+		return ExecutionReceipt{}, err
+	}
+	var source sourceimage.Resolved
+	if prepared != nil {
+		source, err = prepared.Resolve(ctx, client)
+		if err != nil {
+			return ExecutionReceipt{}, err
+		}
+		if source.Uploaded && (source.Image.Width != localWidth || source.Image.Height != localHeight) {
+			return ExecutionReceipt{}, &sourceimage.UploadedError{Source: source.Image, Err: &httpclient.InvalidResponseError{Err: fmt.Errorf("uploaded source dimensions %d × %d differ from local image dimensions %d × %d", source.Image.Width, source.Image.Height, localWidth, localHeight)}}
+		}
+		if err := checkSourceSize(source.Image.Width, source.Image.Height, alignment); err != nil {
+			return ExecutionReceipt{}, err
+		}
+		if request.Width == nil {
+			resolved.Request.Width, resolved.Request.Height = new(source.Image.Width/alignment*alignment), new(source.Image.Height/alignment*alignment)
+		}
+		resolved.SourceImage = source.Image
+	}
 	enqueueRequest, err := adapter.compile(resolved)
 	if err != nil {
+		if source.Uploaded {
+			return ExecutionReceipt{}, &sourceimage.UploadedError{Source: source.Image, Err: err}
+		}
 		return ExecutionReceipt{}, err
 	}
 	queueReceipt, err := graphops.Enqueue(ctx, client, enqueueRequest, *resolved.Request.OutputCount)
 	if err != nil {
+		if source.Uploaded {
+			return ExecutionReceipt{}, &sourceimage.UploadedError{Source: source.Image, Err: err}
+		}
 		return ExecutionReceipt{}, err
 	}
 
-	return ExecutionReceipt{
+	receipt := ExecutionReceipt{
 		Family:           main.Base,
 		SubmittedRequest: request,
 		ResolvedSettings: ResolvedSettings{
@@ -124,9 +196,22 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 			ModelKey:       resolved.Models.Main.Key,
 			ComponentKeys:  adapter.componentKeys(resolved),
 			Seeds:          slices.Clone(resolved.Seeds),
+			Strength:       resolved.Request.Strength,
 		},
 		Queue:    queueReceipt,
 		Outputs:  []Output{},
 		Warnings: append([]result.Warning{}, profileWarnings...),
-	}, nil
+	}
+	if prepared != nil {
+		receipt.SourceImage = &source.Image
+		receipt.SourceUploaded = new(source.Uploaded)
+	}
+	return receipt, nil
+}
+
+func checkSourceSize(width, height, alignment int) error {
+	if width < alignment || height < alignment {
+		return operation.InvalidRequest(fmt.Sprintf("source image width and height must each be at least %d pixels", alignment))
+	}
+	return nil
 }
