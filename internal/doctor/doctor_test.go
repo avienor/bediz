@@ -70,8 +70,8 @@ func assertCapabilityModeFailureFor(t *testing.T, report Report, family, mode, f
 	t.Helper()
 	for _, entry := range report.Capabilities {
 		if entry.Operation == result.OperationGenerate && entry.Family == family && entry.Mode == mode {
-			if !slices.Contains(entry.Failures, failure) {
-				t.Fatalf("capability generate/%s/%s does not contain %q: %#v", family, mode, failure, entry)
+			if entry.Compatible || !slices.Contains(entry.Failures, failure) {
+				t.Fatalf("capability generate/%s/%s is compatible or does not contain %q: %#v", family, mode, failure, entry)
 			}
 			return
 		}
