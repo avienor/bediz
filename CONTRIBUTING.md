@@ -42,11 +42,9 @@ To also verify URL model installation and job status against that baseline, run 
 BEDIZ_E2E_URL=http://127.0.0.1:9090 BEDIZ_E2E_MODEL_INSTALL=1 go test -count=1 -v ./e2e -run '^TestLiveURLModelInstall$'
 ```
 
-This downloads a public, revision-pinned 4.8 MB SD1 LoRA from Hugging Face, checks `models install`, `models status`, and `models list` through the real binary, then removes only the model it installed. It requires outbound HTTPS access from InvokeAI. It skips unless both environment variables are set.
+This downloads a public, revision-pinned 4.8 MB SD1 LoRA from Hugging Face, installs it through the real binary, and removes only the model it installed. It requires outbound HTTPS access from InvokeAI and skips unless both environment variables are set.
 
-The gate builds the real `bediz` binary and invokes `doctor`, `models list`, bounded image, queue, and board listing, a board lookup, a self-cleaning image upload round trip, and a self-cleaning Anima generation round trip through the process boundary. The upload case creates a unique 2-by-2 PNG, verifies the same normalized Image Reference through `images upload`, `images get`, and `images list`, then deletes exactly that image through the InvokeAI backend API. A final `images get` must return the V1 `not_found` envelope. The generation case submits a canonical request with an explicit seed, waits for queue completion, validates the Execution Receipt and accessible Image Reference, and cleans up the resulting image through the InvokeAI backend API before the gate reports `live E2E: VERIFIED`.
-
-Every case checks process exit statuses, one V1 JSON result envelope on standard output, empty standard error, supported-version readiness, normalized result fields, page bounds where the public command supports them, and secret redaction. Upload assertions also cover image origin and category, exact dimensions, intermediate status, board absence, metadata-related fields, and an empty backend metadata record, and absolute image URLs. Cleanup failures name the exact test-created image so it can be removed manually without touching unrelated resources; the fixture filename and SHA-256 digest remain in failed-test output as inspection evidence when an upload outcome is unknown. Empty pre-existing model, image, and queue collections are valid. The URL must not contain credentials, a query, or a fragment; an authentication requirement causes the gate to fail instead of accepting or printing a real token. Use `-count=1` as shown so a live result is never served from the Go test cache.
+The main gate builds the real `bediz` binary and runs `doctor`, bounded model, image, queue, and board inspection, a board lookup, an image upload, and an Anima generation through the process boundary. Each case checks the exit status, one V1 Result Envelope on standard output, empty standard error, and secret redaction. The upload and generation cases delete the images they created; when cleanup fails, the test output names the exact image to remove. The URL must not contain credentials, a query, or a fragment, and a target that requires authentication fails the gate instead of accepting a token. Use `-count=1` as shown so a live result is never served from the Go test cache.
 
 Before a live check, read [docs/agents/live-verification.md](docs/agents/live-verification.md).
 
@@ -71,7 +69,7 @@ The command writes `bediz_<version>_linux_amd64.tar.gz`, `bediz_<version>_darwin
 
 The command must run on Linux amd64, macOS arm64, or Windows amd64. It checks the finished archive for that host by running `bediz version --json` and comparing the reported version, commit, and date with the tag. Two runs on the same tag with the pinned toolchain produce byte-identical archives, so a published release can be rebuilt and compared with `SHA256SUMS`. See [ADR-0021](docs/adr/0021-build-releases-reproducibly-with-a-repository-local-command.md) for the fixed build and archive settings.
 
-To publish a release, set `metadata.bediz-version` in `skills/bediz/SKILL.md` to the new version, commit, and push a tag with that name:
+To publish a release, move the `Unreleased` entries in [CHANGELOG.md](CHANGELOG.md) under a heading for the new version, set `metadata.bediz-version` in `skills/bediz/SKILL.md` to that version, commit, and push a tag with that name. Choose the version under the rules in section 25 of the V1 specification:
 
 ```sh
 git tag v1.0.0

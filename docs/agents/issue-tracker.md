@@ -9,6 +9,7 @@ Issues and specs for this repo live as Markdown files in `.scratch/`.
 - Implementation issues are one file per ticket at `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01`, never a single combined tickets file
 - Workflow state is recorded as a `Status:` line near the top when the publishing skill uses one
 - Comments and conversation history append to the bottom of the file under a `## Comments` heading
+- `.scratch/backlog.md` lists candidate work that has no feature directory yet; start a feature from an entry there and remove the entry when the feature ships or is rejected
 
 ## When a skill says "publish to the issue tracker"
 

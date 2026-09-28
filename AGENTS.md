@@ -20,7 +20,8 @@ This is a single-context repo with `CONTEXT.md` at the root and ADRs under `docs
 
 - Treat specs, ADRs, tickets, and tests as revisable records of the current agreement. Evidence that invalidates an assumption is a reason to revise the agreement, not preserve it in code.
 - When implementation or live verification contradicts an assumption, pause the affected slice, distinguish an implementation defect from a product or design change, and report the impact on code, tests, docs, and tickets. Ask the user to decide changes to product behavior, scope, or hard-to-reverse trade-offs.
-- Keep the sources of truth aligned with the decision: update `CONTEXT.md` for terminology, the V1 spec for behavior, tests for the accepted contract, and affected tickets or dependencies. Supersede an accepted ADR with a new ADR instead of rewriting its history.
+- Keep the sources of truth aligned with the decision: update `CONTEXT.md` for terminology, the V1 spec for behavior, tests for the accepted contract, `CHANGELOG.md` under `Unreleased` for user-visible changes, and affected tickets or dependencies. Supersede an accepted ADR with a new ADR instead of rewriting its history.
+- Keep schema version 1 changes additive, as V1 spec section 25 defines. Ask the user before any change that would need schema version 2.
 
 ## Architecture
 

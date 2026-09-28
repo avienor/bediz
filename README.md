@@ -107,6 +107,7 @@ For authentication, prefer `BEDIZ_TOKEN` from your credential source or a stored
 - [INSTALLATION.md](INSTALLATION.md): installation steps for agents
 - [skills/bediz](skills/bediz/SKILL.md): how an agent uses Bediz
 - [docs/spec/v1.md](docs/spec/v1.md): the complete V1 behavior
+- [CHANGELOG.md](CHANGELOG.md): changes in each release
 - [CONTEXT.md](CONTEXT.md): the project's vocabulary
 - [docs/adr](docs/adr): design decisions
 - [CONTRIBUTING.md](CONTRIBUTING.md): building, testing, and releasing
