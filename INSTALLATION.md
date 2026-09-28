@@ -20,7 +20,7 @@ irm https://raw.githubusercontent.com/avienor/bediz/master/install.ps1 | iex
 
 The script installs the latest release. When the user named a version, such as `v1.0.0-rc.1`, set `BEDIZ_VERSION` to it for the script (`curl ... | BEDIZ_VERSION=v1.0.0-rc.1 sh` on Linux and macOS, `$env:BEDIZ_VERSION = 'v1.0.0-rc.1'` before the command on Windows).
 
-The script verifies the archive against the release's `SHA256SUMS`, installs `bediz` in `~/.local/bin` (`%LOCALAPPDATA%\Programs\bediz` on Windows), checks that it reports the release version, and installs the agent skill for the user with `npx`. It reports progress and notes on stderr.
+The script verifies the archive against the release's `SHA256SUMS`, installs `bediz` in `~/.local/bin` (`%LOCALAPPDATA%\Programs\bediz` on Windows), and checks that it reports the release version. In an interactive terminal it opens `npx skills` for the user to choose agents and confirm skill installation from the same tag. Cancelling that step keeps the binary. Without an interactive terminal or Node.js, it prints the skill command to run later. It reports progress and notes on stderr.
 
 When the script fails, **stop** and report its `bediz install:` message. It fails without installing anything for an unsupported platform, when no stable release is published and no version was named, and when a download or the checksum fails.
 
@@ -33,6 +33,7 @@ Act on each note the script printed:
 - **Not on PATH:** ask the user whether you should add the directory to their shell profile (or to the user `Path` variable on Windows) or whether they will add it themselves. Change the profile or `Path` only after they agree. Until a new shell picks up the change, run the binary by its full path.
 - **Resolves to another file:** tell the user which file shadows the new one and let them decide.
 - **Skill not installed:** tell the user the command the script printed. When Node.js is missing, they install Node.js first.
+- **No interactive terminal:** ask which agents the user wants the skill installed for. Run the printed skill command with explicit `--agent` names and `-y` only after those targets are known, for example `npx skills add <tree URL> -g --agent codex -y`. Report the skill installer's result; its zero exit status alone does not prove every target succeeded.
 
 Tell the user that the skill loads in a new agent session.
 

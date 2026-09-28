@@ -5,8 +5,9 @@
 # It installs the latest release, or the tag in $env:BEDIZ_VERSION, verifies
 # the archive against the release's SHA256SUMS, and copies bediz.exe to
 # $env:BEDIZ_INSTALL_DIR (default $env:LOCALAPPDATA\Programs\bediz). It then
-# installs the agent skill from the same tag for the user with npx when
-# Node.js is available. It never changes Path or needs administrator rights.
+# opens npx's agent selection for the skill from the same tag in a terminal,
+# or prints the skill command to run later. It never changes Path or needs
+# administrator rights.
 # Errors are thrown instead of exiting, so `iex` keeps the caller's session.
 
 function Install-Bediz {
@@ -79,12 +80,16 @@ function Install-Bediz {
 
     $skill = "https://github.com/$repo/tree/$tag/skills/bediz"
     if (Get-Command npx.cmd -ErrorAction SilentlyContinue) {
-        Write-Host "Installing the Bediz agent skill from $tag"
-        & npx.cmd -y skills add $skill -g -y
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host 'Installed the agent skill; it loads in a new agent session'
+        if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
+            Write-Host "Note: no interactive terminal; choose agents later with: npx skills add $skill -g"
         } else {
-            Write-Host "Note: the agent skill was not installed; retry with: npx skills add $skill -g"
+            Write-Host "Choose the agents for the Bediz skill from $tag"
+            & npx.cmd -y skills add $skill -g
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host 'Skill installer finished; installed skills load in a new agent session'
+            } else {
+                Write-Host "Note: the agent skill was not installed; retry with: npx skills add $skill -g"
+            }
         }
     } else {
         Write-Host "Note: the agent skill needs Node.js; after installing it, run: npx skills add $skill -g"

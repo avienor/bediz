@@ -42,7 +42,7 @@ On Windows amd64, in PowerShell:
 irm https://raw.githubusercontent.com/avienor/bediz/master/install.ps1 | iex
 ```
 
-The script installs the latest release: it verifies the archive against the release's `SHA256SUMS`, puts `bediz` in `~/.local/bin` (`%LOCALAPPDATA%\Programs\bediz` on Windows), and installs the agent skill from the same release for your user with `npx`. Without Node.js it prints the skill command to run later. It never uses `sudo` or edits your shell profile; when the directory is not on `PATH`, it tells you what to add. Set `BEDIZ_VERSION` to install another release, such as `v1.0.0-rc.1`, and `BEDIZ_INSTALL_DIR` to use another directory.
+The script installs the latest release: it verifies the archive against the release's `SHA256SUMS`, puts `bediz` in `~/.local/bin` (`%LOCALAPPDATA%\Programs\bediz` on Windows), and opens `npx skills` so you can choose the agents for the skill from the same release. You can cancel skill installation and keep the binary. Without Node.js or an interactive terminal, it prints the skill command to run later. It never uses `sudo` or edits your shell profile; when the directory is not on `PATH`, it tells you what to add. Set `BEDIZ_VERSION` to install another release, such as `v1.0.0-rc.1`, and `BEDIZ_INSTALL_DIR` to use another directory.
 
 You can also ask your agent to install Bediz:
 

@@ -5,9 +5,9 @@
 #
 # It installs the latest release, or the tag in BEDIZ_VERSION, verifies the
 # archive against the release's SHA256SUMS, and copies bediz to
-# BEDIZ_INSTALL_DIR (default ~/.local/bin). It then installs the agent skill
-# from the same tag for the user with npx when Node.js is available. It never
-# edits shell profiles or uses sudo.
+# BEDIZ_INSTALL_DIR (default ~/.local/bin). In a terminal, npx opens its agent
+# selection for the skill from the same tag. Otherwise it prints the skill
+# command to run later. It never edits shell profiles or uses sudo.
 set -eu
 
 repo=avienor/bediz
@@ -89,11 +89,15 @@ main() {
 
 	skill="https://github.com/$repo/tree/$tag/skills/bediz"
 	if command -v npx >/dev/null 2>&1; then
-		say "Installing the Bediz agent skill from $tag"
-		if npx -y skills add "$skill" -g -y; then
-			say "Installed the agent skill; it loads in a new agent session"
+		if [ -t 1 ] && ( : </dev/tty ) 2>/dev/null; then
+			say "Choose the agents for the Bediz skill from $tag"
+			if npx -y skills add "$skill" -g </dev/tty; then
+				say "Skill installer finished; installed skills load in a new agent session"
+			else
+				say "Note: the agent skill was not installed; retry with: npx skills add $skill -g"
+			fi
 		else
-			say "Note: the agent skill was not installed; retry with: npx skills add $skill -g"
+			say "Note: no interactive terminal; choose agents later with: npx skills add $skill -g"
 		fi
 	else
 		say "Note: the agent skill needs Node.js; after installing it, run: npx skills add $skill -g"

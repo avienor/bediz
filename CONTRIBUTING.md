@@ -20,7 +20,11 @@ go vet ./...
 go mod verify
 ```
 
-The ordinary checks do not contact InvokeAI. To display the live-gate status explicitly without requesting a live run, use:
+The ordinary checks do not contact InvokeAI.
+
+On Linux, the ordinary checks also exercise the install script with local release and skill-installer fixtures. The terminal cases use the util-linux `script` command to verify agent selection through a piped script and cancellation; they do not download releases or install user skills.
+
+To display the live-gate status explicitly without requesting a live run, use:
 
 ```sh
 go test -count=1 -v ./e2e
