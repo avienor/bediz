@@ -61,11 +61,11 @@
 - `CHANGELOG.md` under Unreleased. Tests.
 - No ADR or glossary change: ADR-0023 and the terms from ticket 02 cover this slice.
 
-**Status:** in-review
+**Status:** implemented
 
 - [x] `generate` with an Anima main model and a Source Image produces image-to-image outputs through one tested enqueue, as recorded.
 - [x] Doctor, `ui_sync_partial`, the V1 spec, and `CHANGELOG.md` reflect the behavior verified live.
-- [ ] The independent review found no acceptance-blocking issue.
+- [x] The independent review found no acceptance-blocking issue.
 
 ## Comments
 
@@ -73,3 +73,5 @@
 - 2026-09-28: `go run ./cmd/bediz doctor --url http://127.0.0.1:9090 --json` reported ready, including compatible `generate/anima/img2img` with `ui_sync: partial`. `go run ./cmd/bediz models list --url http://127.0.0.1:9090 --json` found `Anima Base 1.0`, its QwenImage VAE, and Qwen3 0.6B encoder. No model was installed.
 - 2026-09-28: `go run ./cmd/bediz generate --model 06409299-d28f-4c00-8416-4d23cb1b8358 --prompt 'flat geometric illustration with a red square in the upper left, a blue circle in the middle right, and a yellow triangle in the lower right, on a white background' --image-path /tmp/bediz-anima-shapes.png --strength 0.35 --steps 8 --seed 43167 --timeout 10m --url http://127.0.0.1:9090 --json` completed one queue item. The 768 × 768 output visibly retained the source's red square, blue circle, and yellow triangle in their original positions. The receipt recorded seed 43167, the installed VAE and encoder keys, uploaded source `23806bea-7ece-4cb9-8de7-a988474efbe8.png`, and the Anima `not_restored` list. The output `dca3b4e6-7237-47b8-ab80-efaf12ff3565.png` was 768 × 768; `GET /api/v1/images/i/dca3b4e6-7237-47b8-ab80-efaf12ff3565.png/metadata` returned `anima_img2img`, strength 0.35, seed 43167, and the uploaded source name.
 - 2026-09-28: `BEDIZ_E2E_URL=http://127.0.0.1:9090 go test -count=1 -v ./e2e -run '^TestLiveGate$'` passed all subtests. The new Anima image-to-image case verified the waited receipt, model components, output dimensions and seed, metadata, and cleaned its uploaded source and output. No live step was unavailable. Ad hoc gallery images left for optional removal: source `23806bea-7ece-4cb9-8de7-a988474efbe8.png` and output `dca3b4e6-7237-47b8-ab80-efaf12ff3565.png`.
+- 2026-09-28: `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify` passed. Independent review of `689e6881523ad8cd4e6fd23c9b6ebde5acefe659...6979aef` found no acceptance-blocking spec issue and no documented-standard breach. Two low-severity style suggestions concern repeated image-to-image capability setup and the existing `sdxlOpenAPIFixture` helper name; neither affects behavior.
+- 2026-09-28: The independent reviewer compared both graph fixtures with the installed `App-CKkzUo1u.js` Anima branch, backend invocation definitions, and live OpenAPI; no unknown node or connected input fields were found. `go test ./internal/generation ./internal/cli -run 'TestCompileAnimaImageToImageMatchesInvokeAI614Fixtures|TestGenerateAnima|TestDoctorAnimaImageToImageMatchesTextModelRequirements|TestAnimaImageToImageVocabularyGuardsGenerateAndDoctor' -count=1` passed. The reviewer independently ran `go run ./cmd/bediz generate --model 06409299-d28f-4c00-8416-4d23cb1b8358 --prompt 'flat geometric illustration with a red square in the upper left, a blue circle in the middle right, and a yellow triangle in the lower right, on a white background' --image 23806bea-7ece-4cb9-8de7-a988474efbe8.png --strength 0.35 --steps 8 --seed 43168 --timeout 10m --url http://127.0.0.1:9090 --json`; output `a127a68c-1725-4c9b-9463-91e30db6eb3c.png` was 768 × 768, visually retained the source shapes, and recorded `anima_img2img`, strength 0.35, seed 43168, and the source name. This second output remains in the gallery for optional removal.
