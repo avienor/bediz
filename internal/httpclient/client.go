@@ -44,6 +44,9 @@ type HTTPError struct {
 	StatusCode int
 	Status     string
 	Body       string
+	// Detail is a bounded, sanitized diagnostic from a non-private 4xx
+	// response. DoJSONPrivate omits it along with Body.
+	Detail any
 }
 
 func (e *HTTPError) Error() string {
@@ -224,7 +227,7 @@ func (c *Client) PostStream(ctx context.Context, path string, body io.Reader, co
 		return gatewayOutcomeUnknown(http.MethodPost, requestURL, response)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return &HTTPError{StatusCode: response.StatusCode, Status: response.Status, Body: compactBody(responseBody)}
+		return c.responseError(response, responseBody)
 	}
 	if target == nil || len(responseBody) == 0 {
 		return nil
@@ -282,7 +285,7 @@ func (c *Client) GetStream(ctx context.Context, path, accept string, maxBody int
 				}
 				continue
 			}
-			return &HTTPError{StatusCode: response.StatusCode, Status: response.Status, Body: compactBody(responseBody)}
+			return c.responseError(response, responseBody)
 		}
 		defer response.Body.Close()
 		if response.ContentLength > maxBody {
@@ -368,11 +371,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, requestBody, t
 			return gatewayOutcomeUnknown(method, requestURL, response)
 		}
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
-			httpErr := &HTTPError{
-				StatusCode: response.StatusCode,
-				Status:     response.Status,
-				Body:       compactBody(responseBody),
-			}
+			httpErr := c.responseError(response, responseBody)
 			if attempt+1 < attempts && gatewayStatus(response.StatusCode) {
 				if err := c.retryWait(ctx, defaultRetryWait*time.Duration(attempt+1)); err != nil {
 					return err

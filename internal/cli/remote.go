@@ -369,7 +369,11 @@ func (c *CLI) classifyRemote(operationName string, jsonOutput bool, err error, e
 		case httpErr.StatusCode == http.StatusNotFound:
 			return fail(result.CodeNotFound, "the requested InvokeAI resource was not found", nil)
 		default:
-			return fail(result.CodeInvokeAIOperationFailed, "InvokeAI rejected the operation", map[string]any{"status": httpErr.StatusCode})
+			details := map[string]any{"status": httpErr.StatusCode}
+			if httpErr.Detail != nil {
+				details["invokeai_detail"] = httpErr.Detail
+			}
+			return fail(result.CodeInvokeAIOperationFailed, "InvokeAI rejected the operation", details)
 		}
 	}
 	return fail(result.CodeInvokeAIOperationFailed, err.Error(), nil)
