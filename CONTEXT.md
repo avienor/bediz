@@ -120,6 +120,18 @@ _Avoid_: Display name, model format
 The InvokeAI-assigned identifier used to select one installed model exactly. A display name is only a valid selector when it resolves to one model key.
 _Avoid_: Ambiguous model name, gallery position
 
+**Starter Model**:
+An entry in InvokeAI's starter model catalog, selected by its exact source identifier. Installing one also submits the catalog dependencies it declares.
+_Avoid_: Recommended model, display-name selection
+
+**Install Job**:
+The InvokeAI record of one model installation, identified by a job ID that belongs to the running InvokeAI process. It is not a durable installation receipt: after a restart, the ID can disappear or name another job.
+_Avoid_: Installation receipt, permanent install ID
+
+**Source Token**:
+A one-time credential for a protected model download, read from standard input and used for that installation only. Bediz never stores it and never includes it in output.
+_Avoid_: InvokeAI token, stored Hugging Face login
+
 **Component Resolution**:
 The deterministic selection of compatible installed component models required by a generation request, subject to profile preferences and explicit overrides.
 _Avoid_: First available model, random selection
