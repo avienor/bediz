@@ -15,6 +15,7 @@ Each release lists the changes that affect users of the `bediz` binary, its JSON
 
 ### Changed
 
+- The agent skill teaches image-to-image generation for Anima, SDXL, and FLUX.1, including Source Images, Denoising Strength, dimensions, safe failure recovery, and partial UI Synchronization; the README lists it as supported.
 - `images upload` and upscale `path` sources reject files whose content is not an image before any network request.
 - A source token is refused for a non-loopback plain-HTTP artifact URL: `invalid_request` for a direct URL, `unsupported_capability` for a starter entry.
 - `doctor` omits `openapi.required_endpoints` and `openapi.required_invocations` when OpenAPI cannot be read, instead of listing every check as missing.

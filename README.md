@@ -20,13 +20,13 @@ Agents are good at turning a request into a prompt. Clicking through a web inter
 
 ## What it can do
 
-- Text-to-image generation with Anima, SDXL, and FLUX.1
+- Text-to-image and image-to-image generation with Anima, SDXL, and FLUX.1
 - Generative upscale with SD1.5 and SDXL
 - Model installation from InvokeAI starter models, Hugging Face, Civitai, direct URLs, and server paths
 - Queue, gallery, board, and generation profile management
 - Loading a generation's settings into the InvokeAI web interface
 
-Bediz supports InvokeAI 6.14.1 and later 6.14 releases. `bediz doctor` reports what your installation can do. Inpainting, img2img, Canvas, LoRAs, and ControlNet-guided generation are not part of V1; continue in the web interface for those.
+Bediz supports InvokeAI 6.14.1 and later 6.14 releases. `bediz doctor` reports what your installation can do. Inpainting, outpainting, Canvas layers, LoRAs, reference images, and ControlNet-guided generation are not part of V1; continue in the web interface for those.
 
 ## Install
 
