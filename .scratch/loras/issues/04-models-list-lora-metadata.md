@@ -56,3 +56,25 @@
 - Built with `go build ./cmd/bediz`. `./bediz models list --type lora --json` listed four installed LoRAs, initially omitting both optional members. In the InvokeAI model manager, temporarily added `bediz-zebra-check` and `bediz-alpha-check` and saved Starting Weight 0.6 on `alienzkin-sdxl` (Model Key `5a64f0b6-e279-4d4e-8c02-826bc2470066`). Repeating the listing returned ascending phrases and `default_weight: 0.6`. `./bediz models list --type lora --base sdxl --json` returned the two SDXL LoRAs; `./bediz models list --type lora --base sdxl` showed both metadata values and preserved the other LoRA's human line.
 - Restored the weight and removed both phrases in the UI. Removing the last phrase stores an empty array, so a single `PATCH /api/v2/models/i/5a64f0b6-e279-4d4e-8c02-826bc2470066` with `{"trigger_phrases":null}` restored the original null exactly. A fresh GET confirmed the original null trigger phrases and null weight/min/max settings. The final `./bediz models list --type lora --json` again omitted both members for all four LoRAs.
 - Independent Standards and Spec reviewers assessed a fixed implementation snapshot against base `482d8a17b35174d65fccd44edc738b70eba1f6ef`. Both independently read the live model-config schemas and reproduced the listing with the temporary metadata before restoration. The Spec reviewer also compared every existing member across all 20 installed models and checked the SDXL LoRA filter. Standards: 0 findings; Spec: 0 findings; no acceptance-blocking issue.
+
+### PR review follow-up — 2026-09-30
+
+The live E2E result type now accepts `trigger_phrases` and `default_weight`. A regression test executes the real binary against an HTTP model inventory with both recorded members and decodes its output through the live gate's strict result contract. Before the correction it failed with an unknown `trigger_phrases` member; afterward it passed and confirmed ascending phrases and weight 0.6. The model-discovery loop is unchanged.
+
+The review's weight-validation cleanup leaves decimal flag parsing in the CLI and shares one private finite −10-to-10 predicate between explicit-request and recorded-default validation. CLI regression cases confirm that NaN, infinity, and values above or below the bounds still return `invalid_request` with `loras.0.weight` before network access. ADR-0024's obsolete implementation sequencing and interim synchronization wording were removed; its accepted architectural decision and the V1 public behavior are unchanged.
+
+All verification commands passed:
+
+```sh
+go test -count=1 -v ./e2e -run '^TestModelsListRecordedMetadataMatchesLiveContract$'
+go test -count=1 ./internal/cli ./internal/generation -run 'LoRA|Lora|ModelsList'
+go test ./...
+go test -race ./...
+go vet ./...
+go mod verify
+git diff --check
+curl -fsS --max-time 10 http://127.0.0.1:9090/api/v1/app/version
+BEDIZ_E2E_URL=http://127.0.0.1:9090 go test -count=1 -v ./e2e -run '^TestLiveGate/(doctor_verifies_the_supported_baseline|model_listing_is_normalized)$'
+```
+
+The live version endpoint returned 6.14.1. The focused gate passed readiness and normalized model listing. It performed no generation, upload, model installation, or model metadata change, so there are no new ad hoc images or model values to restore. The earlier family-generation and frontend synchronization evidence remains in tickets 01–05.

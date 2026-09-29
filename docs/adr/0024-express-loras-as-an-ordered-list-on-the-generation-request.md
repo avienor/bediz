@@ -6,9 +6,9 @@ status: accepted
 
 The Generation Request accepts an optional ordered, non-empty list of LoRAs. Each item selects one installed `lora` model by exact Model Key or unique name, with a base matching the main model, and an optional LoRA Weight. The weight uses InvokeAI's web-interface meaning and range, −10 to 10. When omitted, it resolves from the model's `default_settings.weight`, otherwise 0.75. A repeated resolved Model Key is invalid. No LoRA format is excluded. Generation Profiles do not include LoRAs.
 
-Each supported family chains its stock single-LoRA loader in request order. The resulting list and resolved weights go into `core_metadata.loras` and the Execution Receipt. `doctor` has one `setting: "loras"` row per supported family, inheriting that family's text-to-image requirements and adding its LoRA loader and metadata properties. The Generation Mode's requirements and the LoRA requirements are checked together before upload or enqueue. SDXL support lands first; Anima and FLUX.1 require their own tested graph slices.
+Each supported family chains its stock single-LoRA loader in request order. The resulting list and resolved weights go into `core_metadata.loras` and the Execution Receipt. `doctor` has one `setting: "loras"` row per supported family, inheriting that family's text-to-image requirements and adding its LoRA loader and metadata properties. The Generation Mode's requirements and the LoRA requirements are checked together before upload or enqueue.
 
-Automatic Recall will send the exact LoRA list after every generation, and an empty list after LoRA-less generation or upscale. A display-name collision prevents that Recall patch and produces `ui_sync_failed`. Overlapping Recall events can complete out of order in stock InvokeAI's frontend; the Execution Receipt remains authoritative. Until this synchronization slice lands, LoRA generation lists `loras` in `ui_sync_partial.not_restored`.
+Automatic Recall sends the exact LoRA list after every generation, and an empty list after LoRA-less generation or upscale. A display-name collision prevents that Recall patch and produces `ui_sync_failed`. Overlapping Recall events can complete out of order in stock InvokeAI's frontend; the Execution Receipt remains authoritative.
 
 ## Considered alternatives
 

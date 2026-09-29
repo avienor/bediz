@@ -102,6 +102,9 @@ func TestGenerateLoRARejectsLocalDocumentAndFlagErrorsWithoutNetwork(t *testing.
 		{"flag empty selector", "", "=0.5", "loras.0.model"},
 		{"flag nonnumeric suffix", "", "Alien Style=nope", "loras.0.weight"},
 		{"flag infinite weight", "", "Alien Style=Inf", "loras.0.weight"},
+		{"flag NaN weight", "", "Alien Style=NaN", "loras.0.weight"},
+		{"flag high weight", "", "Alien Style=10.1", "loras.0.weight"},
+		{"flag low weight", "", "Alien Style=-10.1", "loras.0.weight"},
 		{"flag hexadecimal weight", "", "Alien Style=0x1p0", "loras.0.weight"},
 		{"flag underscored weight", "", "Alien Style=1_0", "loras.0.weight"},
 	} {

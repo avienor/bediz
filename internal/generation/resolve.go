@@ -204,7 +204,7 @@ func validateCommonRequest(request Request) error {
 		if lora.Model == "" {
 			return operation.InvalidField(fmt.Sprintf("loras.%d.model", index), "LoRA model selector is required")
 		}
-		if lora.Weight != nil && (math.IsNaN(*lora.Weight) || math.IsInf(*lora.Weight, 0) || *lora.Weight < -10 || *lora.Weight > 10) {
+		if lora.Weight != nil && !validLoRAWeight(*lora.Weight) {
 			return operation.InvalidField(fmt.Sprintf("loras.%d.weight", index), "LoRA weight must be finite and between -10 and 10")
 		}
 	}

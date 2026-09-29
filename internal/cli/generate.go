@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -120,7 +119,7 @@ func (c *CLI) executeGenerate(ctx context.Context, jsonOutput bool, command *cob
 			lora := generation.LoRA{Model: selector}
 			if hasWeight {
 				weight, err := strconv.ParseFloat(suffix, 64)
-				if err != nil || strings.ContainsAny(suffix, "xXpP_") || math.IsNaN(weight) || math.IsInf(weight, 0) || weight < -10 || weight > 10 {
+				if err != nil || strings.ContainsAny(suffix, "xXpP_") {
 					return c.fail(result.OperationGenerate, jsonOutput, result.CodeInvalidRequest, "LoRA weight must be finite and between -10 and 10", map[string]any{"field": fmt.Sprintf("loras.%d.weight", index)})
 				}
 				lora.Weight = new(weight)

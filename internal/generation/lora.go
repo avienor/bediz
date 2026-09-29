@@ -9,6 +9,10 @@ import (
 	"github.com/avienor/bediz/internal/operation"
 )
 
+func validLoRAWeight(weight float64) bool {
+	return !math.IsNaN(weight) && !math.IsInf(weight, 0) && weight >= -10 && weight <= 10
+}
+
 func resolveLoRAs(request []LoRA, inventory []ModelIdentifier, base string) ([]ResolvedLoRA, error) {
 	if len(request) == 0 {
 		return nil, nil
@@ -32,7 +36,7 @@ func resolveLoRAs(request []LoRA, inventory []ModelIdentifier, base string) ([]R
 			weight = *lora.Weight
 		} else if model.DefaultSettings != nil && model.DefaultSettings.Weight != nil {
 			weight = *model.DefaultSettings.Weight
-			if math.IsNaN(weight) || math.IsInf(weight, 0) || weight < -10 || weight > 10 {
+			if !validLoRAWeight(weight) {
 				return nil, operation.InvalidField(fmt.Sprintf("loras.%d.weight", index), "recorded LoRA default weight is outside -10 to 10; provide an explicit weight")
 			}
 		}

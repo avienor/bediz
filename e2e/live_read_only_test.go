@@ -12,6 +12,7 @@ import (
 	"image/png"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
@@ -114,13 +115,15 @@ type doctorData struct {
 
 type modelsListData struct {
 	Models []struct {
-		Key         string  `json:"key"`
-		Name        string  `json:"name"`
-		Base        string  `json:"base"`
-		Type        string  `json:"type"`
-		Format      string  `json:"format"`
-		SizeBytes   *int64  `json:"size_bytes"`
-		Description *string `json:"description"`
+		Key            string   `json:"key"`
+		Name           string   `json:"name"`
+		Base           string   `json:"base"`
+		Type           string   `json:"type"`
+		Format         string   `json:"format"`
+		SizeBytes      *int64   `json:"size_bytes"`
+		Description    *string  `json:"description"`
+		TriggerPhrases []string `json:"trigger_phrases"`
+		DefaultWeight  *float64 `json:"default_weight"`
 	} `json:"models"`
 }
 
@@ -298,6 +301,30 @@ type uiSyncWarning struct {
 	Details struct {
 		NotRestored []string `json:"not_restored"`
 	} `json:"details"`
+}
+
+func TestModelsListRecordedMetadataMatchesLiveContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v2/models/" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"models":[{"key":"detail-lora","name":"Detail","base":"anima","type":"lora","format":"lycoris","trigger_phrases":["zebra","alpha"],"default_settings":{"weight":0.6}}]}`)
+	}))
+	t.Cleanup(server.Close)
+	envelope := runJSONCommand(t, buildBinary(t), server.URL, "models", "list")
+	assertSuccessEnvelope(t, envelope, "models.list")
+	var data modelsListData
+	unmarshalData(t, envelope.Data, &data)
+	if len(data.Models) != 1 || data.Models[0].Key != "detail-lora" {
+		t.Fatalf("model summaries = %#v, want the recorded LoRA", data.Models)
+	}
+	model := data.Models[0]
+	if !slices.Equal(model.TriggerPhrases, []string{"alpha", "zebra"}) || model.DefaultWeight == nil || *model.DefaultWeight != 0.6 {
+		t.Fatalf("recorded model metadata = %#v, want sorted phrases and weight 0.6", model)
+	}
 }
 
 func TestLiveGate(t *testing.T) {
