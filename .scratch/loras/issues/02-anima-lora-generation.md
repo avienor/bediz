@@ -62,8 +62,8 @@
 
 **Status:** ready-for-agent
 
-- [ ] `generate` with an Anima main model and `loras` applies them through one tested enqueue in both Generation Modes, as recorded.
-- [ ] `doctor`, the V1 spec, the live-verification guide, and `CHANGELOG.md` reflect the behavior verified live.
+- [x] `generate` with an Anima main model and `loras` applies them through one tested enqueue in both Generation Modes, as recorded.
+- [x] `doctor`, the V1 spec, the live-verification guide, and `CHANGELOG.md` reflect the behavior verified live.
 - [ ] The independent review found no acceptance-blocking issue.
 
 ## Comments
@@ -75,3 +75,8 @@
 - Waited 768 × 768 image-to-image with the LoRA at `1.0`, source `cab5cb50-165d-4769-959e-5bdd0005bc66.png`, seed `41828`, and strength `0.6` produced `03625502-2dfa-451c-ac44-9930b46f2d90.png` (item 160). Its InvokeAI metadata records `anima_img2img`, source, seed, strength, and the LoRA. These three named images remain in the gallery as ad hoc verification outputs.
 - `BEDIZ_E2E_URL=http://127.0.0.1:9090 go test -count=1 -v ./e2e` passed, including the new Anima LoRA generation and metadata case; the gate cleaned up its own images.
 - `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify` passed.
+- The three primary waited generations above each ran `/tmp/bediz-anima-lora generate --request - --timeout 15m --json` with these exact standard-input Request Documents, respectively:
+  - No LoRA: `{"schema_version":1,"model":"06409299-d28f-4c00-8416-4d23cb1b8358","positive_prompt":"Close-up portrait of an elven woman in an embroidered cloak, intricate facial details, soft cinematic lighting","negative_prompt":"blurry, text","width":768,"height":768,"steps":24,"seed":41827}` → `cab5cb50-165d-4769-959e-5bdd0005bc66.png`.
+  - Text-to-image LoRA: `{"schema_version":1,"model":"06409299-d28f-4c00-8416-4d23cb1b8358","positive_prompt":"Close-up portrait of an elven woman in an embroidered cloak, intricate facial details, soft cinematic lighting","negative_prompt":"blurry, text","width":768,"height":768,"steps":24,"seed":41827,"loras":[{"model":"5e9b17b5-e986-4cb8-83ef-a982326ab283","weight":1.0}]}` → `c85cb7ed-71c0-4bff-ba3c-9b84eee4ce8c.png`.
+  - Image-to-image LoRA: `{"schema_version":1,"model":"06409299-d28f-4c00-8416-4d23cb1b8358","positive_prompt":"Close-up portrait of an elven woman in an embroidered cloak, intricate facial details, soft cinematic lighting","negative_prompt":"blurry, text","width":768,"height":768,"steps":24,"seed":41828,"source":{"type":"image","reference":"cab5cb50-165d-4769-959e-5bdd0005bc66.png"},"strength":0.6,"loras":[{"model":"5e9b17b5-e986-4cb8-83ef-a982326ab283","weight":1.0}]}` → `03625502-2dfa-451c-ac44-9930b46f2d90.png`.
+- Independent reviewer reran `go run ./cmd/bediz generate --model 06409299-d28f-4c00-8416-4d23cb1b8358 --prompt 'portrait of an elven alchemist wearing embroidered green cloak, cinematic fantasy painting, intricate facial detail' --negative-prompt 'blurry, text, watermark' --width 768 --height 768 --steps 24 --seed 771934 --output-count 1 --url http://127.0.0.1:9090 --json` → `8b048a08-4a01-449c-b516-64e6df094770.png`; the same command with `--lora 5e9b17b5-e986-4cb8-83ef-a982326ab283=1` before `--url` → `c46d1ebf-9ed2-415d-aedf-b2dcd92b8de1.png`. Both waited runs succeeded with seed `771934`; only the latter metadata contained the LoRA at weight `1`, and the images visibly differed. Both remain in the gallery.

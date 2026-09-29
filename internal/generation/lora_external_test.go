@@ -156,11 +156,23 @@ func TestResolveAnimaLoRAUsesMatchingInstalledModel(t *testing.T) {
 	main := generation.ModelIdentifier{Key: "anima-main", Hash: "main-hash", Name: "Anima", Base: "anima", Type: "main"}
 	vae := generation.ModelIdentifier{Key: "anima-vae", Hash: "vae-hash", Name: "Anima VAE", Base: "anima", Type: "vae"}
 	encoder := generation.ModelIdentifier{Key: "qwen3", Hash: "encoder-hash", Name: "Qwen3", Base: "any", Type: "qwen3_encoder"}
+	otherVAE := generation.ModelIdentifier{Key: "other-vae", Hash: "other-vae-hash", Name: "Other Anima VAE", Base: "anima", Type: "vae"}
+	otherEncoder := generation.ModelIdentifier{Key: "other-qwen3", Hash: "other-encoder-hash", Name: "Other Qwen3", Base: "any", Type: "qwen3_encoder"}
 	lora := generation.ModelIdentifier{Key: "anima-lora", Hash: "lora-hash", Name: "Detail Tweaker", Base: "anima", Type: "lora", DefaultSettings: &generation.ModelDefaultSettings{Weight: new(1.25)}}
-	request := generation.Request{SchemaVersion: 1, Model: main.Key, PositivePrompt: "test", Seed: new(uint32(41)), Loras: []generation.LoRA{{Model: lora.Name}}}
-	resolved, err := generation.Resolve(request, []generation.ModelIdentifier{main, vae, encoder, lora}, bytes.NewReader(nil))
+	request := generation.Request{SchemaVersion: 1, Model: main.Key, PositivePrompt: "test", Seed: new(uint32(41)), Components: &generation.Components{VAE: new(vae.Key), Qwen3Encoder: new(encoder.Key)}, Loras: []generation.LoRA{{Model: lora.Name}}}
+	inventory := []generation.ModelIdentifier{main, vae, otherVAE, encoder, otherEncoder, lora}
+	resolved, err := generation.Resolve(request, inventory, bytes.NewReader(nil))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if resolved.Models.VAE.Key != vae.Key || resolved.Models.Qwen3Encoder.Key != encoder.Key {
+		t.Fatalf("resolved components = %#v", resolved.Models)
+	}
+	withoutLoRA := request
+	withoutLoRA.Loras = nil
+	baseline, err := generation.Resolve(withoutLoRA, inventory, bytes.NewReader(nil))
+	if err != nil || !reflect.DeepEqual(resolved.Models, baseline.Models) {
+		t.Fatalf("LoRA changed component resolution: with=%#v without=%#v err=%v", resolved.Models, baseline.Models, err)
 	}
 	if len(resolved.Loras) != 1 || resolved.Loras[0].Model.Key != lora.Key || resolved.Loras[0].Weight != 1.25 {
 		t.Fatalf("resolved LoRAs = %#v", resolved.Loras)
