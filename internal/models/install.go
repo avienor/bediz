@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/avienor/bediz/internal/capability"
+	"github.com/avienor/bediz/internal/compatibility"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/huggingface"
 	"github.com/avienor/bediz/internal/operation"
@@ -720,35 +721,40 @@ func checkInstallCompatibility(ctx context.Context, client *httpclient.Client, h
 	if err := capability.RequireSupportedVersion(ctx, client); err != nil {
 		return err
 	}
-	var document struct {
-		Paths map[string]map[string]capability.InstallEndpoint `json:"paths"`
-	}
+	var document compatibility.Document
 	if err := client.GetJSON(ctx, "/openapi.json", &document); err != nil {
 		return err
 	}
-	post, ok := document.Paths["/api/v2/models/install"]["post"]
-	if !ok {
-		return operation.UnsupportedCapability("InvokeAI generic model installation endpoint is unavailable")
+	snapshot := compatibility.Snapshot{SupportedVersion: true, OpenAPIAvailable: true, Document: document}
+	entries, found := capability.InstallPreflightEntries(sourceType, hasSourceToken)
+	if !found {
+		return operation.UnsupportedCapability("InvokeAI model installation requirements are unavailable")
 	}
-	if !post.HasRequiredSource() {
-		return operation.UnsupportedCapability("InvokeAI generic model installation source parameter is unavailable")
-	}
-	if !post.HasJobResponse() {
-		return operation.UnsupportedCapability("InvokeAI generic model installation job response is unavailable")
-	}
-	if sourceType == "huggingface" {
-		if _, ok := document.Paths["/api/v2/models/hugging_face"]["get"]; !ok {
-			return operation.UnsupportedCapability("InvokeAI Hugging Face repository metadata endpoint is unavailable")
+	for _, entry := range entries {
+		for _, failure := range compatibility.Evaluate(entry, snapshot) {
+			return operation.UnsupportedCapability(installFailureMessage(failure))
 		}
 	}
-	if sourceType == "starter" && !document.Paths["/api/v2/models/starter_models"]["get"].HasStarterCatalogResponse() {
-		return operation.UnsupportedCapability("InvokeAI starter model catalog endpoint is unavailable")
-	}
-	if hasSourceToken && !post.HasAccessTokenQuery() {
-		return operation.UnsupportedCapability("InvokeAI generic model installation access token parameter is unavailable")
-	}
-	if sourceType == "path" && !post.HasInplaceQuery() {
-		return operation.UnsupportedCapability("InvokeAI generic model installation in-place parameter is unavailable")
-	}
 	return nil
+}
+
+func installFailureMessage(failure compatibility.Failure) string {
+	switch failure.Code {
+	case "missing_endpoint:POST /api/v2/models/install":
+		return "InvokeAI generic model installation endpoint is unavailable"
+	case "incompatible_install_schema:source":
+		return "InvokeAI generic model installation source parameter is unavailable"
+	case "incompatible_install_schema:job_response":
+		return "InvokeAI generic model installation job response is unavailable"
+	case "missing_endpoint:GET /api/v2/models/hugging_face":
+		return "InvokeAI Hugging Face repository metadata endpoint is unavailable"
+	case "missing_endpoint:GET /api/v2/models/starter_models", "incompatible_starter_catalog_response":
+		return "InvokeAI starter model catalog endpoint is unavailable"
+	case "incompatible_install_schema:access_token":
+		return "InvokeAI generic model installation access token parameter is unavailable"
+	case "incompatible_install_schema:inplace":
+		return "InvokeAI generic model installation in-place parameter is unavailable"
+	default:
+		return failure.Message
+	}
 }

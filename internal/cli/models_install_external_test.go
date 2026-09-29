@@ -19,8 +19,8 @@ import (
 	"github.com/avienor/bediz/internal/result"
 )
 
-const huggingFaceInstallOpenAPI = `{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}},"/api/v2/models/hugging_face":{"get":{}}}}`
-const pathInstallOpenAPI = `{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"inplace","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`
+const huggingFaceInstallOpenAPI = `{"paths":{"/api/v1/app/version":{"get":{}},"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}},"/api/v2/models/hugging_face":{"get":{}}}}`
+const pathInstallOpenAPI = `{"paths":{"/api/v1/app/version":{"get":{}},"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"inplace","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`
 
 func installTestServer(t *testing.T, posts *atomic.Int32) *httptest.Server {
 	t.Helper()
@@ -29,7 +29,7 @@ func installTestServer(t *testing.T, posts *atomic.Int32) *httptest.Server {
 		case "/api/v1/app/version":
 			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
 		case "/openapi.json":
-			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
+			_, _ = w.Write([]byte(`{"paths":{"/api/v1/app/version":{"get":{}},"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
 		case "/api/v2/models/install":
 			posts.Add(1)
 			if r.Method != http.MethodPost || r.URL.Query().Get("source") != "https://example.org/model.safetensors" {
@@ -511,7 +511,7 @@ func TestModelsInstallProtectedURLUsesTemporaryStdinToken(t *testing.T) {
 		case "/api/v1/app/version":
 			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
 		case "/openapi.json":
-			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
+			_, _ = w.Write([]byte(`{"paths":{"/api/v1/app/version":{"get":{}},"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
 		case "/api/v2/models/install":
 			posts.Add(1)
 			if r.Method != http.MethodPost || r.URL.Query().Get("source") != "https://example.org/protected.safetensors" || r.URL.Query().Get("access_token") != sourceToken || r.Header.Get("Authorization") != "Bearer "+connectionToken || len(r.URL.Query()) != 2 {
@@ -723,7 +723,7 @@ func TestModelsInstallProtectedURLFailuresNeverRevealTokenOrRetry(t *testing.T) 
 				case "/api/v1/app/version":
 					_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
 				case "/openapi.json":
-					_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
+					_, _ = w.Write([]byte(`{"paths":{"/api/v1/app/version":{"get":{}},"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
 				case "/api/v2/models/install":
 					posts.Add(1)
 					if r.URL.Query().Get("access_token") != token {
@@ -918,7 +918,7 @@ func TestModelsInstallLostResponseGivesInventoryAndJobInspectionGuidance(t *test
 		case "/api/v1/app/version":
 			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
 		case "/openapi.json":
-			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
+			_, _ = w.Write([]byte(`{"paths":{"/api/v1/app/version":{"get":{}},"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
 		case "/api/v2/models/install":
 			posts.Add(1)
 			connection, _, err := w.(http.Hijacker).Hijack()

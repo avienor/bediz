@@ -174,8 +174,10 @@ func (p QueuePosition) describe() string {
 
 // waitingFor names the items a stopped wait was still waiting for: the pending
 // items when the wait tracked them, otherwise every item of the position.
-func waitingFor(position QueuePosition, pending []int) string {
-	if pending != nil {
+func waitingFor(position QueuePosition, pending, messageItemIDs []int) string {
+	if messageItemIDs != nil {
+		position.ItemIDs = messageItemIDs
+	} else if pending != nil {
 		position.ItemIDs = pending
 	}
 	return position.describe()
@@ -188,10 +190,12 @@ func waitingFor(position QueuePosition, pending []int) string {
 type WaitTimeoutError struct {
 	Position       QueuePosition
 	PendingItemIDs []int
+	// MessageItemIDs retains the accepted-item wording for graph waits.
+	MessageItemIDs []int
 }
 
 func (e *WaitTimeoutError) Error() string {
-	return "wait timeout elapsed before " + waitingFor(e.Position, e.PendingItemIDs) + " reached a terminal state; the InvokeAI item was not canceled"
+	return "wait timeout elapsed before " + waitingFor(e.Position, e.PendingItemIDs, e.MessageItemIDs) + " reached a terminal state; the InvokeAI item was not canceled"
 }
 
 // InterruptedError reports that local interruption stopped Bediz while accepted
@@ -200,10 +204,12 @@ func (e *WaitTimeoutError) Error() string {
 type InterruptedError struct {
 	Position       QueuePosition
 	PendingItemIDs []int
+	// MessageItemIDs retains the accepted-item wording for graph waits.
+	MessageItemIDs []int
 }
 
 func (e *InterruptedError) Error() string {
-	return "waiting for " + waitingFor(e.Position, e.PendingItemIDs) + " was interrupted locally; the InvokeAI item was not canceled"
+	return "waiting for " + waitingFor(e.Position, e.PendingItemIDs, e.MessageItemIDs) + " was interrupted locally; the InvokeAI item was not canceled"
 }
 
 func (e *InterruptedError) Unwrap() error { return context.Canceled }

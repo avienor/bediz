@@ -13,6 +13,16 @@
             "name": "source",
             "in": "query",
             "required": true
+          },
+          {
+            "name": "inplace",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "access_token",
+            "in": "query",
+            "required": false
           }
         ],
         "responses": {
@@ -34,6 +44,9 @@
       "delete": {}
     },
     "/api/v2/models/install/{id}": {
+      "get": {}
+    },
+    "/api/v2/models/hugging_face": {
       "get": {}
     },
     "/api/v2/models/hf_login": {

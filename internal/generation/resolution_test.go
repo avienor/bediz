@@ -24,7 +24,7 @@ func TestResolveAnimaAppliesFamilyDefaultsAndUniqueComponents(t *testing.T) {
 		{Key: "vae-key", Hash: "blake3:vae", Name: "Anima VAE", Base: "anima", Type: "vae"},
 	}
 
-	resolved, err := generation.ResolveAnima(request, inventory, bytes.NewReader([]byte{0x78, 0x56, 0x34, 0x12}))
+	resolved, err := generation.Resolve(request, inventory, bytes.NewReader([]byte{0x78, 0x56, 0x34, 0x12}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestResolveAnimaReturnsStableSelectionCandidates(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := generation.ResolveAnima(test.request, test.inventory, &errorReader{err: errors.New("unexpected random read")})
+			_, err := generation.Resolve(test.request, test.inventory, &errorReader{err: errors.New("unexpected random read")})
 			selection, ok := errors.AsType[*operation.SelectionRequiredError](err)
 			if !ok {
 				t.Fatalf("error = %v, want selection_required", err)
@@ -129,7 +129,7 @@ func TestResolveAnimaExplicitSettingsAndCompatibleSelectorsWin(t *testing.T) {
 		{Key: "encoder-b", Hash: "blake3:encoder-b", Name: "Encoder B", Base: "any", Type: "qwen3_encoder"},
 	}
 
-	resolved, err := generation.ResolveAnima(request, inventory, random)
+	resolved, err := generation.Resolve(request, inventory, random)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestResolveAnimaAssignsIndependentRandomSeeds(t *testing.T) {
 		0xff, 0xff, 0xff, 0xff,
 	})
 
-	resolved, err := generation.ResolveAnima(request, inventory, random)
+	resolved, err := generation.Resolve(request, inventory, random)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestResolveAnimaIncrementsExplicitSeedWithUnsignedWraparound(t *testing.T) 
 		{Key: "encoder-key", Hash: "blake3:encoder", Name: "Qwen3 Encoder", Base: "any", Type: "qwen3_encoder"},
 	}
 
-	resolved, err := generation.ResolveAnima(request, inventory, &errorReader{err: errors.New("random source must not be read")})
+	resolved, err := generation.Resolve(request, inventory, &errorReader{err: errors.New("random source must not be read")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +240,7 @@ func TestResolveAnimaRejectsInvalidSettings(t *testing.T) {
 			request := valid
 			test.change(&request)
 
-			_, err := generation.ResolveAnima(request, inventory, &errorReader{err: errors.New("unexpected random read")})
+			_, err := generation.Resolve(request, inventory, &errorReader{err: errors.New("unexpected random read")})
 			invalid, ok := errors.AsType[*operation.InvalidRequestError](err)
 			if !ok || !strings.Contains(invalid.Error(), test.message) {
 				t.Fatalf("error = %v, want invalid_request containing %q", err, test.message)
@@ -262,7 +262,7 @@ func TestResolveAnimaAcceptsEveryApprovedScheduler(t *testing.T) {
 				Scheduler: new(scheduler), Seed: new(uint32(1)),
 			}
 
-			resolved, err := generation.ResolveAnima(request, inventory, &errorReader{err: errors.New("unexpected random read")})
+			resolved, err := generation.Resolve(request, inventory, &errorReader{err: errors.New("unexpected random read")})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -290,7 +290,7 @@ func TestResolveAnimaReportsMissingComponents(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := generation.ResolveAnima(request, test.inventory, &errorReader{err: errors.New("unexpected random read")})
+			_, err := generation.Resolve(request, test.inventory, &errorReader{err: errors.New("unexpected random read")})
 			missing, ok := errors.AsType[*operation.MissingComponentError](err)
 			if !ok {
 				t.Fatalf("error = %v, want missing_component", err)
@@ -350,7 +350,7 @@ func TestResolveAnimaRejectsIncompatibleOrIncompleteExactModels(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := generation.ResolveAnima(test.request, test.inventory, &errorReader{err: errors.New("unexpected random read")})
+			_, err := generation.Resolve(test.request, test.inventory, &errorReader{err: errors.New("unexpected random read")})
 			if _, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); !ok {
 				t.Fatalf("error = %v, want unsupported_capability", err)
 			}
@@ -367,7 +367,7 @@ func TestResolveAnimaRejectsIncompleteAmbiguityCandidates(t *testing.T) {
 		{Key: "encoder-key", Hash: "blake3:encoder", Name: "Qwen3 Encoder", Base: "any", Type: "qwen3_encoder"},
 	}
 
-	_, err := generation.ResolveAnima(request, inventory, &errorReader{err: errors.New("unexpected random read")})
+	_, err := generation.Resolve(request, inventory, &errorReader{err: errors.New("unexpected random read")})
 	if _, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); !ok {
 		t.Fatalf("error = %v, want unsupported_capability", err)
 	}

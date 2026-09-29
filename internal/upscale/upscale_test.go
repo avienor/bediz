@@ -12,6 +12,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/avienor/bediz/internal/directexecution"
 	"github.com/avienor/bediz/internal/graphops"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/images"
@@ -100,7 +101,7 @@ func TestSubmitChecksSourceAndEnqueuesOnce(t *testing.T) {
 	}
 	for index, test := range []struct{ scale, expected int }{{2, 1024}, {4, 2048}, {8, 4104}} {
 		request := upscale.Request{SchemaVersion: 1, Source: upscale.Source{Type: "image", Reference: "source.png"}, Model: "main", Scale: new(test.scale), Seed: new(uint32(42)), Components: &upscale.Components{TileControlNet: new("controlnet")}}
-		receipt, err := upscale.Submit(t.Context(), client, request)
+		receipt, err := directexecution.Upscale(t.Context(), client, request, directexecution.Options{NoWait: true})
 		if err != nil {
 			t.Fatal(err)
 		}

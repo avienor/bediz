@@ -6,6 +6,8 @@ Each release lists the changes that affect users of the `bediz` binary, its JSON
 
 ### Added
 
+- `doctor` reports `models.install` readiness for Hugging Face sources, server paths, and Source Tokens with source-specific failures.
+- `generate` and `upscale` wait timeouts and interruptions report `pending_item_ids` in queue item order.
 - SDXL image-to-image generation through `generate --image` or `--image-path`, with `--strength`, source-aware dimensions, an Execution Receipt, and a separate `doctor` mode.
 - Anima image-to-image generation through the same Source Image contract, with its tested encoder graph and a separate `doctor` mode.
 - FLUX.1 dev and schnell image-to-image generation through the same Source Image contract, with optimized Denoising Strength, 16-pixel source alignment, and a separate `doctor` mode.
@@ -15,6 +17,8 @@ Each release lists the changes that affect users of the `bediz` binary, its JSON
 
 ### Changed
 
+- `generate` text-to-image and `upscale` check recorded InvokeAI endpoints before upload or enqueue; Recall, installation, and Hugging Face login preflight share `doctor`'s Compatibility Check.
+- `generate` retains `profile_preference_skipped` warnings on pre-enqueue failures, matching `upscale`'s failure handling.
 - The agent skill teaches image-to-image generation for Anima, SDXL, and FLUX.1, including Source Images, Denoising Strength, dimensions, safe failure recovery, and partial UI Synchronization; the README lists it as supported.
 - `images upload` and upscale `path` sources reject files whose content is not an image before any network request.
 - A source token is refused for a non-loopback plain-HTTP artifact URL: `invalid_request` for a direct URL, `unsupported_capability` for a starter entry.

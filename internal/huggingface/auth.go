@@ -2,13 +2,14 @@ package huggingface
 
 import (
 	"context"
-	"encoding/json/jsontext"
 	"errors"
 	"net/http"
 
 	"github.com/avienor/bediz/internal/capability"
+	"github.com/avienor/bediz/internal/compatibility"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/operation"
+	"github.com/avienor/bediz/internal/result"
 )
 
 const endpoint = capability.HuggingFaceAuthEndpoint
@@ -98,36 +99,24 @@ func compatible(ctx context.Context, client *httpclient.Client, method string) e
 	if err := capability.RequireSupportedVersion(ctx, client); err != nil {
 		return err
 	}
-	var document struct {
-		Paths      map[string]map[string]jsontext.Value `json:"paths"`
-		Components struct {
-			Schemas map[string]struct {
-				Properties map[string]struct {
-					Type string `json:"type"`
-				} `json:"properties"`
-				Required []string `json:"required"`
-			} `json:"schemas"`
-		} `json:"components"`
-	}
+	var document compatibility.Document
 	if err := client.GetJSON(ctx, "/openapi.json", &document); err != nil {
 		return err
 	}
-	endpointMethods := document.Paths[endpoint]
-	if _, ok := endpointMethods[lowerMethod(method)]; !ok {
-		return operation.UnsupportedCapability("InvokeAI Hugging Face authentication endpoint is unavailable")
-	}
+	operationName := result.OperationAuthHFLogout
 	if method == http.MethodPost {
-		schema := document.Components.Schemas["Body_do_hf_login"]
-		if !capability.HasHuggingFaceTokenBody(endpointMethods["post"], schema.Properties["token"].Type, schema.Required) {
-			return operation.UnsupportedCapability("InvokeAI Hugging Face login token schema is incompatible")
-		}
+		operationName = result.OperationAuthHFLogin
 	}
-	return nil
-}
-
-func lowerMethod(method string) string {
-	if method == http.MethodPost {
-		return "post"
+	entry, found := capability.Find(operationName, "", "")
+	if !found {
+		return operation.UnsupportedCapability("InvokeAI Hugging Face authentication requirements are unavailable")
 	}
-	return "delete"
+	failures := compatibility.Evaluate(entry, compatibility.Snapshot{SupportedVersion: true, OpenAPIAvailable: true, Document: document})
+	if len(failures) == 0 {
+		return nil
+	}
+	if failures[0].Code == "incompatible_hf_login_schema:token" {
+		return operation.UnsupportedCapability("InvokeAI Hugging Face login token schema is incompatible")
+	}
+	return operation.UnsupportedCapability("InvokeAI Hugging Face authentication endpoint is unavailable")
 }

@@ -118,7 +118,7 @@ type Batch = graphops.Batch
 type BatchDatum = graphops.BatchDatum
 type EnqueueRequest = graphops.EnqueueRequest
 
-func CompileAnima(resolved AnimaResolution) (EnqueueRequest, error) {
+func compileAnima(resolved Resolution) (EnqueueRequest, error) {
 	request := resolved.Request
 	if request.Width == nil || request.Height == nil || request.Steps == nil || request.Scheduler == nil ||
 		request.Guidance == nil || request.Seed == nil || request.OutputCount == nil {

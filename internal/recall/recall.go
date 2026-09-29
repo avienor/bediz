@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/avienor/bediz/internal/capability"
+	"github.com/avienor/bediz/internal/compatibility"
 	"github.com/avienor/bediz/internal/generation"
 	"github.com/avienor/bediz/internal/graphops"
 	"github.com/avienor/bediz/internal/httpclient"
@@ -26,27 +28,6 @@ type Request struct {
 type Result struct {
 	QueueID string `json:"queue_id"`
 	Mode    string `json:"mode"`
-}
-
-type openAPIDocument struct {
-	Paths map[string]struct {
-		Post struct {
-			RequestBody struct {
-				Content map[string]struct {
-					Schema struct {
-						Ref string `json:"$ref"`
-					} `json:"schema"`
-				} `json:"content"`
-			} `json:"requestBody"`
-		} `json:"post"`
-	} `json:"paths"`
-	Components struct {
-		Schemas map[string]struct {
-			Properties map[string]struct {
-				AnyOf []capability.RecallSchemaAlternative `json:"anyOf"`
-			} `json:"properties"`
-		} `json:"schemas"`
-	} `json:"components"`
 }
 
 func Submit(ctx context.Context, client *httpclient.Client, request Request) (Result, error) {
@@ -81,31 +62,24 @@ func submit(ctx context.Context, client *httpclient.Client, request Request, add
 	if err := capability.RequireSupportedVersion(ctx, client); err != nil {
 		return Result{}, err
 	}
-	var openAPI openAPIDocument
+	var openAPI compatibility.Document
 	if err := client.GetJSON(ctx, "/openapi.json", &openAPI); err != nil {
 		return Result{}, err
 	}
-	path := openAPI.Paths[capability.RecallEndpoint]
-	if path.Post.RequestBody.Content["application/json"].Schema.Ref != capability.RecallSchemaRef {
-		return Result{}, operation.UnsupportedCapability("InvokeAI Recall endpoint does not expose the tested request schema")
-	}
-	properties := openAPI.Components.Schemas["RecallParameter"].Properties
-	for _, field := range capability.RecallPatchFields {
-		property, ok := properties[field.Name]
-		if !ok || !field.MatchesNullableAlternatives(property.AnyOf) {
-			return Result{}, operation.UnsupportedCapability(fmt.Sprintf("InvokeAI Recall schema does not support %s as a patch field", field.Name))
-		}
-	}
+	additionalRequirements := make([]capability.RecallFieldRequirement, 0, len(additional))
 	for _, field := range additional {
 		for _, common := range capability.RecallPatchFields {
 			if field.Requirement.Name == common.Name {
 				return Result{}, operation.InvalidRequest(fmt.Sprintf("additional Recall field %q overlaps a common patch field", field.Requirement.Name))
 			}
 		}
-		property, ok := properties[field.Requirement.Name]
-		if !ok || !field.Requirement.MatchesNullableAlternatives(property.AnyOf) {
-			return Result{}, operation.UnsupportedCapability(fmt.Sprintf("InvokeAI Recall schema does not support %s as a patch field", field.Requirement.Name))
+		additionalRequirements = append(additionalRequirements, field.Requirement)
+	}
+	if failures := compatibility.Evaluate(capability.RecallEntry(additionalRequirements), compatibility.Snapshot{SupportedVersion: true, OpenAPIAvailable: true, Document: openAPI}); len(failures) > 0 {
+		if field, ok := strings.CutPrefix(failures[0].Code, "incompatible_recall_schema:"); ok && field != "request_body" {
+			return Result{}, operation.UnsupportedCapability(fmt.Sprintf("InvokeAI Recall schema does not support %s as a patch field", field))
 		}
+		return Result{}, operation.UnsupportedCapability("InvokeAI Recall endpoint does not expose the tested request schema")
 	}
 	patch := request
 	if request.Model != nil {

@@ -3,15 +3,13 @@ package doctor
 import (
 	"cmp"
 	"context"
-	"encoding/json"
-	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
 	"slices"
-	"strings"
 
 	"github.com/avienor/bediz/internal/capability"
+	"github.com/avienor/bediz/internal/compatibility"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/result"
 	"github.com/avienor/bediz/internal/version"
@@ -73,24 +71,6 @@ type ModelSummary struct {
 	Variant string `json:"variant,omitempty"`
 }
 
-type modelInventoryEntry struct {
-	Key     string `json:"key"`
-	Hash    string `json:"hash"`
-	Name    string `json:"name"`
-	Base    string `json:"base"`
-	Type    string `json:"type"`
-	Format  string `json:"format"`
-	Variant string `json:"variant"`
-}
-
-func (m modelInventoryEntry) completeIdentifier() bool {
-	return m.Key != "" && m.Hash != "" && m.Name != "" && m.Base != "" && m.Type != ""
-}
-
-func (m modelInventoryEntry) summary() ModelSummary {
-	return ModelSummary{Key: m.Key, Name: m.Name, Base: m.Base, Type: m.Type, Format: m.Format, Variant: m.Variant}
-}
-
 type ModelRequirement struct {
 	Name      string `json:"name"`
 	Available int    `json:"available"`
@@ -113,27 +93,8 @@ type Issue struct {
 	Details map[string]any `json:"details,omitempty"`
 }
 
-type openAPIDocument struct {
-	Paths      map[string]map[string]json.RawMessage `json:"paths"`
-	Components struct {
-		Schemas map[string]openAPISchema `json:"schemas"`
-	} `json:"components"`
-}
-
-type openAPISchema struct {
-	Properties           map[string]openAPIProperty `json:"properties"`
-	Required             []string                   `json:"required"`
-	AdditionalProperties bool                       `json:"additionalProperties"`
-}
-
-type openAPIProperty struct {
-	Const string                               `json:"const"`
-	Type  string                               `json:"type"`
-	AnyOf []capability.RecallSchemaAlternative `json:"anyOf"`
-}
-
 type modelList struct {
-	Models []modelInventoryEntry `json:"models"`
+	Models []compatibility.Model `json:"models"`
 }
 
 type appVersion struct {
@@ -185,7 +146,7 @@ func Run(ctx context.Context, client *httpclient.Client, bedizVersion version.In
 		appendRequestIssue(&report, "version", versionErr)
 	}
 
-	var document openAPIDocument
+	var document compatibility.Document
 	openAPIErr := client.GetJSON(ctx, "/openapi.json", &document)
 	if openAPIErr == nil {
 		report.OpenAPI.Available = true
@@ -253,7 +214,13 @@ func Run(ctx context.Context, client *httpclient.Client, bedizVersion version.In
 	if report.InvokeAI.ConnectionStatus == "unknown" {
 		report.InvokeAI.ConnectionStatus = "failed"
 	}
-	report.Capabilities = buildCapabilities(report, document)
+	report.Capabilities = buildCapabilities(compatibility.Snapshot{
+		SupportedVersion: report.InvokeAI.SupportedVersion,
+		OpenAPIAvailable: report.OpenAPI.Available,
+		Document:         document,
+		ModelsAvailable:  report.Models.Available,
+		Models:           models.Models,
+	})
 	for _, entry := range report.Capabilities {
 		if entry.UISync != "" {
 			report.UISync[entry.Operation] = entry.UISync
@@ -268,59 +235,48 @@ func Run(ctx context.Context, client *httpclient.Client, bedizVersion version.In
 	return report
 }
 
-func inspectOpenAPI(document openAPIDocument) ([]EndpointCheck, []InvocationCheck) {
+func inspectOpenAPI(document compatibility.Document) ([]EndpointCheck, []InvocationCheck) {
 	endpointRequirements := uniqueEndpoints()
 	endpoints := make([]EndpointCheck, 0, len(endpointRequirements))
 	for _, requirement := range endpointRequirements {
-		methods := document.Paths[requirement.Path]
-		_, available := methods[strings.ToLower(requirement.Method)]
-		endpoints = append(endpoints, EndpointCheck{Method: requirement.Method, Path: requirement.Path, Available: available})
+		endpoints = append(endpoints, EndpointCheck{Method: requirement.Method, Path: requirement.Path, Available: compatibility.EndpointAvailable(document, requirement)})
 	}
 
 	invocationRequirements := uniqueInvocations()
 	invocations := make([]InvocationCheck, 0, len(invocationRequirements))
 	for _, requirement := range invocationRequirements {
-		schema, exists := document.Components.Schemas[requirement.Schema]
+		result := compatibility.InspectInvocation(document, requirement)
 		check := InvocationCheck{
 			Schema:            requirement.Schema,
 			Type:              requirement.Type,
-			Available:         exists && schema.Properties["type"].Const == requirement.Type,
-			MissingProperties: []string{},
-		}
-		for _, property := range requirement.Properties {
-			if _, ok := schema.Properties[property]; !ok {
-				check.MissingProperties = append(check.MissingProperties, property)
-			}
-		}
-		if requirement.RequiresAdditionalProperties && !schema.AdditionalProperties {
-			check.MissingProperties = append(check.MissingProperties, "additionalProperties")
+			Available:         result.Available,
+			MissingProperties: result.MissingProperties,
 		}
 		invocations = append(invocations, check)
 	}
 	return endpoints, invocations
 }
 
-func inspectModels(models []modelInventoryEntry) ([]ModelSummary, []ModelRequirement) {
+func inspectModels(models []compatibility.Model) ([]ModelSummary, []ModelRequirement) {
 	requirements := uniqueModelRequirements()
 	relevant := make([]ModelSummary, 0)
 	seen := make(map[string]bool)
 	checks := make([]ModelRequirement, 0, len(requirements))
 	for _, requirement := range requirements {
-		count := 0
+		check := compatibility.InspectModel(models, requirement)
 		for _, model := range models {
-			if modelMatches(model, requirement) {
-				count++
+			if compatibility.ModelMatches(model, requirement) {
 				if !seen[model.Key] {
-					relevant = append(relevant, model.summary())
+					relevant = append(relevant, ModelSummary{Key: model.Key, Name: model.Name, Base: model.Base, Type: model.Type, Format: model.Format, Variant: model.Variant})
 					seen[model.Key] = true
 				}
 			}
 		}
 		checks = append(checks, ModelRequirement{
 			Name:      requirement.Name,
-			Available: count,
-			Required:  requirement.MinimumCount,
-			Satisfied: count >= requirement.MinimumCount,
+			Available: check.Available,
+			Required:  check.Required,
+			Satisfied: check.Satisfied,
 		})
 	}
 	slices.SortFunc(relevant, func(a, b ModelSummary) int {
@@ -329,61 +285,12 @@ func inspectModels(models []modelInventoryEntry) ([]ModelSummary, []ModelRequire
 	return relevant, checks
 }
 
-func buildCapabilities(report Report, document openAPIDocument) []CapabilityReport {
+func buildCapabilities(snapshot compatibility.Snapshot) []CapabilityReport {
 	capabilities := make([]CapabilityReport, 0, len(capability.Matrix))
 	for _, entry := range capability.Matrix {
 		failures := make([]string, 0)
-		if entry.VersionPolicy == capability.VersionPolicySupportedRange && !report.InvokeAI.SupportedVersion {
-			failures = append(failures, "unsupported_version")
-		}
-		if !report.OpenAPI.Available {
-			failures = append(failures, "openapi_unavailable")
-		} else {
-			for _, requirement := range entry.Endpoints {
-				if !endpointAvailable(report.OpenAPI.Endpoints, requirement) {
-					failures = append(failures, "missing_endpoint:"+requirement.Method+" "+requirement.Path)
-				}
-			}
-			for _, requirement := range entry.Invocations {
-				if !invocationRequirementAvailable(document, requirement) {
-					failures = append(failures, "incompatible_invocation:"+requirement.Type)
-				}
-			}
-		}
-		if len(entry.Models) > 0 {
-			if !report.Models.Available {
-				failures = append(failures, "models_unavailable")
-			} else {
-				for _, requirement := range entry.Models {
-					if !modelRequirementSatisfied(report.Models.Requirements, requirement.Name) {
-						failures = append(failures, "missing_component:"+requirement.Name)
-					}
-				}
-			}
-		}
-		if entry.Operation == result.OperationRecall && report.OpenAPI.Available &&
-			endpointAvailable(report.OpenAPI.Endpoints, capability.EndpointRequirement{Method: "POST", Path: capability.RecallEndpoint}) {
-			failures = append(failures, recallSchemaFailures(document)...)
-		}
-		if entry.Operation == result.OperationModelsInstall && report.OpenAPI.Available &&
-			endpointAvailable(report.OpenAPI.Endpoints, capability.EndpointRequirement{Method: "POST", Path: "/api/v2/models/install"}) {
-			endpoint := installEndpoint(document.Paths["/api/v2/models/install"]["post"])
-			if !endpoint.HasRequiredSource() {
-				failures = append(failures, "incompatible_install_schema:source")
-			}
-			if !endpoint.HasJobResponse() {
-				failures = append(failures, "incompatible_install_schema:job_response")
-			}
-		}
-		if entry.Operation == result.OperationModelsInstall && entry.Family == "starter" && report.OpenAPI.Available &&
-			endpointAvailable(report.OpenAPI.Endpoints, capability.EndpointRequirement{Method: "GET", Path: "/api/v2/models/starter_models"}) &&
-			!installEndpoint(document.Paths["/api/v2/models/starter_models"]["get"]).HasStarterCatalogResponse() {
-			failures = append(failures, "incompatible_starter_catalog_response")
-		}
-		if entry.Operation == result.OperationAuthHFLogin && report.OpenAPI.Available &&
-			endpointAvailable(report.OpenAPI.Endpoints, capability.EndpointRequirement{Method: "POST", Path: capability.HuggingFaceAuthEndpoint}) &&
-			!hasHuggingFaceTokenBody(document) {
-			failures = append(failures, "incompatible_hf_login_schema:token")
+		for _, failure := range compatibility.Evaluate(entry, snapshot) {
+			failures = append(failures, failure.Code)
 		}
 		capabilities = append(capabilities, CapabilityReport{
 			Operation:  entry.Operation,
@@ -407,44 +314,6 @@ func buildCapabilities(report Report, document openAPIDocument) []CapabilityRepo
 		}
 	}
 	return capabilities
-}
-
-func hasHuggingFaceTokenBody(document openAPIDocument) bool {
-	schema := document.Components.Schemas["Body_do_hf_login"]
-	return capability.HasHuggingFaceTokenBody(document.Paths[capability.HuggingFaceAuthEndpoint]["post"], schema.Properties["token"].Type, schema.Required)
-}
-
-func installEndpoint(post json.RawMessage) capability.InstallEndpoint {
-	var endpoint capability.InstallEndpoint
-	if err := jsonv2.Unmarshal(post, &endpoint); err != nil {
-		return capability.InstallEndpoint{}
-	}
-	return endpoint
-}
-
-func recallSchemaFailures(document openAPIDocument) []string {
-	var body struct {
-		RequestBody struct {
-			Content map[string]struct {
-				Schema struct {
-					Ref string `json:"$ref"`
-				} `json:"schema"`
-			} `json:"content"`
-		} `json:"requestBody"`
-	}
-	post := document.Paths[capability.RecallEndpoint]["post"]
-	if err := jsonv2.Unmarshal(post, &body); err != nil || body.RequestBody.Content["application/json"].Schema.Ref != capability.RecallSchemaRef {
-		return []string{"incompatible_recall_schema:request_body"}
-	}
-	properties := document.Components.Schemas["RecallParameter"].Properties
-	failures := make([]string, 0)
-	for _, field := range append(slices.Clone(capability.RecallPatchFields), capability.SDXLCFGRecallField) {
-		property, ok := properties[field.Name]
-		if !ok || !field.MatchesNullableAlternatives(property.AnyOf) {
-			failures = append(failures, "incompatible_recall_schema:"+field.Name)
-		}
-	}
-	return failures
 }
 
 func appendRequestIssue(report *Report, check string, err error) {
@@ -510,43 +379,6 @@ func uniqueModelRequirements() []capability.ModelRequirement {
 		}
 	}
 	return requirements
-}
-
-func modelMatches(model modelInventoryEntry, requirement capability.ModelRequirement) bool {
-	return model.completeIdentifier() && slices.Contains(requirement.Types, model.Type) && slices.Contains(requirement.Bases, model.Base) &&
-		(len(requirement.Variants) == 0 || slices.Contains(requirement.Variants, model.Variant)) &&
-		(len(requirement.Formats) == 0 || slices.Contains(requirement.Formats, model.Format))
-}
-
-func endpointAvailable(checks []EndpointCheck, requirement capability.EndpointRequirement) bool {
-	for _, check := range checks {
-		if check.Method == requirement.Method && check.Path == requirement.Path {
-			return check.Available
-		}
-	}
-	return false
-}
-
-func invocationRequirementAvailable(document openAPIDocument, requirement capability.InvocationRequirement) bool {
-	schema, exists := document.Components.Schemas[requirement.Schema]
-	if !exists || schema.Properties["type"].Const != requirement.Type || (requirement.RequiresAdditionalProperties && !schema.AdditionalProperties) {
-		return false
-	}
-	for _, property := range requirement.Properties {
-		if _, exists := schema.Properties[property]; !exists {
-			return false
-		}
-	}
-	return true
-}
-
-func modelRequirementSatisfied(checks []ModelRequirement, name string) bool {
-	for _, check := range checks {
-		if check.Name == name {
-			return check.Satisfied
-		}
-	}
-	return false
 }
 
 // Failure reports the structured failure that decides doctor's outcome, or nil

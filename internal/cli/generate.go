@@ -6,11 +6,11 @@ import (
 	"io"
 	"time"
 
+	"github.com/avienor/bediz/internal/directexecution"
 	"github.com/avienor/bediz/internal/generation"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/result"
 	"github.com/avienor/bediz/internal/sourceimage"
-	"github.com/avienor/bediz/internal/synchronization"
 	"github.com/spf13/cobra"
 )
 
@@ -157,15 +157,7 @@ func (c *CLI) executeGenerate(ctx context.Context, jsonOutput bool, command *cob
 		requestPath:       options.requestPath,
 		operationFlagsSet: fieldsSet,
 		invoke: func(ctx context.Context, client *httpclient.Client, request generation.Request) (generation.ExecutionReceipt, error) {
-			accepted, err := generation.Submit(ctx, client, request)
-			if err != nil {
-				return accepted, err
-			}
-			accepted = synchronization.Synchronize(ctx, client, accepted)
-			if options.noWait {
-				return accepted, nil
-			}
-			return generation.Wait(ctx, client, accepted, generation.WaitOptions{Timeout: options.waitTimeout})
+			return directexecution.Generate(ctx, client, request, directexecution.Options{NoWait: options.noWait, Timeout: options.waitTimeout})
 		},
 		render:   renderExecutionReceipt,
 		warnings: func(receipt generation.ExecutionReceipt) []result.Warning { return receipt.Warnings },

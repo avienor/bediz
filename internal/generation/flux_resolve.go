@@ -4,27 +4,11 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"slices"
 
 	"github.com/avienor/bediz/internal/capability"
 	"github.com/avienor/bediz/internal/graphops"
 	"github.com/avienor/bediz/internal/operation"
 )
-
-// ResolveFLUX resolves a supported FLUX.1 main model and its three components.
-func ResolveFLUX(request Request, inventory []ModelIdentifier, random io.Reader) (Resolution, error) {
-	if err := validateCommonRequest(request); err != nil {
-		return Resolution{}, err
-	}
-	main, err := ResolveFamilyMain(inventory, request.Model)
-	if err != nil {
-		return Resolution{}, err
-	}
-	if main.Base != "flux" {
-		return Resolution{}, operation.UnsupportedCapability(fmt.Sprintf("model %q is not a FLUX.1 main model", main.Key))
-	}
-	return resolveFLUX(request, main, inventory, random)
-}
 
 func validateFLUXMain(main ModelIdentifier) error {
 	if !capability.SupportsFLUXMain(main.Variant, main.Format) {
@@ -33,7 +17,7 @@ func validateFLUXMain(main ModelIdentifier) error {
 	return nil
 }
 
-func resolveFLUX(request Request, main ModelIdentifier, inventory []ModelIdentifier, random io.Reader) (Resolution, error) {
+func resolveFLUX(request Request, main ModelIdentifier, inventory []ModelIdentifier, random io.Reader, alignment int, entry capability.Entry) (Resolution, error) {
 	if err := validateFLUXMain(main); err != nil {
 		return Resolution{}, err
 	}
@@ -70,13 +54,13 @@ func resolveFLUX(request Request, main ModelIdentifier, inventory []ModelIdentif
 	if resolved.OutputCount == nil {
 		resolved.OutputCount = new(1)
 	}
-	if *resolved.Width < 1 || *resolved.Width%16 != 0 || *resolved.Height < 1 || *resolved.Height%16 != 0 {
-		return Resolution{}, operation.InvalidRequest("width and height must be positive multiples of 16")
+	if err := validateGenerationDimensions(*resolved.Width, *resolved.Height, alignment); err != nil {
+		return Resolution{}, err
 	}
 	if *resolved.Steps < 1 {
 		return Resolution{}, operation.InvalidRequest("steps must be positive")
 	}
-	if !isFLUXScheduler(*resolved.Scheduler) {
+	if !entry.SupportsScheduler(*resolved.Scheduler) {
 		return Resolution{}, operation.InvalidField("scheduler", "scheduler is not supported for FLUX.1")
 	}
 	if *resolved.OutputCount < 1 {
@@ -120,8 +104,4 @@ func resolveFLUX(request Request, main ModelIdentifier, inventory []ModelIdentif
 		return Resolution{}, fmt.Errorf("resolve FLUX.1 CLIP Embed: %w", err)
 	}
 	return Resolution{Request: resolved, Models: ResolvedModels{Main: main, VAE: vae, T5Encoder: t5, CLIPEmbed: clip}, Seeds: seeds}, nil
-}
-
-func isFLUXScheduler(scheduler string) bool {
-	return slices.Contains([]string{"euler", "heun", "lcm"}, scheduler)
 }

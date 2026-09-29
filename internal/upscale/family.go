@@ -50,6 +50,16 @@ func familyFor(base string) (family, bool) {
 	return family{}, false
 }
 
+// supportsScheduler validates locally before a main model can be resolved.
+func supportsScheduler(name string) bool {
+	for _, candidate := range families {
+		if candidate.entry().SupportsScheduler(name) {
+			return true
+		}
+	}
+	return false
+}
+
 // sdxlConditioning is the stock SDXL branch, whose style inputs equal their prompts.
 func sdxlConditioning(model graphops.ModelReference, nodes map[string]any) []graphops.Edge {
 	nodes["model_loader"] = node("model_loader", "sdxl_model_loader", map[string]any{"model": model})

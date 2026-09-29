@@ -1,0 +1,180 @@
+[
+  {
+    "operation": "models.list",
+    "compatible": true,
+    "failures": []
+  },
+  {
+    "operation": "models.scan",
+    "compatible": true,
+    "failures": []
+  },
+  {
+    "operation": "models.install",
+    "compatible": true,
+    "failures": []
+  },
+  {
+    "operation": "models.install",
+    "family": "starter",
+    "compatible": true,
+    "failures": []
+  },
+  {
+    "operation": "models.status",
+    "compatible": true,
+    "failures": []
+  },
+  {
+    "operation": "models.delete",
+    "compatible": true,
+    "failures": []
+  },
+  {
+    "operation": "images.list",
+    "compatible": true,
+    "failures": []
+  },
+  {
+    "operation": "images.get",
+    "compatible": true,
+    "failures": []
+  },
+  {
+    "operation": "images.upload",
+    "compatible": true,
+    "failures": []
+  },
+  {
+    "operation": "images.download",
+    "compatible": true,
+    "failures": []
+  },
+  {
+    "operation": "images.delete",
+    "compatible": true,
+    "failures": []
+  },
+  {
+    "operation": "queue.list",
+    "compatible": true,
+    "failures": []
+  },
+  {
+    "operation": "queue.get",
+    "compatible": true,
+    "failures": []
+  },
+  {
+    "operation": "queue.wait",
+    "compatible": true,
+    "failures": []
+  },
+  {
+    "operation": "queue.cancel",
+    "compatible": true,
+    "failures": []
+  },
+  {
+    "operation": "queue.clear",
+    "compatible": true,
+    "failures": []
+  },
+  {
+    "operation": "boards.list",
+    "compatible": true,
+    "failures": []
+  },
+  {
+    "operation": "boards.get",
+    "compatible": true,
+    "failures": []
+  },
+  {
+    "operation": "boards.create",
+    "compatible": true,
+    "failures": []
+  },
+  {
+    "operation": "generate",
+    "family": "anima",
+    "mode": "txt2img",
+    "compatible": true,
+    "ui_sync": "partial",
+    "failures": []
+  },
+  {
+    "operation": "generate",
+    "family": "anima",
+    "mode": "img2img",
+    "compatible": true,
+    "ui_sync": "partial",
+    "failures": []
+  },
+  {
+    "operation": "generate",
+    "family": "sdxl",
+    "mode": "txt2img",
+    "compatible": true,
+    "ui_sync": "partial",
+    "failures": []
+  },
+  {
+    "operation": "generate",
+    "family": "sdxl",
+    "mode": "img2img",
+    "compatible": true,
+    "ui_sync": "partial",
+    "failures": []
+  },
+  {
+    "operation": "generate",
+    "family": "flux",
+    "mode": "txt2img",
+    "compatible": true,
+    "ui_sync": "partial",
+    "failures": []
+  },
+  {
+    "operation": "generate",
+    "family": "flux",
+    "mode": "img2img",
+    "compatible": true,
+    "ui_sync": "partial",
+    "failures": []
+  },
+  {
+    "operation": "upscale",
+    "family": "sdxl",
+    "compatible": true,
+    "ui_sync": "partial",
+    "failures": []
+  },
+  {
+    "operation": "upscale",
+    "family": "sd-1",
+    "compatible": true,
+    "ui_sync": "partial",
+    "failures": []
+  },
+  {
+    "operation": "recall",
+    "compatible": true,
+    "failures": []
+  },
+  {
+    "operation": "auth.huggingface.status",
+    "compatible": true,
+    "failures": []
+  },
+  {
+    "operation": "auth.huggingface.login",
+    "compatible": true,
+    "failures": []
+  },
+  {
+    "operation": "auth.huggingface.logout",
+    "compatible": true,
+    "failures": []
+  }
+]

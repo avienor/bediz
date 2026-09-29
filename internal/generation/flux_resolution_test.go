@@ -28,7 +28,7 @@ func TestResolveFLUXVariantDefaultsAndRequiredComponents(t *testing.T) {
 	}{{fluxDev, 30, new(4.0)}, {fluxSchnell, 4, nil}} {
 		t.Run(tc.main.Variant, func(t *testing.T) {
 			request := generation.Request{SchemaVersion: 1, Model: tc.main.Key, PositivePrompt: "a lighthouse", Seed: new(uint32(41))}
-			got, err := generation.ResolveFLUX(request, fluxInventory(tc.main), bytes.NewReader(nil))
+			got, err := generation.Resolve(request, fluxInventory(tc.main), bytes.NewReader(nil))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -44,7 +44,7 @@ func TestResolveFLUXRejectsUnsupportedVariantsAndFormat(t *testing.T) {
 		main := fluxDev
 		main.Variant, main.Format = tc.variant, tc.format
 		request := generation.Request{SchemaVersion: 1, Model: main.Key, PositivePrompt: "test", Seed: new(uint32(1))}
-		_, err := generation.ResolveFLUX(request, fluxInventory(main), bytes.NewReader(nil))
+		_, err := generation.Resolve(request, fluxInventory(main), bytes.NewReader(nil))
 		if _, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); !ok {
 			t.Fatalf("variant=%q format=%q: %v", tc.variant, tc.format, err)
 		}
@@ -57,7 +57,7 @@ func TestResolveFLUXAcceptsStockLoaderFormats(t *testing.T) {
 			main := fluxDev
 			main.Format = format
 			request := generation.Request{SchemaVersion: 1, Model: main.Key, PositivePrompt: "test", Seed: new(uint32(1))}
-			if _, err := generation.ResolveFLUX(request, fluxInventory(main), bytes.NewReader(nil)); err != nil {
+			if _, err := generation.Resolve(request, fluxInventory(main), bytes.NewReader(nil)); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -80,7 +80,7 @@ func TestResolveFLUXValidatesVariantSettingsAndComponents(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			request := generation.Request{SchemaVersion: 1, Model: tc.main.Key, PositivePrompt: "test", Seed: new(uint32(1))}
 			tc.change(&request)
-			_, err := generation.ResolveFLUX(request, fluxInventory(tc.main), bytes.NewReader(nil))
+			_, err := generation.Resolve(request, fluxInventory(tc.main), bytes.NewReader(nil))
 			if _, ok := errors.AsType[*operation.InvalidRequestError](err); !ok {
 				t.Fatalf("error = %v", err)
 			}
@@ -111,7 +111,7 @@ func TestResolveFLUXComponentSelectionAndMissingGuidance(t *testing.T) {
 			if tc.change != nil {
 				tc.change(&r)
 			}
-			got, err := generation.ResolveFLUX(r, tc.inventory, bytes.NewReader(nil))
+			got, err := generation.Resolve(r, tc.inventory, bytes.NewReader(nil))
 			if tc.wantCode == "" {
 				if err != nil || got.Models.VAE.Key != fluxVAE.Key {
 					t.Fatalf("resolution = %#v; error = %v", got, err)

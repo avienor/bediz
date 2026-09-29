@@ -12,7 +12,6 @@ import (
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/images"
 	"github.com/avienor/bediz/internal/operation"
-	"github.com/avienor/bediz/internal/sourceimage"
 )
 
 func TestWaitRejectsMissingOrContradictorySeedMetadata(t *testing.T) {
@@ -100,14 +99,6 @@ func TestWaitReportsACompletedThenFailedBatchAsFailure(t *testing.T) {
 	failure, ok := errors.AsType[*operation.ItemFailureError](err)
 	if !ok || failure.ItemID != 22 || failure.Status != "failed" || len(receipt.Outputs) != 1 {
 		t.Fatalf("receipt = %#v, error = %#v", receipt, err)
-	}
-	accepted := acceptedBatchReceipt([]int{23, 22}, []uint32{42, 43})
-	accepted.SourceImage = &images.Reference{ImageName: "uploaded.png"}
-	accepted.SourceUploaded = new(true)
-	_, err = generation.Wait(t.Context(), client, accepted, generation.WaitOptions{})
-	uploaded, hasSource := errors.AsType[*sourceimage.UploadedError](err)
-	if !hasSource || uploaded.Source.ImageName != "uploaded.png" {
-		t.Fatalf("post-upload wait error = %#v", err)
 	}
 }
 

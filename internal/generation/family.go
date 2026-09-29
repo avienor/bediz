@@ -3,10 +3,12 @@ package generation
 import (
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/avienor/bediz/internal/capability"
 	"github.com/avienor/bediz/internal/graphops"
 	"github.com/avienor/bediz/internal/operation"
+	"github.com/avienor/bediz/internal/profiles"
 )
 
 // A family adapter owns the behavior that varies with the selected main model.
@@ -14,7 +16,9 @@ import (
 type familyAdapter interface {
 	resolve(Request, ModelIdentifier, []ModelIdentifier, io.Reader) (Resolution, error)
 	compile(Resolution) (EnqueueRequest, error)
-	invocations() []capability.InvocationRequirement
+	capabilityEntry(Request) capability.Entry
+	alignment() int
+	profileApplicability(ModelIdentifier) profileApplicability
 	componentKeys(Resolution) map[string]string
 	validateRecall(ModelIdentifier, *int, *int, *int) error
 	synchronization(ResolvedSettings) (SyncSettings, []string)
@@ -30,22 +34,44 @@ type animaAdapter struct{}
 type sdxlAdapter struct{}
 type fluxAdapter struct{}
 
-func (fluxAdapter) resolve(request Request, main ModelIdentifier, inventory []ModelIdentifier, random io.Reader) (Resolution, error) {
-	return resolveFLUX(request, main, inventory, random)
+type profileApplicability struct {
+	components []string
+	guidance   bool
 }
 
-func (fluxAdapter) compile(resolved Resolution) (EnqueueRequest, error) { return CompileFLUX(resolved) }
-func (fluxAdapter) invocations() []capability.InvocationRequirement {
-	return capability.FLUXGenerationEntry().Invocations
+func (fluxAdapter) profileApplicability(main ModelIdentifier) profileApplicability {
+	return profileApplicability{components: []string{"vae", "t5_encoder", "clip_embed"}, guidance: main.Variant != "schnell"}
+}
+
+func (sdxlAdapter) profileApplicability(ModelIdentifier) profileApplicability {
+	return profileApplicability{components: []string{"vae"}, guidance: true}
+}
+
+func (animaAdapter) profileApplicability(ModelIdentifier) profileApplicability {
+	return profileApplicability{components: []string{"vae", "qwen3_encoder"}, guidance: true}
+}
+
+func (adapter fluxAdapter) resolve(request Request, main ModelIdentifier, inventory []ModelIdentifier, random io.Reader) (Resolution, error) {
+	return resolveFLUX(request, main, inventory, random, adapter.alignment(), adapter.capabilityEntry(request))
+}
+
+func (fluxAdapter) alignment() int { return 16 }
+
+func (fluxAdapter) compile(resolved Resolution) (EnqueueRequest, error) { return compileFLUX(resolved) }
+func (fluxAdapter) capabilityEntry(request Request) capability.Entry {
+	if request.Source != nil {
+		return capability.FLUXImageToImageEntry()
+	}
+	return capability.FLUXGenerationEntry()
 }
 func (fluxAdapter) componentKeys(resolved Resolution) map[string]string {
 	return map[string]string{"vae": resolved.Models.VAE.Key, "t5_encoder": resolved.Models.T5Encoder.Key, "clip_embed": resolved.Models.CLIPEmbed.Key}
 }
-func (fluxAdapter) validateRecall(model ModelIdentifier, width, height, steps *int) error {
+func (adapter fluxAdapter) validateRecall(model ModelIdentifier, width, height, steps *int) error {
 	if err := validateFLUXMain(model); err != nil {
 		return err
 	}
-	return validateAlignedRecall(width, height, steps, 16)
+	return validateAlignedRecall(width, height, steps, adapter.alignment())
 }
 func (fluxAdapter) synchronization(settings ResolvedSettings) (SyncSettings, []string) {
 	fields := []string{"scheduler"}
@@ -59,16 +85,21 @@ func (fluxAdapter) synchronization(settings ResolvedSettings) (SyncSettings, []s
 	return SyncSettings{Model: settings.ModelKey, PositivePrompt: settings.PositivePrompt, NegativePrompt: settings.NegativePrompt, Width: settings.Width, Height: settings.Height, Steps: settings.Steps, Seed: settings.Seeds[0]}, fields
 }
 
-func (sdxlAdapter) resolve(request Request, main ModelIdentifier, inventory []ModelIdentifier, random io.Reader) (Resolution, error) {
-	return resolveSDXL(request, main, inventory, random)
+func (adapter sdxlAdapter) resolve(request Request, main ModelIdentifier, inventory []ModelIdentifier, random io.Reader) (Resolution, error) {
+	return resolveSDXL(request, main, inventory, random, adapter.alignment(), adapter.capabilityEntry(request))
 }
+
+func (sdxlAdapter) alignment() int { return 8 }
 
 func (sdxlAdapter) compile(resolved Resolution) (EnqueueRequest, error) {
-	return CompileSDXL(resolved)
+	return compileSDXL(resolved)
 }
 
-func (sdxlAdapter) invocations() []capability.InvocationRequirement {
-	return capability.SDXLGenerationEntry().Invocations
+func (sdxlAdapter) capabilityEntry(request Request) capability.Entry {
+	if request.Source != nil {
+		return capability.SDXLImageToImageEntry()
+	}
+	return capability.SDXLGenerationEntry()
 }
 
 func (sdxlAdapter) componentKeys(resolved Resolution) map[string]string {
@@ -79,8 +110,8 @@ func (sdxlAdapter) componentKeys(resolved Resolution) map[string]string {
 	return keys
 }
 
-func (sdxlAdapter) validateRecall(_ ModelIdentifier, width, height, steps *int) error {
-	return validateAlignedRecall(width, height, steps, 8)
+func (adapter sdxlAdapter) validateRecall(_ ModelIdentifier, width, height, steps *int) error {
+	return validateAlignedRecall(width, height, steps, adapter.alignment())
 }
 
 func (sdxlAdapter) synchronization(settings ResolvedSettings) (SyncSettings, []string) {
@@ -96,24 +127,36 @@ func (sdxlAdapter) synchronization(settings ResolvedSettings) (SyncSettings, []s
 	return patch, fields
 }
 
-func (animaAdapter) resolve(request Request, main ModelIdentifier, inventory []ModelIdentifier, random io.Reader) (Resolution, error) {
-	return resolveAnima(request, main, inventory, random)
+func (adapter animaAdapter) resolve(request Request, main ModelIdentifier, inventory []ModelIdentifier, random io.Reader) (Resolution, error) {
+	return resolveAnima(request, main, inventory, random, adapter.alignment(), adapter.capabilityEntry(request))
 }
+
+func (animaAdapter) alignment() int { return 8 }
 
 func (animaAdapter) compile(resolved Resolution) (EnqueueRequest, error) {
-	return CompileAnima(resolved)
+	return compileAnima(resolved)
 }
 
-func (animaAdapter) invocations() []capability.InvocationRequirement {
-	return capability.AnimaGenerationEntry().Invocations
+func (animaAdapter) capabilityEntry(request Request) capability.Entry {
+	if request.Source != nil {
+		return capability.AnimaImageToImageEntry()
+	}
+	return capability.AnimaGenerationEntry()
 }
 
 func (animaAdapter) componentKeys(resolved Resolution) map[string]string {
 	return map[string]string{"vae": resolved.Models.VAE.Key, "qwen3_encoder": resolved.Models.Qwen3Encoder.Key}
 }
 
-func (animaAdapter) validateRecall(_ ModelIdentifier, width, height, steps *int) error {
-	return validateAlignedRecall(width, height, steps, 8)
+func (adapter animaAdapter) validateRecall(_ ModelIdentifier, width, height, steps *int) error {
+	return validateAlignedRecall(width, height, steps, adapter.alignment())
+}
+
+func validateGenerationDimensions(width, height, alignment int) error {
+	if width < 1 || width%alignment != 0 || height < 1 || height%alignment != 0 {
+		return operation.InvalidRequest(fmt.Sprintf("width and height must be positive multiples of %d", alignment))
+	}
+	return nil
 }
 
 func validateAlignedRecall(width, height, steps *int, alignment int) error {
@@ -155,6 +198,81 @@ func adapterForBase(base string) (familyAdapter, error) {
 		return nil, operation.UnsupportedCapability(fmt.Sprintf("model family %q is not supported for generation", base))
 	}
 	return adapter, nil
+}
+
+func validateProfileApplicability(name string, profile profiles.Generate, main ModelIdentifier) error {
+	adapter, err := adapterForBase(main.Base)
+	if err != nil {
+		return err
+	}
+	rules := adapter.profileApplicability(main)
+	invalid := func(field string) error { return &ProfileSettingError{Profile: name, Field: field} }
+	if profile.Components != nil {
+		for _, component := range []struct {
+			kind     string
+			selector *string
+		}{
+			{"vae", profile.Components.VAE},
+			{"qwen3_encoder", profile.Components.Qwen3Encoder},
+			{"t5_encoder", profile.Components.T5Encoder},
+			{"clip_embed", profile.Components.CLIPEmbed},
+		} {
+			if component.selector != nil && !slices.Contains(rules.components, component.kind) {
+				return invalid(component.kind)
+			}
+		}
+	}
+	if profile.Width != nil {
+		if *profile.Width%adapter.alignment() != 0 {
+			return invalid("width")
+		}
+		if *profile.Height%adapter.alignment() != 0 {
+			return invalid("height")
+		}
+	}
+	if profile.Guidance != nil && !rules.guidance {
+		return invalid("guidance")
+	}
+	if profile.Scheduler != nil && !adapter.capabilityEntry(Request{}).SupportsScheduler(*profile.Scheduler) {
+		return invalid("scheduler")
+	}
+	return nil
+}
+
+// Resolve applies the selected family's defaults and resolves its required
+// installed models without consulting browser state.
+func Resolve(request Request, inventory []ModelIdentifier, random io.Reader) (Resolution, error) {
+	if err := validateCommonRequest(request); err != nil {
+		return Resolution{}, err
+	}
+	main, err := ResolveFamilyMain(inventory, request.Model)
+	if err != nil {
+		return Resolution{}, err
+	}
+	adapter, err := adapterForBase(main.Base)
+	if err != nil {
+		return Resolution{}, err
+	}
+	return adapter.resolve(applyModeDefaults(request), main, inventory, random)
+}
+
+// Compile produces the selected family's tested InvokeAI enqueue graph.
+func Compile(resolved Resolution) (EnqueueRequest, error) {
+	adapter, err := adapterForBase(resolved.Models.Main.Base)
+	if err != nil {
+		return EnqueueRequest{}, err
+	}
+	return adapter.compile(resolved)
+}
+
+// CapabilityEntry supplies the tested requirements for the resolved family
+// and the Generation Mode inferred from its Source Image.
+func CapabilityEntry(resolved Resolution) (capability.Entry, error) {
+	adapter, err := adapterForBase(resolved.Models.Main.Base)
+	if err != nil {
+		return capability.Entry{}, err
+	}
+	return adapter.capabilityEntry(resolved.Request), nil
 }
 
 // ResolveFamilyMain selects an installed main model, then applies the

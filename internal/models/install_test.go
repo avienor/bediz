@@ -19,8 +19,8 @@ import (
 	"github.com/avienor/bediz/internal/operation"
 )
 
-const huggingFaceInstallOpenAPI = `{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}},"/api/v2/models/hugging_face":{"get":{}}}}`
-const pathInstallOpenAPI = `{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"inplace","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`
+const huggingFaceInstallOpenAPI = `{"paths":{"/api/v1/app/version":{"get":{}},"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}},"/api/v2/models/hugging_face":{"get":{}}}}`
+const pathInstallOpenAPI = `{"paths":{"/api/v1/app/version":{"get":{}},"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"inplace","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`
 
 func installClient(t *testing.T, handler http.HandlerFunc) *httpclient.Client {
 	t.Helper()
@@ -411,7 +411,7 @@ func TestInstallURLSubmitsOneGenericPOSTAndProjectsJob(t *testing.T) {
 		case "/api/v1/app/version":
 			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
 		case "/openapi.json":
-			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
+			_, _ = w.Write([]byte(`{"paths":{"/api/v1/app/version":{"get":{}},"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
 		case "/api/v2/models/install":
 			posts.Add(1)
 			if r.Method != http.MethodPost || r.URL.Query().Get("source") != "https://example.org/model.safetensors" {
@@ -521,7 +521,7 @@ func TestInstallPathRequiresTestedInplaceParameterBeforeMutation(t *testing.T) {
 		case "/api/v1/app/version":
 			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
 		case "/openapi.json":
-			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
+			_, _ = w.Write([]byte(`{"paths":{"/api/v1/app/version":{"get":{}},"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
 		case "/api/v2/models/install":
 			posts.Add(1)
 		}
@@ -588,7 +588,7 @@ func TestStarterRepositoryDependencyUsesCanonicalURLDespiteLocalPathCollision(t 
 		case "/api/v1/app/version":
 			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
 		case "/openapi.json":
-			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}},"/api/v2/models/starter_models":{"get":{"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/StarterModelResponse"}}}}}}},"/api/v2/models/hugging_face":{"get":{}}}}`))
+			_, _ = w.Write([]byte(`{"paths":{"/api/v1/app/version":{"get":{}},"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}},"/api/v2/models/starter_models":{"get":{"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/StarterModelResponse"}}}}}}},"/api/v2/models/hugging_face":{"get":{}}}}`))
 		case "/api/v2/models/starter_models":
 			_, _ = w.Write([]byte(`{"starter_models":[{"source":"https://example.org/main.safetensors","is_installed":false,"dependencies":[{"source":"sample/dep","is_installed":false}]}],"starter_bundles":{}}`))
 		case "/api/v2/models/hugging_face":
@@ -632,7 +632,7 @@ func TestProtectedStarterDependencyNeedsBothAuthenticationInputsBeforeMutation(t
 				case "/api/v1/app/version":
 					_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
 				case "/openapi.json":
-					_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}},"/api/v2/models/starter_models":{"get":{"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/StarterModelResponse"}}}}}}},"/api/v2/models/hugging_face":{"get":{}}}}`))
+					_, _ = w.Write([]byte(`{"paths":{"/api/v1/app/version":{"get":{}},"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}},"/api/v2/models/starter_models":{"get":{"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/StarterModelResponse"}}}}}}},"/api/v2/models/hugging_face":{"get":{}}}}`))
 				case "/api/v2/models/starter_models":
 					_, _ = w.Write([]byte(`{"starter_models":[{"source":"https://example.org/main","is_installed":false,"dependencies":[{"source":"sample/private","is_installed":false}]}],"starter_bundles":{}}`))
 				case "/api/v2/models/hf_login":
@@ -661,7 +661,7 @@ func TestProtectedStarterArtifactDependencyNeedsDownloadTokenBeforeMutation(t *t
 		case "/api/v1/app/version":
 			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
 		case "/openapi.json":
-			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}},"/api/v2/models/starter_models":{"get":{"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/StarterModelResponse"}}}}}}},"/api/v2/models/hugging_face":{"get":{}}}}`))
+			_, _ = w.Write([]byte(`{"paths":{"/api/v1/app/version":{"get":{}},"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}},"/api/v2/models/starter_models":{"get":{"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/StarterModelResponse"}}}}}}},"/api/v2/models/hugging_face":{"get":{}}}}`))
 		case "/api/v2/models/starter_models":
 			_, _ = w.Write([]byte(`{"starter_models":[{"source":"https://huggingface.co/sample/main/resolve/main/main.safetensors","is_installed":false,"dependencies":[{"source":"https://example.org/public.safetensors","is_installed":false},{"source":"https://huggingface.co/sample/gated/resolve/main/dep.safetensors","is_installed":false}]}],"starter_bundles":{}}`))
 		case "/api/v2/models/install":
@@ -691,7 +691,7 @@ func TestProtectedStarterArtifactDependencyWithDownloadTokenDoesNotNeedInvokeAIL
 		case "/api/v1/app/version":
 			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
 		case "/openapi.json":
-			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}},"/api/v2/models/starter_models":{"get":{"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/StarterModelResponse"}}}}}}},"/api/v2/models/hugging_face":{"get":{}}}}`))
+			_, _ = w.Write([]byte(`{"paths":{"/api/v1/app/version":{"get":{}},"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}},"/api/v2/models/starter_models":{"get":{"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/StarterModelResponse"}}}}}}},"/api/v2/models/hugging_face":{"get":{}}}}`))
 		case "/api/v2/models/starter_models":
 			_, _ = w.Write([]byte(`{"starter_models":[{"source":"https://huggingface.co/sample/main/resolve/main/main.safetensors","is_installed":false,"dependencies":[{"source":"https://huggingface.co/sample/gated/resolve/main/dep.safetensors","is_installed":false}]}],"starter_bundles":{}}`))
 		case "/api/v2/models/install":
@@ -724,7 +724,7 @@ func TestStarterRepositoryWithoutOneSupportedArtifactFailsBeforeMutation(t *test
 		case "/api/v1/app/version":
 			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
 		case "/openapi.json":
-			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}},"/api/v2/models/starter_models":{"get":{"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/StarterModelResponse"}}}}}}},"/api/v2/models/hugging_face":{"get":{}}}}`))
+			_, _ = w.Write([]byte(`{"paths":{"/api/v1/app/version":{"get":{}},"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}},"/api/v2/models/starter_models":{"get":{"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/StarterModelResponse"}}}}}}},"/api/v2/models/hugging_face":{"get":{}}}}`))
 		case "/api/v2/models/starter_models":
 			_, _ = w.Write([]byte(`{"starter_models":[{"source":"sample/empty","is_installed":false}],"starter_bundles":{}}`))
 		case "/api/v2/models/hugging_face":
@@ -1118,7 +1118,7 @@ func TestHuggingFaceInstallRequiresReadOnlyInvokeAIMetadataEndpoint(t *testing.T
 		case "/api/v1/app/version":
 			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
 		case "/openapi.json":
-			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
+			_, _ = w.Write([]byte(`{"paths":{"/api/v1/app/version":{"get":{}},"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
 		default:
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
 		}
@@ -1154,7 +1154,7 @@ func TestInstallRejectsGenericPOSTWithoutInspectableJobResponse(t *testing.T) {
 		case "/api/v1/app/version":
 			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
 		case "/openapi.json":
-			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}]}}}}`))
+			_, _ = w.Write([]byte(`{"paths":{"/api/v1/app/version":{"get":{}},"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}]}}}}`))
 		case "/api/v2/models/install":
 			posts.Add(1)
 		}
@@ -1261,7 +1261,7 @@ func TestInstallLostResponseReturnsUnknownAfterOnePOST(t *testing.T) {
 		case "/api/v1/app/version":
 			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
 		case "/openapi.json":
-			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
+			_, _ = w.Write([]byte(`{"paths":{"/api/v1/app/version":{"get":{}},"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
 		case "/api/v2/models/install":
 			posts.Add(1)
 			connection, _, err := w.(http.Hijacker).Hijack()
@@ -1321,7 +1321,7 @@ func TestInstallProtectedURLRedactsBackendFailureFromPublicError(t *testing.T) {
 		case "/api/v1/app/version":
 			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
 		case "/openapi.json":
-			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
+			_, _ = w.Write([]byte(`{"paths":{"/api/v1/app/version":{"get":{}},"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true},{"name":"access_token","in":"query"}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
 		case "/api/v2/models/install":
 			posts.Add(1)
 			if r.URL.Query().Get("access_token") != token {
@@ -1343,7 +1343,7 @@ func TestInstallProtectedURLRequiresAdvertisedAccessTokenParameter(t *testing.T)
 		case "/api/v1/app/version":
 			_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
 		case "/openapi.json":
-			_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
+			_, _ = w.Write([]byte(`{"paths":{"/api/v1/app/version":{"get":{}},"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
 		case "/api/v2/models/install":
 			posts.Add(1)
 		}

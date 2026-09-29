@@ -67,8 +67,8 @@ type sdxlImageToLatentsNode struct {
 	ColorCompensation string      `json:"color_compensation"`
 }
 
-// CompileSDXL produces the stock InvokeAI 6.14.1 SDXL text-to-image graph.
-func CompileSDXL(resolved Resolution) (EnqueueRequest, error) {
+// compileSDXL produces the stock InvokeAI 6.14.1 SDXL text-to-image graph.
+func compileSDXL(resolved Resolution) (EnqueueRequest, error) {
 	request := resolved.Request
 	if request.Width == nil || request.Height == nil || request.Steps == nil || request.Scheduler == nil || request.Guidance == nil || request.Seed == nil || request.OutputCount == nil {
 		return EnqueueRequest{}, fmt.Errorf("compile SDXL graph: all generation settings must be resolved")

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"slices"
 
+	"github.com/avienor/bediz/internal/capability"
 	"github.com/avienor/bediz/internal/graphops"
 	"github.com/avienor/bediz/internal/images"
 	"github.com/avienor/bediz/internal/operation"
@@ -21,9 +21,6 @@ type Resolution struct {
 	SourceImage images.Reference
 }
 
-// AnimaResolution is the Anima compiler's resolution value.
-type AnimaResolution = Resolution
-
 var (
 	animaVAERequirement     = graphops.ComponentRequirement{Kind: "vae", Base: "anima", ModelType: "vae"}
 	sdxlVAERequirement      = graphops.ComponentRequirement{Kind: "vae", Base: "sdxl", ModelType: "vae"}
@@ -33,22 +30,7 @@ var (
 	fluxCLIPRequirement     = graphops.ComponentRequirement{Kind: "clip_embed", Base: "any", ModelType: "clip_embed"}
 )
 
-// ResolveSDXL resolves an SDXL main model and its optional explicit VAE override.
-func ResolveSDXL(request Request, inventory []ModelIdentifier, random io.Reader) (Resolution, error) {
-	if err := validateCommonRequest(request); err != nil {
-		return Resolution{}, err
-	}
-	mainModel, err := ResolveFamilyMain(inventory, request.Model)
-	if err != nil {
-		return Resolution{}, err
-	}
-	if mainModel.Base != "sdxl" {
-		return Resolution{}, operation.UnsupportedCapability(fmt.Sprintf("model %q is not an SDXL main model", mainModel.Key))
-	}
-	return resolveSDXL(request, mainModel, inventory, random)
-}
-
-func resolveSDXL(request Request, mainModel ModelIdentifier, inventory []ModelIdentifier, random io.Reader) (Resolution, error) {
+func resolveSDXL(request Request, mainModel ModelIdentifier, inventory []ModelIdentifier, random io.Reader, alignment int, entry capability.Entry) (Resolution, error) {
 	if request.Components != nil {
 		if request.Components.Qwen3Encoder != nil {
 			return Resolution{}, operation.InvalidRequest("qwen3_encoder is not applicable to SDXL")
@@ -76,13 +58,13 @@ func resolveSDXL(request Request, mainModel ModelIdentifier, inventory []ModelId
 	if resolved.OutputCount == nil {
 		resolved.OutputCount = new(1)
 	}
-	if *resolved.Width < 1 || *resolved.Width%8 != 0 || *resolved.Height < 1 || *resolved.Height%8 != 0 {
-		return Resolution{}, operation.InvalidRequest("width and height must be positive multiples of 8")
+	if err := validateGenerationDimensions(*resolved.Width, *resolved.Height, alignment); err != nil {
+		return Resolution{}, err
 	}
 	if *resolved.Steps < 1 {
 		return Resolution{}, operation.InvalidRequest("steps must be positive")
 	}
-	if !graphops.IsSDXLScheduler(*resolved.Scheduler) {
+	if !entry.SupportsScheduler(*resolved.Scheduler) {
 		return Resolution{}, operation.InvalidField("scheduler", "scheduler is not supported for SDXL")
 	}
 	if math.IsNaN(*resolved.Guidance) || math.IsInf(*resolved.Guidance, 0) || *resolved.Guidance < 1 {
@@ -109,38 +91,22 @@ func resolveSDXL(request Request, mainModel ModelIdentifier, inventory []ModelId
 	return Resolution{Request: resolved, Models: models, Seeds: seeds}, nil
 }
 
-// ResolveAnima applies Anima family defaults and resolves the required
-// installed models without consulting browser state.
-func ResolveAnima(request Request, inventory []ModelIdentifier, random io.Reader) (AnimaResolution, error) {
-	if err := validateCommonRequest(request); err != nil {
-		return AnimaResolution{}, err
-	}
-	mainModel, err := ResolveFamilyMain(inventory, request.Model)
-	if err != nil {
-		return AnimaResolution{}, fmt.Errorf("resolve Anima main model: %w", err)
-	}
-	if mainModel.Base != "anima" {
-		return AnimaResolution{}, operation.UnsupportedCapability(fmt.Sprintf("model %q is not an Anima main model", mainModel.Key))
-	}
-	return resolveAnima(request, mainModel, inventory, random)
-}
-
-func resolveAnima(request Request, mainModel ModelIdentifier, inventory []ModelIdentifier, random io.Reader) (AnimaResolution, error) {
+func resolveAnima(request Request, mainModel ModelIdentifier, inventory []ModelIdentifier, random io.Reader, alignment int, entry capability.Entry) (Resolution, error) {
 	if request.Components != nil {
 		if request.Components.T5Encoder != nil {
-			return AnimaResolution{}, operation.InvalidRequest("t5_encoder is not applicable to Anima")
+			return Resolution{}, operation.InvalidRequest("t5_encoder is not applicable to Anima")
 		}
 		if request.Components.CLIPEmbed != nil {
-			return AnimaResolution{}, operation.InvalidRequest("clip_embed is not applicable to Anima")
+			return Resolution{}, operation.InvalidRequest("clip_embed is not applicable to Anima")
 		}
 	}
 	resolved := applyAnimaDefaults(request)
-	if err := validateAnimaSettings(resolved); err != nil {
-		return AnimaResolution{}, err
+	if err := validateAnimaSettings(resolved, alignment, entry); err != nil {
+		return Resolution{}, err
 	}
 	seeds, err := assignSeeds(&resolved, random, "Anima")
 	if err != nil {
-		return AnimaResolution{}, err
+		return Resolution{}, err
 	}
 
 	var vaeSelector string
@@ -155,13 +121,13 @@ func resolveAnima(request Request, mainModel ModelIdentifier, inventory []ModelI
 	}
 	vae, err := graphops.ResolveComponent(inventory, vaeSelector, animaVAERequirement)
 	if err != nil {
-		return AnimaResolution{}, fmt.Errorf("resolve Anima VAE: %w", err)
+		return Resolution{}, fmt.Errorf("resolve Anima VAE: %w", err)
 	}
 	encoder, err := graphops.ResolveComponent(inventory, encoderSelector, qwen3EncoderRequirement)
 	if err != nil {
-		return AnimaResolution{}, fmt.Errorf("resolve Qwen3 encoder: %w", err)
+		return Resolution{}, fmt.Errorf("resolve Qwen3 encoder: %w", err)
 	}
-	return AnimaResolution{
+	return Resolution{
 		Request: resolved,
 		Models:  ResolvedModels{Main: mainModel, VAE: vae, Qwen3Encoder: encoder},
 		Seeds:   seeds,
@@ -240,14 +206,14 @@ func applyAnimaDefaults(request Request) Request {
 	return resolved
 }
 
-func validateAnimaSettings(request Request) error {
-	if *request.Width < 1 || *request.Width%8 != 0 || *request.Height < 1 || *request.Height%8 != 0 {
-		return operation.InvalidRequest("width and height must be positive multiples of 8")
+func validateAnimaSettings(request Request, alignment int, entry capability.Entry) error {
+	if err := validateGenerationDimensions(*request.Width, *request.Height, alignment); err != nil {
+		return err
 	}
 	if *request.Steps < 1 {
 		return operation.InvalidRequest("steps must be positive")
 	}
-	if !isAnimaScheduler(*request.Scheduler) {
+	if !entry.SupportsScheduler(*request.Scheduler) {
 		return operation.InvalidField("scheduler", "scheduler is not supported for Anima")
 	}
 	if math.IsNaN(*request.Guidance) || math.IsInf(*request.Guidance, 0) || *request.Guidance < 1 {
@@ -257,8 +223,4 @@ func validateAnimaSettings(request Request) error {
 		return operation.InvalidRequest("output count must be positive")
 	}
 	return nil
-}
-
-func isAnimaScheduler(scheduler string) bool {
-	return slices.Contains([]string{"euler", "heun", "dpmpp_2m", "dpmpp_2m_sde", "er_sde", "lcm"}, scheduler)
 }

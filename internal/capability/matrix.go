@@ -161,6 +161,17 @@ const (
 	VersionPolicyCompatibleEndpoint VersionPolicy = "compatible_endpoint"
 )
 
+type SpecialPredicate string
+
+const (
+	RecallPatchSchema       SpecialPredicate = "recall_patch_schema"
+	InstallSchema           SpecialPredicate = "install_schema"
+	InstallInplaceQuery     SpecialPredicate = "install_inplace_query"
+	InstallAccessTokenQuery SpecialPredicate = "install_access_token_query"
+	StarterCatalogResponse  SpecialPredicate = "starter_catalog_response"
+	HuggingFaceLoginBody    SpecialPredicate = "hugging_face_login_body"
+)
+
 type Entry struct {
 	Operation     string
 	Family        string
@@ -170,6 +181,25 @@ type Entry struct {
 	Endpoints     []EndpointRequirement
 	Invocations   []InvocationRequirement
 	Models        []ModelRequirement
+	Schedulers    []string
+	Special       []SpecialPredicate
+	RecallFields  []RecallFieldRequirement
+}
+
+// SupportsScheduler checks the scheduler set tested for this family.
+func (entry Entry) SupportsScheduler(name string) bool {
+	return slices.Contains(entry.Schedulers, name)
+}
+
+// IsRegisteredScheduler accepts the union of all tested graph-operation sets.
+// Profile save-time validation has no resolved Model Family.
+func IsRegisteredScheduler(name string) bool {
+	for _, entry := range Matrix {
+		if (entry.Operation == result.OperationGenerate || entry.Operation == result.OperationUpscale) && entry.SupportsScheduler(name) {
+			return true
+		}
+	}
+	return false
 }
 
 var Matrix = []Entry{
@@ -190,6 +220,7 @@ var Matrix = []Entry{
 	{
 		Operation:     result.OperationModelsInstall,
 		VersionPolicy: VersionPolicySupportedRange,
+		Special:       []SpecialPredicate{InstallSchema},
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v1/app/version"},
 			{Method: "POST", Path: "/api/v2/models/install"},
@@ -199,12 +230,16 @@ var Matrix = []Entry{
 		Operation:     result.OperationModelsInstall,
 		Family:        "starter",
 		VersionPolicy: VersionPolicySupportedRange,
+		Special:       []SpecialPredicate{InstallSchema, StarterCatalogResponse},
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v1/app/version"},
 			{Method: "GET", Path: "/api/v2/models/starter_models"},
 			{Method: "POST", Path: "/api/v2/models/install"},
 		},
 	},
+	installSourceEntry("huggingface", []EndpointRequirement{{Method: "GET", Path: "/api/v2/models/hugging_face"}}, nil),
+	installSourceEntry("path", nil, []SpecialPredicate{InstallInplaceQuery}),
+	installSourceEntry("source_token", nil, []SpecialPredicate{InstallAccessTokenQuery}),
 	{
 		Operation:     result.OperationModelsStatus,
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
@@ -331,13 +366,7 @@ var Matrix = []Entry{
 	FLUXImageToImageEntry(),
 	SDXLUpscaleEntry(),
 	SD1UpscaleEntry(),
-	{
-		Operation:     result.OperationRecall,
-		VersionPolicy: VersionPolicySupportedRange,
-		Endpoints: []EndpointRequirement{
-			{Method: "POST", Path: RecallEndpoint},
-		},
-	},
+	RecallEntry([]RecallFieldRequirement{SDXLCFGRecallField}),
 	{
 		Operation:     result.OperationAuthHFStatus,
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
@@ -346,6 +375,7 @@ var Matrix = []Entry{
 	{
 		Operation:     result.OperationAuthHFLogin,
 		VersionPolicy: VersionPolicySupportedRange,
+		Special:       []SpecialPredicate{HuggingFaceLoginBody},
 		Endpoints:     []EndpointRequirement{{Method: "POST", Path: HuggingFaceAuthEndpoint}},
 	},
 	{
@@ -353,6 +383,69 @@ var Matrix = []Entry{
 		VersionPolicy: VersionPolicySupportedRange,
 		Endpoints:     []EndpointRequirement{{Method: "DELETE", Path: HuggingFaceAuthEndpoint}},
 	},
+}
+
+// Find returns the recorded capability entry for an exact operation, family,
+// and generation mode.
+func Find(operation, family, mode string) (Entry, bool) {
+	for _, entry := range Matrix {
+		if entry.Operation == operation && entry.Family == family && entry.Mode == mode {
+			return entry, true
+		}
+	}
+	return Entry{}, false
+}
+
+// InstallPreflightEntries selects the doctor rows that describe one install
+// request. Starter entries that resolve to repositories are checked again with
+// the Hugging Face row before submission.
+func InstallPreflightEntries(sourceType string, hasSourceToken bool) ([]Entry, bool) {
+	generic, found := Find(result.OperationModelsInstall, "", "")
+	if !found {
+		return nil, false
+	}
+	entries := []Entry{generic}
+	switch sourceType {
+	case "starter", "huggingface", "path":
+		entry, found := Find(result.OperationModelsInstall, sourceType, "")
+		if !found {
+			return nil, false
+		}
+		entries = append(entries, entry)
+	}
+	if hasSourceToken {
+		entry, found := Find(result.OperationModelsInstall, "source_token", "")
+		if !found {
+			return nil, false
+		}
+		entries = append(entries, entry)
+	}
+	return entries, true
+}
+
+// RecallEntry records the common patch schema and any fields used by a
+// generation family's UI Synchronization. The doctor row includes the union.
+func RecallEntry(additional []RecallFieldRequirement) Entry {
+	return Entry{
+		Operation:     result.OperationRecall,
+		VersionPolicy: VersionPolicySupportedRange,
+		Special:       []SpecialPredicate{RecallPatchSchema},
+		Endpoints:     []EndpointRequirement{{Method: "POST", Path: RecallEndpoint}},
+		RecallFields:  append(slices.Clone(RecallPatchFields), additional...),
+	}
+}
+
+func installSourceEntry(family string, additionalEndpoints []EndpointRequirement, additionalPredicates []SpecialPredicate) Entry {
+	return Entry{
+		Operation:     result.OperationModelsInstall,
+		Family:        family,
+		VersionPolicy: VersionPolicySupportedRange,
+		Endpoints: append([]EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/app/version"},
+			{Method: "POST", Path: "/api/v2/models/install"},
+		}, additionalEndpoints...),
+		Special: append([]SpecialPredicate{InstallSchema}, additionalPredicates...),
+	}
 }
 
 // SDXLUpscaleEntry records the tested stock 6.14.1 tiled upscale graph.
@@ -397,6 +490,7 @@ func upscaleEntry(base, label string, conditioning []InvocationRequirement) Entr
 	)
 	return Entry{
 		Operation: result.OperationUpscale, Family: base, UISync: "partial", VersionPolicy: VersionPolicySupportedRange,
+		Schedulers:  slices.Clone(sdxlSchedulers),
 		Endpoints:   append(slices.Clone(AnimaGenerationEntry().Endpoints), EndpointRequirement{Method: "POST", Path: "/api/v1/images/upload"}),
 		Invocations: invocations,
 		Models: []ModelRequirement{
@@ -411,7 +505,8 @@ func upscaleEntry(base, label string, conditioning []InvocationRequirement) Entr
 func FLUXGenerationEntry() Entry {
 	return Entry{
 		Operation: result.OperationGenerate, Family: "flux", Mode: "txt2img", UISync: "partial", VersionPolicy: VersionPolicySupportedRange,
-		Endpoints: slices.Clone(AnimaGenerationEntry().Endpoints),
+		Schedulers: []string{"euler", "heun", "lcm"},
+		Endpoints:  slices.Clone(AnimaGenerationEntry().Endpoints),
 		Invocations: []InvocationRequirement{
 			{Schema: "FluxModelLoaderInvocation", Type: "flux_model_loader", Properties: []string{"id", "is_intermediate", "use_cache", "type", "model", "vae_model", "t5_encoder_model", "clip_embed_model"}},
 			{Schema: "FluxTextEncoderInvocation", Type: "flux_text_encoder", Properties: []string{"id", "is_intermediate", "use_cache", "type", "clip", "t5_encoder", "t5_max_seq_len", "prompt"}},
@@ -452,11 +547,20 @@ func FLUXImageToImageEntry() Entry {
 	return entry
 }
 
+// SDXL generation and both stock upscale families share this tested set.
+var sdxlSchedulers = []string{
+	"ddim", "ddpm", "deis", "deis_k", "lms", "lms_k", "pndm", "heun", "heun_k", "euler", "euler_k", "euler_a",
+	"kdpm_2", "kdpm_2_k", "kdpm_2_a", "kdpm_2_a_k", "dpmpp_2s", "dpmpp_2s_k", "dpmpp_2m", "dpmpp_2m_k",
+	"dpmpp_2m_sde", "dpmpp_2m_sde_k", "dpmpp_3m", "dpmpp_3m_k", "dpmpp_sde", "dpmpp_sde_k", "er_sde",
+	"unipc", "unipc_k", "lcm", "tcd",
+}
+
 // SDXLGenerationEntry records the tested stock 6.14.1 text-to-image graph.
 func SDXLGenerationEntry() Entry {
 	return Entry{
 		Operation: result.OperationGenerate, Family: "sdxl", Mode: "txt2img", UISync: "partial", VersionPolicy: VersionPolicySupportedRange,
-		Endpoints: slices.Clone(AnimaGenerationEntry().Endpoints),
+		Schedulers: slices.Clone(sdxlSchedulers),
+		Endpoints:  slices.Clone(AnimaGenerationEntry().Endpoints),
 		Invocations: []InvocationRequirement{
 			{Schema: "SDXLModelLoaderInvocation", Type: "sdxl_model_loader", Properties: []string{"id", "is_intermediate", "use_cache", "type", "model"}},
 			{Schema: "StringInvocation", Type: "string", Properties: []string{"id", "is_intermediate", "use_cache", "type", "value"}},
@@ -526,6 +630,7 @@ func AnimaGenerationEntry() Entry {
 		Mode:          "txt2img",
 		UISync:        "partial",
 		VersionPolicy: VersionPolicySupportedRange,
+		Schedulers:    []string{"euler", "heun", "dpmpp_2m", "dpmpp_2m_sde", "er_sde", "lcm"},
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v1/app/version"},
 			{Method: "GET", Path: "/api/v2/models/"},
