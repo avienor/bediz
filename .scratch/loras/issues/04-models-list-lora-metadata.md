@@ -40,8 +40,19 @@
 - `CHANGELOG.md` under Unreleased. Tests.
 - No ADR or glossary change: the members are additive inventory data.
 
-**Status:** ready-for-agent
+**Status:** implemented
 
-- [ ] `models list` reports sorted `trigger_phrases` and a LoRA's `default_weight` exactly when InvokeAI records them, and nothing else changes.
-- [ ] The V1 spec and `CHANGELOG.md` record the members.
-- [ ] The independent review found no acceptance-blocking issue.
+- [x] `models list` reports sorted `trigger_phrases` and a LoRA's `default_weight` exactly when InvokeAI records them, and nothing else changes.
+- [x] The V1 spec and `CHANGELOG.md` record the members.
+- [x] The independent review found no acceptance-blocking issue.
+
+## Comments
+
+### Implementation and verification — 2026-09-29
+
+- Implemented the additive inventory members and human output through the existing `models.List` and public CLI seams. Separate red/green cycles covered trigger phrases, recorded LoRA weights, and human output. Fake-server checks cover missing/null/empty metadata, zero and negative weights, non-LoRA omission, unchanged summaries and human lines, and exactly one V1 Result Envelope. Existing request-document and filter checks pass.
+- All required commands passed: `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify`. Focused checks passed: `go test ./internal/cli ./internal/models -run '^(TestModelsList|TestList)' -count=1`.
+- Live baseline: `curl -fsS --max-time 10 http://127.0.0.1:9090/api/v1/app/version` reported 6.14.1. The live OpenAPI confirms nullable top-level `trigger_phrases` in all 19 `LoRA_*` configs and nullable numeric `LoraModelDefaultSettings.weight` under `default_settings`.
+- Built with `go build ./cmd/bediz`. `./bediz models list --type lora --json` listed four installed LoRAs, initially omitting both optional members. In the InvokeAI model manager, temporarily added `bediz-zebra-check` and `bediz-alpha-check` and saved Starting Weight 0.6 on `alienzkin-sdxl` (Model Key `5a64f0b6-e279-4d4e-8c02-826bc2470066`). Repeating the listing returned ascending phrases and `default_weight: 0.6`. `./bediz models list --type lora --base sdxl --json` returned the two SDXL LoRAs; `./bediz models list --type lora --base sdxl` showed both metadata values and preserved the other LoRA's human line.
+- Restored the weight and removed both phrases in the UI. Removing the last phrase stores an empty array, so a single `PATCH /api/v2/models/i/5a64f0b6-e279-4d4e-8c02-826bc2470066` with `{"trigger_phrases":null}` restored the original null exactly. A fresh GET confirmed the original null trigger phrases and null weight/min/max settings. The final `./bediz models list --type lora --json` again omitted both members for all four LoRAs.
+- Independent Standards and Spec reviewers assessed a fixed implementation snapshot against base `482d8a17b35174d65fccd44edc738b70eba1f6ef`. Both independently read the live model-config schemas and reproduced the listing with the temporary metadata before restoration. The Spec reviewer also compared every existing member across all 20 installed models and checked the SDXL LoRA filter. Standards: 0 findings; Spec: 0 findings; no acceptance-blocking issue.

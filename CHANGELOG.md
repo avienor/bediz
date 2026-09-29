@@ -6,6 +6,7 @@ Each release lists the changes that affect users of the `bediz` binary, its JSON
 
 ### Added
 
+- `models list` reports recorded trigger phrases in sorted order and recorded LoRA default weights in JSON and human output.
 - FLUX.1 dev and schnell text-to-image and image-to-image generation accept ordered LoRAs with metadata, receipts, and a distinct `doctor` capability row.
 - Anima text-to-image and image-to-image generation accept ordered LoRAs with metadata, receipts, and a distinct `doctor` capability row.
 - SDXL text-to-image and image-to-image generation accept ordered LoRAs through `loras` or repeatable `--lora`, with per-model default weights, metadata, receipts, and a distinct `doctor` capability row.
