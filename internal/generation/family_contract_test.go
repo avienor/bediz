@@ -27,7 +27,7 @@ func TestCompiledGenerationInvocationsAreCoveredByCapabilityMatrix(t *testing.T)
 		"flux":  {fluxDev, fluxSchnell},
 	}
 	for _, entry := range capability.Matrix {
-		if entry.Operation != result.OperationGenerate {
+		if entry.Operation != result.OperationGenerate || entry.Setting != "" {
 			continue
 		}
 		t.Run(entry.Family+"/"+entry.Mode, func(t *testing.T) {

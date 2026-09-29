@@ -17,20 +17,26 @@ import (
 )
 
 type ResolvedSettings struct {
-	Profile        string            `json:"profile,omitempty"`
-	PositivePrompt string            `json:"positive_prompt"`
-	NegativePrompt string            `json:"negative_prompt"`
-	Width          int               `json:"width"`
-	Height         int               `json:"height"`
-	Steps          int               `json:"steps"`
-	Scheduler      string            `json:"scheduler"`
-	Guidance       *float64          `json:"guidance,omitempty"`
-	OutputCount    int               `json:"output_count"`
-	BoardID        string            `json:"board_id,omitempty"`
-	ModelKey       string            `json:"model_key"`
-	ComponentKeys  map[string]string `json:"component_keys"`
-	Seeds          []uint32          `json:"seeds"`
-	Strength       *float64          `json:"strength,omitempty"`
+	Profile        string                `json:"profile,omitempty"`
+	PositivePrompt string                `json:"positive_prompt"`
+	NegativePrompt string                `json:"negative_prompt"`
+	Width          int                   `json:"width"`
+	Height         int                   `json:"height"`
+	Steps          int                   `json:"steps"`
+	Scheduler      string                `json:"scheduler"`
+	Guidance       *float64              `json:"guidance,omitempty"`
+	OutputCount    int                   `json:"output_count"`
+	BoardID        string                `json:"board_id,omitempty"`
+	ModelKey       string                `json:"model_key"`
+	ComponentKeys  map[string]string     `json:"component_keys"`
+	Seeds          []uint32              `json:"seeds"`
+	Strength       *float64              `json:"strength,omitempty"`
+	Loras          []ResolvedLoRASetting `json:"loras,omitempty"`
+}
+
+type ResolvedLoRASetting struct {
+	ModelKey string  `json:"model_key"`
+	Weight   float64 `json:"weight"`
 }
 
 type QueueReceipt = graphops.QueueReceipt
@@ -128,6 +134,9 @@ func (p *Preparation) Resolve(inventory []ModelIdentifier, random io.Reader) (ca
 	if err != nil {
 		return capability.Entry{}, profileWarnings, err
 	}
+	if err := validateLoRAFamily(effective.Loras, main.Base); err != nil {
+		return capability.Entry{}, profileWarnings, err
+	}
 	effective = applyModeDefaults(effective)
 	alignment := adapter.alignment()
 	if effective.Source != nil {
@@ -205,6 +214,9 @@ func (p *Preparation) Receipt(queueReceipt QueueReceipt, source sourceimage.Reso
 	if p.source != nil {
 		receipt.SourceImage = &source.Image
 		receipt.SourceUploaded = new(source.Uploaded)
+	}
+	for _, lora := range resolved.Loras {
+		receipt.ResolvedSettings.Loras = append(receipt.ResolvedSettings.Loras, ResolvedLoRASetting{ModelKey: lora.Model.Key, Weight: lora.Weight})
 	}
 	return receipt
 }

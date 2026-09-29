@@ -82,6 +82,7 @@ type CapabilityReport struct {
 	Operation  string   `json:"operation"`
 	Family     string   `json:"family,omitempty"`
 	Mode       string   `json:"mode,omitempty"`
+	Setting    string   `json:"setting,omitempty"`
 	Compatible bool     `json:"compatible"`
 	UISync     string   `json:"ui_sync,omitempty"`
 	Failures   []string `json:"failures"`
@@ -166,7 +167,9 @@ func Run(ctx context.Context, client *httpclient.Client, bedizVersion version.In
 				})
 			}
 		}
-		for _, check := range report.OpenAPI.Invocations {
+		for _, requirement := range uniqueInvocations(false) {
+			inspection := compatibility.InspectInvocation(document, requirement)
+			check := InvocationCheck{Schema: requirement.Schema, Type: requirement.Type, Available: inspection.Available, MissingProperties: inspection.MissingProperties}
 			if !check.Available || len(check.MissingProperties) > 0 {
 				report.Issues = append(report.Issues, Issue{
 					Code:    "incompatible_invocation",
@@ -228,7 +231,7 @@ func Run(ctx context.Context, client *httpclient.Client, bedizVersion version.In
 	}
 	report.Ready = len(report.Issues) == 0 && len(report.Capabilities) > 0
 	for _, entry := range report.Capabilities {
-		if !entry.Compatible {
+		if !entry.Compatible && entry.Setting == "" {
 			report.Ready = false
 		}
 	}
@@ -242,7 +245,7 @@ func inspectOpenAPI(document compatibility.Document) ([]EndpointCheck, []Invocat
 		endpoints = append(endpoints, EndpointCheck{Method: requirement.Method, Path: requirement.Path, Available: compatibility.EndpointAvailable(document, requirement)})
 	}
 
-	invocationRequirements := uniqueInvocations()
+	invocationRequirements := uniqueInvocations(true)
 	invocations := make([]InvocationCheck, 0, len(invocationRequirements))
 	for _, requirement := range invocationRequirements {
 		result := compatibility.InspectInvocation(document, requirement)
@@ -296,6 +299,7 @@ func buildCapabilities(snapshot compatibility.Snapshot) []CapabilityReport {
 			Operation:  entry.Operation,
 			Family:     entry.Family,
 			Mode:       entry.Mode,
+			Setting:    entry.Setting,
 			Compatible: len(failures) == 0,
 			Failures:   failures,
 		})
@@ -346,10 +350,13 @@ func uniqueEndpoints() []capability.EndpointRequirement {
 	return requirements
 }
 
-func uniqueInvocations() []capability.InvocationRequirement {
+func uniqueInvocations(includeSettings bool) []capability.InvocationRequirement {
 	seen := make(map[string]int)
 	var requirements []capability.InvocationRequirement
 	for _, entry := range capability.Matrix {
+		if !includeSettings && entry.Setting != "" {
+			continue
+		}
 		for _, requirement := range entry.Invocations {
 			if index, ok := seen[requirement.Schema]; ok {
 				requirements[index].RequiresAdditionalProperties = requirements[index].RequiresAdditionalProperties || requirement.RequiresAdditionalProperties
@@ -429,6 +436,9 @@ func (r Report) Human(w io.Writer) error {
 		}
 		if entry.Mode == "img2img" {
 			name += "/img2img"
+		}
+		if entry.Setting != "" {
+			name += "/" + entry.Setting
 		}
 		if entry.UISync != "" {
 			if _, err := fmt.Fprintf(w, "%s compatible: %t (UI sync: %s)\n", name, entry.Compatible, entry.UISync); err != nil {

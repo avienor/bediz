@@ -98,9 +98,24 @@
 - `CHANGELOG.md` under Unreleased. Tests.
 - The live-verification guide: the installed LoRAs and the SDXL LoRA the gate requires.
 
-**Status:** ready-for-agent
+**Status:** implemented
 
-- [ ] `generate` with an SDXL main model and `loras` applies them through one tested enqueue in both Generation Modes, with the recorded graph, metadata, and receipt.
-- [ ] Every local and resolution failure is reported before any upload or enqueue, and LoRA-less generation, its fixtures, and its receipts are unchanged.
-- [ ] Anima and FLUX.1 LoRA requests fail as `unsupported_capability` before any upload or enqueue.
-- [ ] `doctor`, ADR-0024, `CONTEXT.md`, the V1 spec, the live-verification guide, and `CHANGELOG.md` reflect the behavior verified live, and every unavailable live step is reported.
+- [x] `generate` with an SDXL main model and `loras` applies them through one tested enqueue in both Generation Modes, with the recorded graph, metadata, and receipt.
+- [x] Every local and resolution failure is reported before any upload or enqueue, and LoRA-less generation, its fixtures, and its receipts are unchanged.
+- [x] Anima and FLUX.1 LoRA requests fail as `unsupported_capability` before any upload or enqueue.
+- [x] `doctor`, ADR-0024, `CONTEXT.md`, the V1 spec, the live-verification guide, and `CHANGELOG.md` reflect the behavior verified live, and every unavailable live step is reported.
+
+## Comments
+
+2026-09-29 live verification on local InvokeAI 6.14.1 (`http://127.0.0.1:9090`):
+
+- `GET /api/v1/app/version` returned `6.14.1`; the live OpenAPI confirmed `SDXLLoRALoaderInvocation` inputs `lora`, `weight`, `unet`, `clip`, `clip2` and `CoreMetadataInvocation.loras`. Four versioned LoRA enqueue fixtures cover one LoRA, two in order, a VAE override, and image-to-image.
+- `bediz models install --source-type starter --source https://huggingface.co/RalFinger/alien-style-lora-sdxl/resolve/main/alienzkin-sdxl.safetensors` submitted job 0; `models status --job-id 0` completed with Model Key `5a64f0b6-e279-4d4e-8c02-826bc2470066`. The matching Noodles Style install with source `https://huggingface.co/RalFinger/noodles-lora-sdxl/resolve/main/noodlez-sdxl.safetensors` submitted job 1 and completed with key `d93c9c1c-eae9-49ef-bf02-d5e7421983bf`. `models list --type lora --json` showed both as `base: sdxl`, `type: lora`, format `lycoris`, under names `alienzkin-sdxl` and `noodlez-sdxl`.
+- Waited 768×768, 20-step `Juggernaut-XL-v9` text-to-image at seed 762345 with prompt `alienzkin alien creature portrait in a desert, intricate skin, cinematic light`: no LoRA image `32da778b-4627-43dd-b306-c9940bb65748.png`; Alien Style at weight 1.0 image `ba961fad-9860-4469-999e-f7ff6a8231d6.png`. Visual inspection showed a clear change in the creature's shape, eyes, texture, and lighting. The latter image metadata recorded `loras` with the exact Model Identifier and weight 1.0.
+- Waited two-LoRA request (Alien Style 1.0, Noodles Style 0.5) produced `98e04bc7-9882-489a-89d4-836257b39ea4.png`; its receipt and image metadata retained that order. An omitted Noodles Style weight resolved to 0.75 and produced `a0716b32-ebaf-4c14-b56f-4de4b32879a9.png`.
+- Waited image-to-image request using `32da778b-4627-43dd-b306-c9940bb65748.png` as source, Alien Style 1.0 and strength 0.65 produced `685451cc-2bd6-4630-bff9-a7a2e99732d8.png`, with `source_uploaded: false` and `loras` in `not_restored`.
+- `bediz doctor --json` reported `ready: true`, the new compatible `generate/sdxl/loras` setting row without `mode` or `ui_sync`, and unchanged compatible SDXL mode rows. `BEDIZ_E2E_URL=http://127.0.0.1:9090 go test -count=1 -v ./e2e -run '^TestLiveGate$'` passed, including the new self-cleaning LoRA case.
+- Review found that `doctor.ready` initially fell when only the optional LoRA vocabulary was missing. The compatibility tests now cover this case, and `doctor` keeps `ready` based on the pre-existing rows while reporting the LoRA row's failure separately.
+- Final verification passed: `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify`. After the readiness repair, the focused live gate `BEDIZ_E2E_URL=http://127.0.0.1:9090 go test -count=1 -v ./e2e -run '^TestLiveGate/(doctor_verifies_the_supported_baseline|model_listing_is_normalized|SDXL_LoRA_generation_records_metadata_and_self-cleans)$'` passed. Standards and spec reviews found no remaining issue.
+
+The five named ad hoc images above remain in the gallery. E2E fixture images were removed by the gate. All required live steps were available.

@@ -176,6 +176,7 @@ type Entry struct {
 	Operation     string
 	Family        string
 	Mode          string
+	Setting       string
 	UISync        string
 	VersionPolicy VersionPolicy
 	Endpoints     []EndpointRequirement
@@ -362,6 +363,7 @@ var Matrix = []Entry{
 	AnimaImageToImageEntry(),
 	SDXLGenerationEntry(),
 	SDXLImageToImageEntry(),
+	SDXLLoRAEntry(),
 	FLUXGenerationEntry(),
 	FLUXImageToImageEntry(),
 	SDXLUpscaleEntry(),
@@ -596,6 +598,27 @@ func SDXLImageToImageEntry() Entry {
 		InvocationRequirement{Schema: "ImageResizeInvocation", Type: "img_resize", Properties: append(slices.Clone(common), "image", "width", "height", "resample_mode")},
 		InvocationRequirement{Schema: "ImageToLatentsInvocation", Type: "i2l", Properties: append(slices.Clone(common), "image", "vae", "fp32", "color_compensation")},
 	)
+	return entry
+}
+
+// WithSDXLLoRA adds the tested LoRA vocabulary to either SDXL Generation Mode.
+func WithSDXLLoRA(entry Entry) Entry {
+	entry.Invocations = slices.Clone(entry.Invocations)
+	for index := range entry.Invocations {
+		if entry.Invocations[index].Type == "core_metadata" {
+			entry.Invocations[index].Properties = append(slices.Clone(entry.Invocations[index].Properties), "loras")
+		}
+	}
+	entry.Invocations = append(entry.Invocations, InvocationRequirement{Schema: "SDXLLoRALoaderInvocation", Type: "sdxl_lora_loader", Properties: []string{"id", "is_intermediate", "use_cache", "type", "lora", "weight", "unet", "clip", "clip2"}})
+	return entry
+}
+
+// SDXLLoRAEntry is the setting row, inheriting text-to-image requirements.
+func SDXLLoRAEntry() Entry {
+	entry := WithSDXLLoRA(SDXLGenerationEntry())
+	entry.Mode = ""
+	entry.Setting = "loras"
+	entry.UISync = ""
 	return entry
 }
 

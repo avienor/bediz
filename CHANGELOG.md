@@ -6,6 +6,7 @@ Each release lists the changes that affect users of the `bediz` binary, its JSON
 
 ### Added
 
+- SDXL text-to-image and image-to-image generation accept ordered LoRAs through `loras` or repeatable `--lora`, with per-model default weights, metadata, receipts, and a distinct `doctor` capability row.
 - `doctor` reports `models.install` readiness for Hugging Face sources, server paths, and Source Tokens with source-specific failures.
 - `generate` and `upscale` wait timeouts and interruptions report `pending_item_ids` in queue item order.
 - SDXL image-to-image generation through `generate --image` or `--image-path`, with `--strength`, source-aware dimensions, an Execution Receipt, and a separate `doctor` mode.

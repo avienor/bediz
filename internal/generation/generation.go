@@ -14,6 +14,14 @@ type Components struct {
 	CLIPEmbed    *string `json:"clip_embed,omitempty"`
 }
 
+// LoRA selects one installed adaptation model for a Generation Request.
+type LoRA struct {
+	Model  string   `json:"model"`
+	Weight *float64 `json:"weight,omitempty"`
+}
+
+type ModelDefaultSettings = graphops.ModelDefaultSettings
+
 type Request struct {
 	SchemaVersion  int                 `json:"schema_version"`
 	Model          string              `json:"model,omitempty"`
@@ -31,6 +39,7 @@ type Request struct {
 	Components     *Components         `json:"components,omitempty"`
 	Source         *sourceimage.Source `json:"source,omitempty"`
 	Strength       *float64            `json:"strength,omitempty"`
+	Loras          []LoRA              `json:"loras,omitempty"`
 }
 
 type ModelIdentifier = graphops.ModelIdentifier

@@ -96,10 +96,16 @@ func (sdxlAdapter) compile(resolved Resolution) (EnqueueRequest, error) {
 }
 
 func (sdxlAdapter) capabilityEntry(request Request) capability.Entry {
+	var entry capability.Entry
 	if request.Source != nil {
-		return capability.SDXLImageToImageEntry()
+		entry = capability.SDXLImageToImageEntry()
+	} else {
+		entry = capability.SDXLGenerationEntry()
 	}
-	return capability.SDXLGenerationEntry()
+	if len(request.Loras) > 0 {
+		return capability.WithSDXLLoRA(entry)
+	}
+	return entry
 }
 
 func (sdxlAdapter) componentKeys(resolved Resolution) map[string]string {
@@ -123,6 +129,9 @@ func (sdxlAdapter) synchronization(settings ResolvedSettings) (SyncSettings, []s
 	fields := []string{"scheduler", "vae", "output_count", "board_id"}
 	if settings.Strength != nil {
 		fields = append(fields, "source_image", "strength")
+	}
+	if len(settings.Loras) > 0 {
+		fields = append(fields, "loras")
 	}
 	return patch, fields
 }
@@ -251,6 +260,9 @@ func Resolve(request Request, inventory []ModelIdentifier, random io.Reader) (Re
 	}
 	adapter, err := adapterForBase(main.Base)
 	if err != nil {
+		return Resolution{}, err
+	}
+	if err := validateLoRAFamily(request.Loras, main.Base); err != nil {
 		return Resolution{}, err
 	}
 	return adapter.resolve(applyModeDefaults(request), main, inventory, random)

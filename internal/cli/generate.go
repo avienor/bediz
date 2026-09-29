@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/avienor/bediz/internal/directexecution"
@@ -38,6 +41,7 @@ type generateOptions struct {
 	image          string
 	imagePath      string
 	strength       float64
+	loras          []string
 }
 
 func (c *CLI) newGenerateCommand(exitCode *int, jsonOutput *bool) *cobra.Command {
@@ -75,6 +79,7 @@ func (c *CLI) newGenerateCommand(exitCode *int, jsonOutput *bool) *cobra.Command
 	command.Flags().StringVar(&options.image, "image", "", "existing InvokeAI source image name")
 	command.Flags().StringVar(&options.imagePath, "image-path", "", "absolute local source image path")
 	command.Flags().Float64Var(&options.strength, "strength", 0, "image-to-image denoising strength")
+	command.Flags().StringArrayVar(&options.loras, "lora", nil, "LoRA model key or unique name with optional =weight (repeatable)")
 	return command
 }
 
@@ -90,7 +95,7 @@ func (c *CLI) executeGenerate(ctx context.Context, jsonOutput bool, command *cob
 	}
 	operationFlags := []string{
 		"model", "profile", "prompt", "negative-prompt", "width", "height", "steps", "scheduler", "guidance",
-		"seed", "output-count", "board", "vae", "qwen3-encoder", "t5-encoder", "clip-embed", "image", "image-path", "strength",
+		"seed", "output-count", "board", "vae", "qwen3-encoder", "t5-encoder", "clip-embed", "image", "image-path", "strength", "lora",
 	}
 	fieldsSet := false
 	for _, name := range operationFlags {
@@ -104,6 +109,24 @@ func (c *CLI) executeGenerate(ctx context.Context, jsonOutput bool, command *cob
 		request.PositivePrompt = options.prompt
 		request.NegativePrompt = options.negativePrompt
 		request.BoardID = options.boardID
+		for index, value := range options.loras {
+			selector, suffix, hasWeight := strings.CutLast(value, "=")
+			if !hasWeight {
+				selector = value
+			}
+			if selector == "" {
+				return c.fail(result.OperationGenerate, jsonOutput, result.CodeInvalidRequest, "LoRA model selector is required", map[string]any{"field": fmt.Sprintf("loras.%d.model", index)})
+			}
+			lora := generation.LoRA{Model: selector}
+			if hasWeight {
+				weight, err := strconv.ParseFloat(suffix, 64)
+				if err != nil || strings.ContainsAny(suffix, "xXpP_") || math.IsNaN(weight) || math.IsInf(weight, 0) || weight < -10 || weight > 10 {
+					return c.fail(result.OperationGenerate, jsonOutput, result.CodeInvalidRequest, "LoRA weight must be finite and between -10 and 10", map[string]any{"field": fmt.Sprintf("loras.%d.weight", index)})
+				}
+				lora.Weight = new(weight)
+			}
+			request.Loras = append(request.Loras, lora)
+		}
 		if command.Flags().Changed("image") {
 			request.Source = &sourceimage.Source{Type: "image", Reference: options.image}
 		}

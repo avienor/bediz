@@ -13,13 +13,18 @@ import (
 )
 
 type ModelIdentifier struct {
-	Key     string `json:"key"`
-	Hash    string `json:"hash"`
-	Name    string `json:"name"`
-	Base    string `json:"base"`
-	Type    string `json:"type"`
-	Variant string `json:"variant,omitempty"`
-	Format  string `json:"format,omitempty"`
+	Key             string                `json:"key"`
+	Hash            string                `json:"hash"`
+	Name            string                `json:"name"`
+	Base            string                `json:"base"`
+	Type            string                `json:"type"`
+	Variant         string                `json:"variant,omitempty"`
+	Format          string                `json:"format,omitempty"`
+	DefaultSettings *ModelDefaultSettings `json:"default_settings,omitempty"`
+}
+
+type ModelDefaultSettings struct {
+	Weight *float64 `json:"weight,omitempty"`
 }
 
 // Inventory reads the installed models without applying an operation's family registry.
