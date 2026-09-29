@@ -8,7 +8,7 @@ The Generation Request accepts an optional ordered, non-empty list of LoRAs. Eac
 
 Each supported family chains its stock single-LoRA loader in request order. The resulting list and resolved weights go into `core_metadata.loras` and the Execution Receipt. `doctor` has one `setting: "loras"` row per supported family, inheriting that family's text-to-image requirements and adding its LoRA loader and metadata properties. The Generation Mode's requirements and the LoRA requirements are checked together before upload or enqueue.
 
-Automatic Recall sends the exact LoRA list after every generation, and an empty list after LoRA-less generation or upscale. A display-name collision prevents that Recall patch and produces `ui_sync_failed`. Overlapping Recall events can complete out of order in stock InvokeAI's frontend; the Execution Receipt remains authoritative.
+After a successful generation or upscale enqueue, Automatic Recall attempts to send the exact resolved LoRA list, using an empty list for LoRA-less generation or upscale. A failed or inconclusive enqueue sends no Recall. A display-name collision or incompatible Recall schema prevents the patch and produces `ui_sync_failed`. Overlapping Recall events can complete out of order in stock InvokeAI's frontend; the Execution Receipt remains authoritative.
 
 ## Considered alternatives
 
