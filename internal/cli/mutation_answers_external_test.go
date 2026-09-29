@@ -109,7 +109,7 @@ func mutatingCommands(t *testing.T) []mutatingCommand {
 					case "/api/v1/app/version":
 						_, _ = w.Write([]byte(`{"version":"6.14.1"}`))
 					case "/openapi.json":
-						_, _ = w.Write([]byte(`{"paths":{"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
+						_, _ = w.Write([]byte(`{"paths":{"/api/v1/app/version":{"get":{}},"/api/v2/models/install":{"post":{"parameters":[{"name":"source","in":"query","required":true}],"responses":{"201":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ModelInstallJob"}}}}}}}}}`))
 					case "/api/v2/models/install":
 						mutate(w, r)
 					default:

@@ -164,10 +164,12 @@ const (
 type SpecialPredicate string
 
 const (
-	RecallPatchSchema      SpecialPredicate = "recall_patch_schema"
-	InstallSchema          SpecialPredicate = "install_schema"
-	StarterCatalogResponse SpecialPredicate = "starter_catalog_response"
-	HuggingFaceLoginBody   SpecialPredicate = "hugging_face_login_body"
+	RecallPatchSchema       SpecialPredicate = "recall_patch_schema"
+	InstallSchema           SpecialPredicate = "install_schema"
+	InstallInplaceQuery     SpecialPredicate = "install_inplace_query"
+	InstallAccessTokenQuery SpecialPredicate = "install_access_token_query"
+	StarterCatalogResponse  SpecialPredicate = "starter_catalog_response"
+	HuggingFaceLoginBody    SpecialPredicate = "hugging_face_login_body"
 )
 
 type Entry struct {
@@ -181,6 +183,7 @@ type Entry struct {
 	Models        []ModelRequirement
 	Schedulers    []string
 	Special       []SpecialPredicate
+	RecallFields  []RecallFieldRequirement
 }
 
 // SupportsScheduler checks the scheduler set tested for this family.
@@ -234,6 +237,9 @@ var Matrix = []Entry{
 			{Method: "POST", Path: "/api/v2/models/install"},
 		},
 	},
+	installSourceEntry("huggingface", []EndpointRequirement{{Method: "GET", Path: "/api/v2/models/hugging_face"}}, nil),
+	installSourceEntry("path", nil, []SpecialPredicate{InstallInplaceQuery}),
+	installSourceEntry("source_token", nil, []SpecialPredicate{InstallAccessTokenQuery}),
 	{
 		Operation:     result.OperationModelsStatus,
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
@@ -360,14 +366,7 @@ var Matrix = []Entry{
 	FLUXImageToImageEntry(),
 	SDXLUpscaleEntry(),
 	SD1UpscaleEntry(),
-	{
-		Operation:     result.OperationRecall,
-		VersionPolicy: VersionPolicySupportedRange,
-		Special:       []SpecialPredicate{RecallPatchSchema},
-		Endpoints: []EndpointRequirement{
-			{Method: "POST", Path: RecallEndpoint},
-		},
-	},
+	RecallEntry([]RecallFieldRequirement{SDXLCFGRecallField}),
 	{
 		Operation:     result.OperationAuthHFStatus,
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
@@ -384,6 +383,69 @@ var Matrix = []Entry{
 		VersionPolicy: VersionPolicySupportedRange,
 		Endpoints:     []EndpointRequirement{{Method: "DELETE", Path: HuggingFaceAuthEndpoint}},
 	},
+}
+
+// Find returns the recorded capability entry for an exact operation, family,
+// and generation mode.
+func Find(operation, family, mode string) (Entry, bool) {
+	for _, entry := range Matrix {
+		if entry.Operation == operation && entry.Family == family && entry.Mode == mode {
+			return entry, true
+		}
+	}
+	return Entry{}, false
+}
+
+// InstallPreflightEntries selects the doctor rows that describe one install
+// request. Starter entries that resolve to repositories are checked again with
+// the Hugging Face row before submission.
+func InstallPreflightEntries(sourceType string, hasSourceToken bool) ([]Entry, bool) {
+	generic, found := Find(result.OperationModelsInstall, "", "")
+	if !found {
+		return nil, false
+	}
+	entries := []Entry{generic}
+	switch sourceType {
+	case "starter", "huggingface", "path":
+		entry, found := Find(result.OperationModelsInstall, sourceType, "")
+		if !found {
+			return nil, false
+		}
+		entries = append(entries, entry)
+	}
+	if hasSourceToken {
+		entry, found := Find(result.OperationModelsInstall, "source_token", "")
+		if !found {
+			return nil, false
+		}
+		entries = append(entries, entry)
+	}
+	return entries, true
+}
+
+// RecallEntry records the common patch schema and any fields used by a
+// generation family's UI Synchronization. The doctor row includes the union.
+func RecallEntry(additional []RecallFieldRequirement) Entry {
+	return Entry{
+		Operation:     result.OperationRecall,
+		VersionPolicy: VersionPolicySupportedRange,
+		Special:       []SpecialPredicate{RecallPatchSchema},
+		Endpoints:     []EndpointRequirement{{Method: "POST", Path: RecallEndpoint}},
+		RecallFields:  append(slices.Clone(RecallPatchFields), additional...),
+	}
+}
+
+func installSourceEntry(family string, additionalEndpoints []EndpointRequirement, additionalPredicates []SpecialPredicate) Entry {
+	return Entry{
+		Operation:     result.OperationModelsInstall,
+		Family:        family,
+		VersionPolicy: VersionPolicySupportedRange,
+		Endpoints: append([]EndpointRequirement{
+			{Method: "GET", Path: "/api/v1/app/version"},
+			{Method: "POST", Path: "/api/v2/models/install"},
+		}, additionalEndpoints...),
+		Special: append([]SpecialPredicate{InstallSchema}, additionalPredicates...),
+	}
 }
 
 // SDXLUpscaleEntry records the tested stock 6.14.1 tiled upscale graph.

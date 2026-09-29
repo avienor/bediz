@@ -147,7 +147,7 @@ func Evaluate(entry capability.Entry, snapshot Snapshot) []Failure {
 	}
 	if snapshot.OpenAPIAvailable {
 		for _, predicate := range entry.Special {
-			for _, code := range specialFailures(snapshot.Document, predicate) {
+			for _, code := range specialFailures(snapshot.Document, predicate, entry.RecallFields) {
 				add(code, "")
 			}
 		}
@@ -155,11 +155,11 @@ func Evaluate(entry capability.Entry, snapshot Snapshot) []Failure {
 	return failures
 }
 
-func specialFailures(document Document, predicate capability.SpecialPredicate) []string {
+func specialFailures(document Document, predicate capability.SpecialPredicate, recallFields []capability.RecallFieldRequirement) []string {
 	switch predicate {
 	case capability.RecallPatchSchema:
 		if EndpointAvailable(document, capability.EndpointRequirement{Method: "POST", Path: capability.RecallEndpoint}) {
-			return recallSchemaFailures(document)
+			return recallSchemaFailures(document, recallFields)
 		}
 	case capability.InstallSchema:
 		if EndpointAvailable(document, capability.EndpointRequirement{Method: "POST", Path: "/api/v2/models/install"}) {
@@ -172,6 +172,16 @@ func specialFailures(document Document, predicate capability.SpecialPredicate) [
 				failures = append(failures, "incompatible_install_schema:job_response")
 			}
 			return failures
+		}
+	case capability.InstallInplaceQuery, capability.InstallAccessTokenQuery:
+		if EndpointAvailable(document, capability.EndpointRequirement{Method: "POST", Path: "/api/v2/models/install"}) {
+			endpoint := installEndpoint(document.Paths["/api/v2/models/install"]["post"])
+			if predicate == capability.InstallInplaceQuery && !endpoint.HasInplaceQuery() {
+				return []string{"incompatible_install_schema:inplace"}
+			}
+			if predicate == capability.InstallAccessTokenQuery && !endpoint.HasAccessTokenQuery() {
+				return []string{"incompatible_install_schema:access_token"}
+			}
 		}
 	case capability.StarterCatalogResponse:
 		if EndpointAvailable(document, capability.EndpointRequirement{Method: "GET", Path: "/api/v2/models/starter_models"}) &&
@@ -197,7 +207,7 @@ func installEndpoint(raw json.RawMessage) capability.InstallEndpoint {
 	return endpoint
 }
 
-func recallSchemaFailures(document Document) []string {
+func recallSchemaFailures(document Document, fields []capability.RecallFieldRequirement) []string {
 	var body struct {
 		RequestBody struct {
 			Content map[string]struct {
@@ -213,7 +223,7 @@ func recallSchemaFailures(document Document) []string {
 	}
 	properties := document.Components.Schemas["RecallParameter"].Properties
 	var failures []string
-	for _, field := range append(slices.Clone(capability.RecallPatchFields), capability.SDXLCFGRecallField) {
+	for _, field := range fields {
 		property, ok := properties[field.Name]
 		if !ok || !field.MatchesNullableAlternatives(property.AnyOf) {
 			failures = append(failures, "incompatible_recall_schema:"+field.Name)

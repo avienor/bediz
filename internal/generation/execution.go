@@ -148,10 +148,6 @@ func (p *Preparation) Resolve(inventory []ModelIdentifier, random io.Reader) (ca
 	if err != nil {
 		return capability.Entry{}, profileWarnings, err
 	}
-	if effective.Source == nil {
-		// Text-to-image keeps its existing invocation-only preflight.
-		entry.Endpoints = nil
-	}
 	p.adapter, p.resolved = adapter, resolved
 	return entry, profileWarnings, nil
 }

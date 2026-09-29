@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -41,7 +42,7 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 	for i, entry := range report.Capabilities {
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "models.scan", "models.install", "models.install", "models.status", "models.delete", "images.list", "images.get", "images.upload", "images.download", "images.delete", "queue.list", "queue.get", "queue.wait", "queue.cancel", "queue.clear", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
+	wantOperations := []string{"models.list", "models.scan", "models.install", "models.install", "models.install", "models.install", "models.install", "models.status", "models.delete", "images.list", "images.get", "images.upload", "images.download", "images.delete", "queue.list", "queue.get", "queue.wait", "queue.cancel", "queue.clear", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if !slices.Equal(operations, wantOperations) {
 		t.Fatalf("reported operations = %q, want implemented operations %q", operations, wantOperations)
 	}
@@ -130,6 +131,112 @@ func TestDoctorStarterCapabilityRequiresCatalogResponseContract(t *testing.T) {
 	if generic == nil || !generic.Compatible || starter == nil || starter.Compatible || !slices.Contains(starter.Failures, "incompatible_starter_catalog_response") {
 		t.Fatalf("generic=%#v starter=%#v", generic, starter)
 	}
+}
+
+func TestDoctorInstallSourceCapabilities(t *testing.T) {
+	tests := []struct {
+		name, family, failure string
+		remove                func(map[string]any)
+	}{
+		{"stock", "", "", nil},
+		{"Hugging Face metadata", "huggingface", "missing_endpoint:GET /api/v2/models/hugging_face", func(document map[string]any) {
+			delete(document["paths"].(map[string]any), "/api/v2/models/hugging_face")
+		}},
+		{"server path inplace", "path", "incompatible_install_schema:inplace", func(document map[string]any) {
+			removeInstallParameter(document, "inplace")
+		}},
+		{"source token", "source_token", "incompatible_install_schema:access_token", func(document map[string]any) {
+			removeInstallParameter(document, "access_token")
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			document := openAPIFixture(t)
+			if test.remove != nil {
+				test.remove(document)
+			}
+			server := newCustomInvokeAIServer(t, "6.14.1", document, baselineModels)
+			defer server.Close()
+			client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			report := Run(t.Context(), client, version.Info{Version: "test"})
+			seen := map[string]bool{}
+			for _, entry := range report.Capabilities {
+				if entry.Operation != result.OperationModelsInstall {
+					if !entry.Compatible || len(entry.Failures) != 0 {
+						t.Fatalf("unrelated row = %#v", entry)
+					}
+					continue
+				}
+				seen[entry.Family] = true
+				if entry.Family == test.family && test.failure != "" {
+					if entry.Compatible || !slices.Equal(entry.Failures, []string{test.failure}) {
+						t.Fatalf("affected row = %#v", entry)
+					}
+				} else if !entry.Compatible || len(entry.Failures) != 0 {
+					t.Fatalf("unaffected row = %#v", entry)
+				}
+			}
+			for _, family := range []string{"", "starter", "huggingface", "path", "source_token"} {
+				if !seen[family] {
+					t.Errorf("missing install row %q", family)
+				}
+			}
+		})
+	}
+}
+
+func TestDoctorPreservesExistingCapabilityRowsAndOrder(t *testing.T) {
+	// These reports were captured from the code before the three install rows
+	// were added. The mixed fixture exercises existing failure values and order.
+	for _, name := range []string{"stock", "mixed"} {
+		t.Run(name, func(t *testing.T) {
+			document := openAPIFixture(t)
+			models := baselineModels
+			if name == "mixed" {
+				paths := document["paths"].(map[string]any)
+				delete(paths, "/api/v1/queue/{queue_id}/enqueue_batch")
+				delete(paths, "/api/v2/models/starter_models")
+				delete(document["components"].(map[string]any)["schemas"].(map[string]any)["RecallParameter"].(map[string]any)["properties"].(map[string]any), "cfg_scale")
+				models = baselineModels[:len(baselineModels)-1]
+			}
+			server := newCustomInvokeAIServer(t, "6.14.1", document, models)
+			defer server.Close()
+			client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			report := Run(t.Context(), client, version.Info{Version: "test"})
+			got := make([]CapabilityReport, 0, len(report.Capabilities)-3)
+			for _, row := range report.Capabilities {
+				if row.Operation == result.OperationModelsInstall && slices.Contains([]string{"huggingface", "path", "source_token"}, row.Family) {
+					continue
+				}
+				got = append(got, row)
+			}
+			encoded, err := os.ReadFile("testdata/legacy_capabilities_" + name + ".json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var want []CapabilityReport
+			if err := jsonv2.Unmarshal(encoded, &want); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("existing rows changed:\ngot  %#v\nwant %#v", got, want)
+			}
+		})
+	}
+}
+
+func removeInstallParameter(document map[string]any, name string) {
+	post := document["paths"].(map[string]any)["/api/v2/models/install"].(map[string]any)["post"].(map[string]any)
+	parameters := post["parameters"].([]any)
+	post["parameters"] = slices.DeleteFunc(parameters, func(parameter any) bool {
+		return parameter.(map[string]any)["name"] == name
+	})
 }
 
 func TestDoctorDoesNotAdvertiseInstallWithoutGenericSourceParameter(t *testing.T) {

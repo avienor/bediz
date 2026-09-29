@@ -79,9 +79,6 @@ func (p *Preparation) Resolve(inventory []graphops.ModelIdentifier, random io.Re
 	family, _ := familyFor(resolved.Models.Main.Base)
 	p.resolved = resolved
 	entry := family.entry()
-	// Upscale keeps its existing invocation-only preflight. Source inspection
-	// and upload follow that check.
-	entry.Endpoints = nil
 	return entry, warnings, nil
 }
 
