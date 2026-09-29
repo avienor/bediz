@@ -13,6 +13,7 @@ import (
 	"github.com/avienor/bediz/internal/doctor"
 	"github.com/avienor/bediz/internal/document"
 	"github.com/avienor/bediz/internal/result"
+	"github.com/avienor/bediz/internal/structurederror"
 	"github.com/avienor/bediz/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -394,6 +395,11 @@ func (c *CLI) writeResultWithWarnings(operation string, data any, warnings []res
 // from the structured error code.
 func (c *CLI) fail(operation string, jsonOutput bool, code, message string, details map[string]any) int {
 	return c.failWithWarnings(operation, jsonOutput, code, message, details, nil)
+}
+
+// failStructured writes the module's classification without inspecting its cause.
+func (c *CLI) failStructured(operation string, jsonOutput bool, failure structurederror.Failure) int {
+	return c.failWithWarnings(operation, jsonOutput, failure.Error.Code, failure.Error.Message, failure.Error.Details, failure.Warnings)
 }
 
 func (c *CLI) failWithWarnings(operation string, jsonOutput bool, code, message string, details map[string]any, warnings []result.Warning) int {

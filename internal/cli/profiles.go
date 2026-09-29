@@ -2,12 +2,11 @@ package cli
 
 import (
 	"encoding/json/v2"
-	"errors"
 	"fmt"
-	"os"
 
 	"github.com/avienor/bediz/internal/profiles"
 	"github.com/avienor/bediz/internal/result"
+	"github.com/avienor/bediz/internal/structurederror"
 	"github.com/spf13/cobra"
 )
 
@@ -35,7 +34,7 @@ func (c *CLI) newProfilesCommand(exitCode *int, jsonOutput *bool) *cobra.Command
 			}
 			var doc profiles.Document
 			if err := c.loadRequestDocument(requestPath, &doc); err != nil {
-				*exitCode = c.fail(result.OperationProfilesCreate, *jsonOutput, result.CodeInvalidRequest, err.Error(), invalidRequestDetails(err))
+				*exitCode = c.failStructured(result.OperationProfilesCreate, *jsonOutput, structurederror.InvalidRequest(err))
 				return
 			}
 			if err := profiles.Validate(doc); err != nil {
@@ -43,11 +42,7 @@ func (c *CLI) newProfilesCommand(exitCode *int, jsonOutput *bool) *cobra.Command
 				return
 			}
 			if err := profiles.Create(doc, replace); err != nil {
-				if existing, ok := errors.AsType[*profiles.ExistsError](err); ok {
-					*exitCode = c.fail(result.OperationProfilesCreate, *jsonOutput, result.CodeInvalidRequest, err.Error(), map[string]any{"reason": "profile_exists", "name": existing.Name})
-				} else {
-					*exitCode = c.fail(result.OperationProfilesCreate, *jsonOutput, result.CodeConfigurationWriteFailed, err.Error(), nil)
-				}
+				*exitCode = c.failStructured(result.OperationProfilesCreate, *jsonOutput, structurederror.Profile(result.OperationProfilesCreate, doc.Name, err))
 				return
 			}
 			*exitCode = c.profileSuccess(result.OperationProfilesCreate, *jsonOutput, doc)
@@ -66,10 +61,8 @@ func (c *CLI) newProfilesCommand(exitCode *int, jsonOutput *bool) *cobra.Command
 				return
 			}
 			doc, err := profiles.Get(args[0])
-			if errors.Is(err, os.ErrNotExist) {
-				*exitCode = c.fail(result.OperationProfilesGet, *jsonOutput, result.CodeNotFound, fmt.Sprintf("profile %q was not found", args[0]), nil)
-			} else if err != nil {
-				*exitCode = c.fail(result.OperationProfilesGet, *jsonOutput, result.CodeInvalidConfiguration, err.Error(), map[string]any{"name": args[0]})
+			if err != nil {
+				*exitCode = c.failStructured(result.OperationProfilesGet, *jsonOutput, structurederror.Profile(result.OperationProfilesGet, args[0], err))
 			} else {
 				*exitCode = c.profileSuccess(result.OperationProfilesGet, *jsonOutput, doc)
 			}
@@ -82,7 +75,7 @@ func (c *CLI) newProfilesCommand(exitCode *int, jsonOutput *bool) *cobra.Command
 		Run: func(_ *cobra.Command, _ []string) {
 			items, err := profiles.List()
 			if err != nil {
-				*exitCode = c.fail(result.OperationProfilesList, *jsonOutput, result.CodeInvalidConfiguration, err.Error(), nil)
+				*exitCode = c.failStructured(result.OperationProfilesList, *jsonOutput, structurederror.Profile(result.OperationProfilesList, "", err))
 				return
 			}
 			if *jsonOutput {
@@ -110,10 +103,8 @@ func (c *CLI) newProfilesCommand(exitCode *int, jsonOutput *bool) *cobra.Command
 				*exitCode = c.fail(result.OperationProfilesDelete, *jsonOutput, result.CodeInvalidRequest, "valid profile name and --yes are required", nil)
 				return
 			}
-			if err := profiles.Delete(name); errors.Is(err, os.ErrNotExist) {
-				*exitCode = c.fail(result.OperationProfilesDelete, *jsonOutput, result.CodeNotFound, fmt.Sprintf("profile %q was not found", name), nil)
-			} else if err != nil {
-				*exitCode = c.fail(result.OperationProfilesDelete, *jsonOutput, result.CodeConfigurationWriteFailed, err.Error(), map[string]any{"name": name})
+			if err := profiles.Delete(name); err != nil {
+				*exitCode = c.failStructured(result.OperationProfilesDelete, *jsonOutput, structurederror.Profile(result.OperationProfilesDelete, name, err))
 			} else if *jsonOutput {
 				*exitCode = c.writeResult(result.OperationProfilesDelete, map[string]string{"name": name})
 			} else {
