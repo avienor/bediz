@@ -23,6 +23,23 @@ func profileLoadError(name string, err error) error {
 	return &ProfileLoadError{Name: name, Err: err}
 }
 
+// ProfilePreferenceError retains skipped component preferences when a later
+// step fails before an accepted enqueue.
+type ProfilePreferenceError struct {
+	Err      error
+	Warnings []result.Warning
+}
+
+func (e *ProfilePreferenceError) Error() string { return e.Err.Error() }
+func (e *ProfilePreferenceError) Unwrap() error { return e.Err }
+
+func withProfileWarnings(err error, warnings []result.Warning) error {
+	if err == nil || len(warnings) == 0 {
+		return err
+	}
+	return &ProfilePreferenceError{Err: err, Warnings: warnings}
+}
+
 // ProfileSettingError identifies a saved setting that cannot apply to the
 // selected main model, even if the request supplied an explicit override.
 type ProfileSettingError struct {

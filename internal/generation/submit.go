@@ -111,14 +111,14 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	}
 	adapter, err := adapterForBase(main.Base)
 	if err != nil {
-		return ExecutionReceipt{}, err
+		return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
 	}
 	effective = applyModeDefaults(effective)
 	alignment := adapter.alignment()
 	if effective.Source != nil {
 		if request.Source.Type == "path" {
 			if err := checkSourceSize(localWidth, localHeight, alignment); err != nil {
-				return ExecutionReceipt{}, err
+				return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
 			}
 			if effective.Width == nil {
 				effective.Width, effective.Height = new(localWidth/alignment*alignment), new(localHeight/alignment*alignment)
@@ -127,30 +127,31 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	}
 	resolved, err := adapter.resolve(effective, main, inventory, rand.Reader)
 	if err != nil {
-		return ExecutionReceipt{}, err
+		return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
 	}
 	entry, err := CapabilityEntry(resolved)
 	if err != nil {
-		return ExecutionReceipt{}, err
+		return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
 	}
 	if effective.Source != nil {
 		if err := graphops.CheckRequirements(ctx, client, entry.Endpoints, entry.Invocations); err != nil {
-			return ExecutionReceipt{}, err
+			return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
 		}
 	} else if err := graphops.CheckInvocations(ctx, client, entry.Invocations); err != nil {
-		return ExecutionReceipt{}, err
+		return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
 	}
 	var source sourceimage.Resolved
 	if prepared != nil {
 		source, err = prepared.Resolve(ctx, client)
 		if err != nil {
-			return ExecutionReceipt{}, err
+			return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
 		}
 		if source.Uploaded && (source.Image.Width != localWidth || source.Image.Height != localHeight) {
-			return ExecutionReceipt{}, &sourceimage.UploadedError{Source: source.Image, Err: &httpclient.InvalidResponseError{Err: fmt.Errorf("uploaded source dimensions %d × %d differ from local image dimensions %d × %d", source.Image.Width, source.Image.Height, localWidth, localHeight)}}
+			err := &httpclient.InvalidResponseError{Err: fmt.Errorf("uploaded source dimensions %d × %d differ from local image dimensions %d × %d", source.Image.Width, source.Image.Height, localWidth, localHeight)}
+			return ExecutionReceipt{}, &sourceimage.UploadedError{Source: source.Image, Err: withProfileWarnings(err, profileWarnings)}
 		}
 		if err := checkSourceSize(source.Image.Width, source.Image.Height, alignment); err != nil {
-			return ExecutionReceipt{}, err
+			return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
 		}
 		if request.Width == nil {
 			resolved.Request.Width, resolved.Request.Height = new(source.Image.Width/alignment*alignment), new(source.Image.Height/alignment*alignment)
@@ -160,16 +161,16 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	enqueueRequest, err := Compile(resolved)
 	if err != nil {
 		if source.Uploaded {
-			return ExecutionReceipt{}, &sourceimage.UploadedError{Source: source.Image, Err: err}
+			return ExecutionReceipt{}, &sourceimage.UploadedError{Source: source.Image, Err: withProfileWarnings(err, profileWarnings)}
 		}
-		return ExecutionReceipt{}, err
+		return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
 	}
 	queueReceipt, err := graphops.Enqueue(ctx, client, enqueueRequest, *resolved.Request.OutputCount)
 	if err != nil {
 		if source.Uploaded {
-			return ExecutionReceipt{}, &sourceimage.UploadedError{Source: source.Image, Err: err}
+			return ExecutionReceipt{}, &sourceimage.UploadedError{Source: source.Image, Err: withProfileWarnings(err, profileWarnings)}
 		}
-		return ExecutionReceipt{}, err
+		return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
 	}
 
 	receipt := ExecutionReceipt{

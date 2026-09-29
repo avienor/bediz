@@ -72,6 +72,8 @@ func classify(operationName string, err error, extra map[string]any) Failure {
 	var warnings []result.Warning
 	if preference, ok := errors.AsType[*upscale.ProfilePreferenceError](err); ok {
 		warnings = preference.Warnings
+	} else if preference, ok := errors.AsType[*generation.ProfilePreferenceError](err); ok {
+		warnings = preference.Warnings
 	}
 	fail := func(code, message string, details map[string]any) Failure {
 		if len(extra) > 0 {
