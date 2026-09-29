@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"slices"
 
 	"github.com/avienor/bediz/internal/capability"
 	"github.com/avienor/bediz/internal/graphops"
@@ -18,7 +17,7 @@ func validateFLUXMain(main ModelIdentifier) error {
 	return nil
 }
 
-func resolveFLUX(request Request, main ModelIdentifier, inventory []ModelIdentifier, random io.Reader, alignment int) (Resolution, error) {
+func resolveFLUX(request Request, main ModelIdentifier, inventory []ModelIdentifier, random io.Reader, alignment int, entry capability.Entry) (Resolution, error) {
 	if err := validateFLUXMain(main); err != nil {
 		return Resolution{}, err
 	}
@@ -61,7 +60,7 @@ func resolveFLUX(request Request, main ModelIdentifier, inventory []ModelIdentif
 	if *resolved.Steps < 1 {
 		return Resolution{}, operation.InvalidRequest("steps must be positive")
 	}
-	if !isFLUXScheduler(*resolved.Scheduler) {
+	if !entry.SupportsScheduler(*resolved.Scheduler) {
 		return Resolution{}, operation.InvalidField("scheduler", "scheduler is not supported for FLUX.1")
 	}
 	if *resolved.OutputCount < 1 {
@@ -105,8 +104,4 @@ func resolveFLUX(request Request, main ModelIdentifier, inventory []ModelIdentif
 		return Resolution{}, fmt.Errorf("resolve FLUX.1 CLIP Embed: %w", err)
 	}
 	return Resolution{Request: resolved, Models: ResolvedModels{Main: main, VAE: vae, T5Encoder: t5, CLIPEmbed: clip}, Seeds: seeds}, nil
-}
-
-func isFLUXScheduler(scheduler string) bool {
-	return slices.Contains([]string{"euler", "heun", "lcm"}, scheduler)
 }

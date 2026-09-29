@@ -96,7 +96,7 @@ func validateRequest(request Request, requireModel bool) error {
 	if request.Steps != nil && *request.Steps < 1 {
 		return operation.InvalidRequest("steps must be positive")
 	}
-	if request.Scheduler != nil && !graphops.IsSDXLScheduler(*request.Scheduler) {
+	if request.Scheduler != nil && !supportsScheduler(*request.Scheduler) {
 		return operation.InvalidRequest("scheduler is not supported for upscale")
 	}
 	if request.Guidance != nil && (math.IsNaN(*request.Guidance) || math.IsInf(*request.Guidance, 0) || *request.Guidance < 1) {
@@ -155,6 +155,9 @@ func Resolve(request Request, inventory []graphops.ModelIdentifier, random io.Re
 		return Resolution{}, err
 	}
 	family, _ := familyFor(main.Base)
+	if request.Scheduler != nil && !family.entry().SupportsScheduler(*request.Scheduler) {
+		return Resolution{}, operation.InvalidRequest("scheduler is not supported for upscale")
+	}
 	upscaleSelector, tileSelector, vaeSelector := "", "", ""
 	if request.Components != nil {
 		if request.Components.UpscaleModel != nil {

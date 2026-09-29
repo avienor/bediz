@@ -14,8 +14,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/avienor/bediz/internal/capability"
 	"github.com/avienor/bediz/internal/document"
-	"github.com/avienor/bediz/internal/graphops"
 )
 
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
@@ -97,7 +97,9 @@ func validGuidance(value *float64) bool {
 	return value == nil || (!math.IsNaN(*value) && !math.IsInf(*value, 0) && *value >= 1)
 }
 
-func validScheduler(value *string) bool { return value == nil || graphops.IsSDXLScheduler(*value) }
+func validScheduler(value *string) bool {
+	return value == nil || capability.IsRegisteredScheduler(*value)
+}
 
 func (g Generate) validate() error {
 	if !validSelector(g.Model) {

@@ -34,56 +34,6 @@ func (e *ProfileSettingError) Error() string {
 	return fmt.Sprintf("profile %q setting %q is not applicable to the selected model", e.Profile, e.Field)
 }
 
-func validateProfileApplicability(name string, profile profiles.Generate, main ModelIdentifier) error {
-	invalid := func(field string) error { return &ProfileSettingError{Profile: name, Field: field} }
-	if profile.Components != nil {
-		for _, component := range []struct {
-			kind     string
-			selector *string
-			applies  bool
-		}{
-			{"qwen3_encoder", profile.Components.Qwen3Encoder, main.Base == "anima"},
-			{"t5_encoder", profile.Components.T5Encoder, main.Base == "flux"},
-			{"clip_embed", profile.Components.CLIPEmbed, main.Base == "flux"},
-		} {
-			if component.selector != nil && !component.applies {
-				return invalid(component.kind)
-			}
-		}
-	}
-	if profile.Width != nil {
-		multiple := 8
-		if main.Base == "flux" {
-			multiple = 16
-		}
-		if *profile.Width%multiple != 0 {
-			return invalid("width")
-		}
-		if *profile.Height%multiple != 0 {
-			return invalid("height")
-		}
-	}
-	if profile.Guidance != nil && main.Base == "flux" && main.Variant == "schnell" {
-		return invalid("guidance")
-	}
-	if profile.Scheduler != nil {
-		scheduler := *profile.Scheduler
-		var supported bool
-		switch main.Base {
-		case "anima":
-			supported = isAnimaScheduler(scheduler)
-		case "sdxl":
-			supported = graphops.IsSDXLScheduler(scheduler)
-		case "flux":
-			supported = isFLUXScheduler(scheduler)
-		}
-		if !supported {
-			return invalid("scheduler")
-		}
-	}
-	return nil
-}
-
 func applyProfileSettings(request Request, profile profiles.Generate) Request {
 	if request.Width == nil && request.Source == nil {
 		request.Width, request.Height = profile.Width, profile.Height

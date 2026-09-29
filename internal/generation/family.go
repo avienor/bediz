@@ -3,10 +3,12 @@ package generation
 import (
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/avienor/bediz/internal/capability"
 	"github.com/avienor/bediz/internal/graphops"
 	"github.com/avienor/bediz/internal/operation"
+	"github.com/avienor/bediz/internal/profiles"
 )
 
 // A family adapter owns the behavior that varies with the selected main model.
@@ -16,6 +18,7 @@ type familyAdapter interface {
 	compile(Resolution) (EnqueueRequest, error)
 	capabilityEntry(Request) capability.Entry
 	alignment() int
+	profileApplicability(ModelIdentifier) profileApplicability
 	componentKeys(Resolution) map[string]string
 	validateRecall(ModelIdentifier, *int, *int, *int) error
 	synchronization(ResolvedSettings) (SyncSettings, []string)
@@ -31,8 +34,25 @@ type animaAdapter struct{}
 type sdxlAdapter struct{}
 type fluxAdapter struct{}
 
+type profileApplicability struct {
+	components []string
+	guidance   bool
+}
+
+func (fluxAdapter) profileApplicability(main ModelIdentifier) profileApplicability {
+	return profileApplicability{components: []string{"vae", "t5_encoder", "clip_embed"}, guidance: main.Variant != "schnell"}
+}
+
+func (sdxlAdapter) profileApplicability(ModelIdentifier) profileApplicability {
+	return profileApplicability{components: []string{"vae"}, guidance: true}
+}
+
+func (animaAdapter) profileApplicability(ModelIdentifier) profileApplicability {
+	return profileApplicability{components: []string{"vae", "qwen3_encoder"}, guidance: true}
+}
+
 func (adapter fluxAdapter) resolve(request Request, main ModelIdentifier, inventory []ModelIdentifier, random io.Reader) (Resolution, error) {
-	return resolveFLUX(request, main, inventory, random, adapter.alignment())
+	return resolveFLUX(request, main, inventory, random, adapter.alignment(), adapter.capabilityEntry(request))
 }
 
 func (fluxAdapter) alignment() int { return 16 }
@@ -66,7 +86,7 @@ func (fluxAdapter) synchronization(settings ResolvedSettings) (SyncSettings, []s
 }
 
 func (adapter sdxlAdapter) resolve(request Request, main ModelIdentifier, inventory []ModelIdentifier, random io.Reader) (Resolution, error) {
-	return resolveSDXL(request, main, inventory, random, adapter.alignment())
+	return resolveSDXL(request, main, inventory, random, adapter.alignment(), adapter.capabilityEntry(request))
 }
 
 func (sdxlAdapter) alignment() int { return 8 }
@@ -108,7 +128,7 @@ func (sdxlAdapter) synchronization(settings ResolvedSettings) (SyncSettings, []s
 }
 
 func (adapter animaAdapter) resolve(request Request, main ModelIdentifier, inventory []ModelIdentifier, random io.Reader) (Resolution, error) {
-	return resolveAnima(request, main, inventory, random, adapter.alignment())
+	return resolveAnima(request, main, inventory, random, adapter.alignment(), adapter.capabilityEntry(request))
 }
 
 func (animaAdapter) alignment() int { return 8 }
@@ -178,6 +198,45 @@ func adapterForBase(base string) (familyAdapter, error) {
 		return nil, operation.UnsupportedCapability(fmt.Sprintf("model family %q is not supported for generation", base))
 	}
 	return adapter, nil
+}
+
+func validateProfileApplicability(name string, profile profiles.Generate, main ModelIdentifier) error {
+	adapter, err := adapterForBase(main.Base)
+	if err != nil {
+		return err
+	}
+	rules := adapter.profileApplicability(main)
+	invalid := func(field string) error { return &ProfileSettingError{Profile: name, Field: field} }
+	if profile.Components != nil {
+		for _, component := range []struct {
+			kind     string
+			selector *string
+		}{
+			{"vae", profile.Components.VAE},
+			{"qwen3_encoder", profile.Components.Qwen3Encoder},
+			{"t5_encoder", profile.Components.T5Encoder},
+			{"clip_embed", profile.Components.CLIPEmbed},
+		} {
+			if component.selector != nil && !slices.Contains(rules.components, component.kind) {
+				return invalid(component.kind)
+			}
+		}
+	}
+	if profile.Width != nil {
+		if *profile.Width%adapter.alignment() != 0 {
+			return invalid("width")
+		}
+		if *profile.Height%adapter.alignment() != 0 {
+			return invalid("height")
+		}
+	}
+	if profile.Guidance != nil && !rules.guidance {
+		return invalid("guidance")
+	}
+	if profile.Scheduler != nil && !adapter.capabilityEntry(Request{}).SupportsScheduler(*profile.Scheduler) {
+		return invalid("scheduler")
+	}
+	return nil
 }
 
 // Resolve applies the selected family's defaults and resolves its required

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"slices"
 
+	"github.com/avienor/bediz/internal/capability"
 	"github.com/avienor/bediz/internal/graphops"
 	"github.com/avienor/bediz/internal/images"
 	"github.com/avienor/bediz/internal/operation"
@@ -30,7 +30,7 @@ var (
 	fluxCLIPRequirement     = graphops.ComponentRequirement{Kind: "clip_embed", Base: "any", ModelType: "clip_embed"}
 )
 
-func resolveSDXL(request Request, mainModel ModelIdentifier, inventory []ModelIdentifier, random io.Reader, alignment int) (Resolution, error) {
+func resolveSDXL(request Request, mainModel ModelIdentifier, inventory []ModelIdentifier, random io.Reader, alignment int, entry capability.Entry) (Resolution, error) {
 	if request.Components != nil {
 		if request.Components.Qwen3Encoder != nil {
 			return Resolution{}, operation.InvalidRequest("qwen3_encoder is not applicable to SDXL")
@@ -64,7 +64,7 @@ func resolveSDXL(request Request, mainModel ModelIdentifier, inventory []ModelId
 	if *resolved.Steps < 1 {
 		return Resolution{}, operation.InvalidRequest("steps must be positive")
 	}
-	if !graphops.IsSDXLScheduler(*resolved.Scheduler) {
+	if !entry.SupportsScheduler(*resolved.Scheduler) {
 		return Resolution{}, operation.InvalidField("scheduler", "scheduler is not supported for SDXL")
 	}
 	if math.IsNaN(*resolved.Guidance) || math.IsInf(*resolved.Guidance, 0) || *resolved.Guidance < 1 {
@@ -91,7 +91,7 @@ func resolveSDXL(request Request, mainModel ModelIdentifier, inventory []ModelId
 	return Resolution{Request: resolved, Models: models, Seeds: seeds}, nil
 }
 
-func resolveAnima(request Request, mainModel ModelIdentifier, inventory []ModelIdentifier, random io.Reader, alignment int) (Resolution, error) {
+func resolveAnima(request Request, mainModel ModelIdentifier, inventory []ModelIdentifier, random io.Reader, alignment int, entry capability.Entry) (Resolution, error) {
 	if request.Components != nil {
 		if request.Components.T5Encoder != nil {
 			return Resolution{}, operation.InvalidRequest("t5_encoder is not applicable to Anima")
@@ -101,7 +101,7 @@ func resolveAnima(request Request, mainModel ModelIdentifier, inventory []ModelI
 		}
 	}
 	resolved := applyAnimaDefaults(request)
-	if err := validateAnimaSettings(resolved, alignment); err != nil {
+	if err := validateAnimaSettings(resolved, alignment, entry); err != nil {
 		return Resolution{}, err
 	}
 	seeds, err := assignSeeds(&resolved, random, "Anima")
@@ -206,14 +206,14 @@ func applyAnimaDefaults(request Request) Request {
 	return resolved
 }
 
-func validateAnimaSettings(request Request, alignment int) error {
+func validateAnimaSettings(request Request, alignment int, entry capability.Entry) error {
 	if err := validateGenerationDimensions(*request.Width, *request.Height, alignment); err != nil {
 		return err
 	}
 	if *request.Steps < 1 {
 		return operation.InvalidRequest("steps must be positive")
 	}
-	if !isAnimaScheduler(*request.Scheduler) {
+	if !entry.SupportsScheduler(*request.Scheduler) {
 		return operation.InvalidField("scheduler", "scheduler is not supported for Anima")
 	}
 	if math.IsNaN(*request.Guidance) || math.IsInf(*request.Guidance, 0) || *request.Guidance < 1 {
@@ -223,8 +223,4 @@ func validateAnimaSettings(request Request, alignment int) error {
 		return operation.InvalidRequest("output count must be positive")
 	}
 	return nil
-}
-
-func isAnimaScheduler(scheduler string) bool {
-	return slices.Contains([]string{"euler", "heun", "dpmpp_2m", "dpmpp_2m_sde", "er_sde", "lcm"}, scheduler)
 }
