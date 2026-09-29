@@ -48,7 +48,10 @@ type RecallPatchField struct {
 
 // RecallSchemaAlternative is one type branch in a Recall patch field's anyOf.
 type RecallSchemaAlternative struct {
-	Type string `json:"type"`
+	Type  string `json:"type"`
+	Items struct {
+		Ref string `json:"$ref"`
+	} `json:"items"`
 }
 
 // MatchesNullableAlternatives accepts the expected field type and null in
@@ -68,6 +71,8 @@ var RecallPatchFields = []RecallFieldRequirement{
 	{Name: "steps", Type: "integer"},
 	{Name: "seed", Type: "integer"},
 }
+
+var LoRARecallField = RecallFieldRequirement{Name: "loras", Type: "array"}
 
 var SDXLCFGRecallField = RecallFieldRequirement{Name: "cfg_scale", Type: "number"}
 
@@ -370,7 +375,7 @@ var Matrix = []Entry{
 	FLUXLoRAEntry(),
 	SDXLUpscaleEntry(),
 	SD1UpscaleEntry(),
-	RecallEntry([]RecallFieldRequirement{SDXLCFGRecallField}),
+	RecallEntry([]RecallFieldRequirement{SDXLCFGRecallField, LoRARecallField}),
 	{
 		Operation:     result.OperationAuthHFStatus,
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
@@ -428,7 +433,7 @@ func InstallPreflightEntries(sourceType string, hasSourceToken bool) ([]Entry, b
 }
 
 // RecallEntry records the common patch schema and any fields used by a
-// generation family's UI Synchronization. The doctor row includes the union.
+// direct execution's UI Synchronization. The doctor row includes the union.
 func RecallEntry(additional []RecallFieldRequirement) Entry {
 	return Entry{
 		Operation:     result.OperationRecall,

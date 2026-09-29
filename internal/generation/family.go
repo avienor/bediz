@@ -88,9 +88,6 @@ func (fluxAdapter) synchronization(settings ResolvedSettings) (SyncSettings, []s
 	if settings.Strength != nil {
 		fields = append(fields, "source_image", "strength")
 	}
-	if len(settings.Loras) > 0 {
-		fields = append(fields, "loras")
-	}
 	return SyncSettings{Model: settings.ModelKey, PositivePrompt: settings.PositivePrompt, NegativePrompt: settings.NegativePrompt, Width: settings.Width, Height: settings.Height, Steps: settings.Steps, Seed: settings.Seeds[0]}, fields
 }
 
@@ -138,9 +135,6 @@ func (sdxlAdapter) synchronization(settings ResolvedSettings) (SyncSettings, []s
 	fields := []string{"scheduler", "vae", "output_count", "board_id"}
 	if settings.Strength != nil {
 		fields = append(fields, "source_image", "strength")
-	}
-	if len(settings.Loras) > 0 {
-		fields = append(fields, "loras")
 	}
 	return patch, fields
 }
@@ -209,9 +203,6 @@ func (animaAdapter) synchronization(settings ResolvedSettings) (SyncSettings, []
 	fields := []string{"scheduler", "guidance", "vae", "qwen3_encoder", "output_count", "board_id"}
 	if settings.Strength != nil {
 		fields = append(fields, "source_image", "strength")
-	}
-	if len(settings.Loras) > 0 {
-		fields = append(fields, "loras")
 	}
 	return SyncSettings{
 		Model: settings.ModelKey, PositivePrompt: settings.PositivePrompt, NegativePrompt: settings.NegativePrompt,

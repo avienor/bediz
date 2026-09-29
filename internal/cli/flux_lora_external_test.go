@@ -22,7 +22,6 @@ func TestGenerateFLUXLoRARecordsReceiptAndVariantSynchronization(t *testing.T) {
 					args = append(args, "--image-path", sourcePNG(t, 768, 768), "--strength", "0.6")
 					wantFields = append(wantFields, "source_image", "strength")
 				}
-				wantFields = append(wantFields, "loras")
 				code, envelope := runImg2Img(t, args...)
 				if code != 0 || countRequest(*requests, "POST /api/v1/queue/default/enqueue_batch") != 1 {
 					t.Fatalf("code=%d envelope=%#v requests=%#v", code, envelope, *requests)
@@ -55,7 +54,7 @@ func TestGenerateFLUXLoRARecordsReceiptAndVariantSynchronization(t *testing.T) {
 					}
 				}
 				fields = envelope["warnings"].([]any)[0].(map[string]any)["details"].(map[string]any)["not_restored"]
-				if !reflect.DeepEqual(fields, wantFields[:len(wantFields)-1]) {
+				if !reflect.DeepEqual(fields, wantFields) {
 					t.Fatalf("LoRA-less not_restored = %#v", fields)
 				}
 				nodes = (*graphs)["batch"].(map[string]any)["graph"].(map[string]any)["nodes"].(map[string]any)

@@ -758,7 +758,7 @@ func TestLiveGate(t *testing.T) {
 		if err := json.Unmarshal(envelope.Data, &receipt); err != nil {
 			t.Fatal(err)
 		}
-		if len(receipt.SubmittedRequest.Loras) != 1 || receipt.SubmittedRequest.Loras[0].Model != sdxlLoRA || receipt.SubmittedRequest.Loras[0].Weight != 1 || len(receipt.ResolvedSettings.Loras) != 1 || receipt.ResolvedSettings.Loras[0].ModelKey != sdxlLoRA || receipt.ResolvedSettings.Loras[0].Weight != 1 || len(receipt.Outputs) != 1 || len(receipt.Warnings) != 1 || !slices.Contains(receipt.Warnings[0].Details.NotRestored, "loras") {
+		if len(receipt.SubmittedRequest.Loras) != 1 || receipt.SubmittedRequest.Loras[0].Model != sdxlLoRA || receipt.SubmittedRequest.Loras[0].Weight != 1 || len(receipt.ResolvedSettings.Loras) != 1 || receipt.ResolvedSettings.Loras[0].ModelKey != sdxlLoRA || receipt.ResolvedSettings.Loras[0].Weight != 1 || len(receipt.Outputs) != 1 || len(receipt.Warnings) != 1 || slices.Contains(receipt.Warnings[0].Details.NotRestored, "loras") {
 			t.Fatalf("SDXL LoRA receipt = %#v", receipt)
 		}
 		assertGeneratedImageReference(t, target, receipt.Outputs[0].Image, 768, 768)
@@ -815,7 +815,7 @@ func TestLiveGate(t *testing.T) {
 		if len(receipt.SubmittedRequest.Loras) != 1 || receipt.SubmittedRequest.Loras[0].Model != animaLoRA || receipt.SubmittedRequest.Loras[0].Weight != 1 ||
 			len(receipt.ResolvedSettings.Loras) != 1 || receipt.ResolvedSettings.Loras[0].ModelKey != animaLoRA || receipt.ResolvedSettings.Loras[0].Weight != 1 ||
 			!slices.Equal(receipt.ResolvedSettings.Seeds, []uint32{52}) || len(receipt.Outputs) != 1 || receipt.Outputs[0].Seed != 52 ||
-			len(receipt.Warnings) != 1 || !slices.Contains(receipt.Warnings[0].Details.NotRestored, "loras") {
+			len(receipt.Warnings) != 1 || slices.Contains(receipt.Warnings[0].Details.NotRestored, "loras") {
 			t.Fatalf("Anima LoRA receipt = %#v", receipt)
 		}
 		assertGeneratedImageReference(t, target, receipt.Outputs[0].Image, 768, 768)

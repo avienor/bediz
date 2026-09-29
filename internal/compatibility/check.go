@@ -225,9 +225,22 @@ func recallSchemaFailures(document Document, fields []capability.RecallFieldRequ
 	var failures []string
 	for _, field := range fields {
 		property, ok := properties[field.Name]
-		if !ok || !field.MatchesNullableAlternatives(property.AnyOf) {
+		if !ok || !field.MatchesNullableAlternatives(property.AnyOf) || (field.Name == "loras" && !recallLoRAItemsCompatible(document, property)) {
 			failures = append(failures, "incompatible_recall_schema:"+field.Name)
 		}
 	}
 	return failures
+}
+
+func recallLoRAItemsCompatible(document Document, property Property) bool {
+	for _, alternative := range property.AnyOf {
+		if alternative.Type == "array" {
+			if alternative.Items.Ref != "#/components/schemas/LoRARecallParameter" {
+				return false
+			}
+			items := document.Components.Schemas["LoRARecallParameter"].Properties
+			return items["model_name"].Type == "string" && items["weight"].Type == "number"
+		}
+	}
+	return false
 }

@@ -31,6 +31,18 @@ func TestGenerateSDXLLoRAFlagSubmitsOneGraphAndResolvedReceipt(t *testing.T) {
 			}
 			_ = json.MarshalWrite(w, map[string]any{"queue_id": "default", "enqueued": 1, "requested": 1, "item_ids": []int{17}, "batch": map[string]any{"batch_id": "lora-batch"}})
 		case "/api/v1/recall/default":
+			var patch map[string]any
+			if err := json.UnmarshalRead(r.Body, &patch); err != nil {
+				t.Error(err)
+			}
+			want := map[string]any{
+				"model": "SDXL Main", "positive_prompt": "alienzkin", "negative_prompt": "",
+				"width": float64(1024), "height": float64(1024), "steps": float64(30), "seed": float64(41), "cfg_scale": float64(7),
+				"loras": []any{map[string]any{"model_name": "Alien Style", "weight": 1.25}},
+			}
+			if !reflect.DeepEqual(patch, want) {
+				t.Errorf("Recall patch = %#v, want %#v", patch, want)
+			}
 			_, _ = w.Write([]byte(`{"status":"success"}`))
 		default:
 			http.NotFound(w, r)
@@ -58,7 +70,7 @@ func TestGenerateSDXLLoRAFlagSubmitsOneGraphAndResolvedReceipt(t *testing.T) {
 	}
 	warnings := envelope["warnings"].([]any)
 	fields := warnings[0].(map[string]any)["details"].(map[string]any)["not_restored"].([]any)
-	if fields[len(fields)-1] != "loras" {
+	if !reflect.DeepEqual(fields, []any{"scheduler", "vae", "output_count", "board_id"}) {
 		t.Fatalf("not_restored = %#v", fields)
 	}
 }
@@ -213,7 +225,7 @@ func TestGenerateAnimaLoRARecordsReceiptAndSynchronization(t *testing.T) {
 		t.Fatalf("receipt LoRAs: submitted=%#v resolved=%#v", submitted, resolved)
 	}
 	fields := envelope["warnings"].([]any)[0].(map[string]any)["details"].(map[string]any)["not_restored"].([]any)
-	if fields[len(fields)-1] != "loras" {
+	if !reflect.DeepEqual(fields, []any{"scheduler", "guidance", "vae", "qwen3_encoder", "output_count", "board_id"}) {
 		t.Fatalf("not_restored = %#v", fields)
 	}
 	code, envelope = runImg2Img(t, "--no-wait", "--model", "main-key", "--prompt", "a lighthouse", "--seed", "41", "--image-path", sourcePNG(t, 768, 768), "--strength", "0.6", "--lora", "anima-lora=1", "--url", server.URL)
@@ -225,7 +237,7 @@ func TestGenerateAnimaLoRARecordsReceiptAndSynchronization(t *testing.T) {
 		t.Fatalf("image-to-image LoRA graph = %#v", nodes)
 	}
 	fields = envelope["warnings"].([]any)[0].(map[string]any)["details"].(map[string]any)["not_restored"].([]any)
-	if !reflect.DeepEqual(fields[len(fields)-3:], []any{"source_image", "strength", "loras"}) {
+	if !reflect.DeepEqual(fields[len(fields)-2:], []any{"source_image", "strength"}) {
 		t.Fatalf("image-to-image not_restored = %#v", fields)
 	}
 }

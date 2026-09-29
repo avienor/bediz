@@ -99,6 +99,7 @@ func animaOpenAPIFixture(missingSchema, missingProperty string) map[string]any {
 	}
 	recallSchema := recallOpenAPI()
 	schemas["RecallParameter"] = recallSchema["components"].(map[string]any)["schemas"].(map[string]any)["RecallParameter"]
+	schemas["LoRARecallParameter"] = recallSchema["components"].(map[string]any)["schemas"].(map[string]any)["LoRARecallParameter"]
 	paths := recallSchema["paths"].(map[string]any)
 	paths["/api/v1/app/version"] = map[string]any{"get": map[string]any{}}
 	paths["/api/v2/models/"] = map[string]any{"get": map[string]any{}}

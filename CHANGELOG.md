@@ -21,6 +21,7 @@ Each release lists the changes that affect users of the `bediz` binary, its JSON
 
 ### Changed
 
+- Automatic Recall replaces the web interface's LoRA list and weights after every generation and clears it after LoRA-less generation or upscale. LoRA name collisions and incompatible Recall schemas report `ui_sync_failed`; overlapping stock-frontend Recalls can retain an earlier LoRA, so the Execution Receipt remains authoritative.
 - `generate` text-to-image and `upscale` check recorded InvokeAI endpoints before upload or enqueue; Recall, installation, and Hugging Face login preflight share `doctor`'s Compatibility Check.
 - `generate` retains `profile_preference_skipped` warnings on pre-enqueue failures, matching `upscale`'s failure handling.
 - The agent skill teaches image-to-image generation for Anima, SDXL, and FLUX.1, including Source Images, Denoising Strength, dimensions, safe failure recovery, and partial UI Synchronization; the README lists it as supported.

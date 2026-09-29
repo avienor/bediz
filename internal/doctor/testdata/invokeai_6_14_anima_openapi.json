@@ -358,6 +358,21 @@
                 "type": "null"
               }
             ]
+          },
+          "loras": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/LoRARecallParameter"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loras",
+            "description": "List of LoRAs with their weights"
           }
         }
       },
@@ -1240,6 +1255,35 @@
         ],
         "title": "FluxLoRALoaderOutput",
         "type": "object"
+      },
+      "LoRARecallParameter": {
+        "properties": {
+          "model_name": {
+            "type": "string",
+            "title": "Model Name",
+            "description": "The name of the LoRA model"
+          },
+          "weight": {
+            "type": "number",
+            "maximum": 10.0,
+            "minimum": -10.0,
+            "title": "Weight",
+            "description": "The weight for the LoRA",
+            "default": 0.75
+          },
+          "is_enabled": {
+            "type": "boolean",
+            "title": "Is Enabled",
+            "description": "Whether the LoRA is enabled",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "model_name"
+        ],
+        "title": "LoRARecallParameter",
+        "description": "LoRA configuration for recall"
       }
     }
   }

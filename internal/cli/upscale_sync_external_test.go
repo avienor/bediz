@@ -59,7 +59,7 @@ func TestUpscaleRecallsSharedGenerateControlsAfterAcceptedEnqueue(t *testing.T) 
 					}
 					want := map[string]any{
 						"model": test.wantModel, "positive_prompt": "mountain", "negative_prompt": "blur",
-						"steps": float64(5), "seed": float64(42),
+						"steps": float64(5), "seed": float64(42), "loras": []any{},
 					}
 					if !reflect.DeepEqual(patch, want) {
 						t.Errorf("Recall patch = %#v, want %#v", patch, want)
