@@ -161,6 +161,15 @@ const (
 	VersionPolicyCompatibleEndpoint VersionPolicy = "compatible_endpoint"
 )
 
+type SpecialPredicate string
+
+const (
+	RecallPatchSchema      SpecialPredicate = "recall_patch_schema"
+	InstallSchema          SpecialPredicate = "install_schema"
+	StarterCatalogResponse SpecialPredicate = "starter_catalog_response"
+	HuggingFaceLoginBody   SpecialPredicate = "hugging_face_login_body"
+)
+
 type Entry struct {
 	Operation     string
 	Family        string
@@ -171,6 +180,7 @@ type Entry struct {
 	Invocations   []InvocationRequirement
 	Models        []ModelRequirement
 	Schedulers    []string
+	Special       []SpecialPredicate
 }
 
 // SupportsScheduler checks the scheduler set tested for this family.
@@ -207,6 +217,7 @@ var Matrix = []Entry{
 	{
 		Operation:     result.OperationModelsInstall,
 		VersionPolicy: VersionPolicySupportedRange,
+		Special:       []SpecialPredicate{InstallSchema},
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v1/app/version"},
 			{Method: "POST", Path: "/api/v2/models/install"},
@@ -216,6 +227,7 @@ var Matrix = []Entry{
 		Operation:     result.OperationModelsInstall,
 		Family:        "starter",
 		VersionPolicy: VersionPolicySupportedRange,
+		Special:       []SpecialPredicate{InstallSchema, StarterCatalogResponse},
 		Endpoints: []EndpointRequirement{
 			{Method: "GET", Path: "/api/v1/app/version"},
 			{Method: "GET", Path: "/api/v2/models/starter_models"},
@@ -351,6 +363,7 @@ var Matrix = []Entry{
 	{
 		Operation:     result.OperationRecall,
 		VersionPolicy: VersionPolicySupportedRange,
+		Special:       []SpecialPredicate{RecallPatchSchema},
 		Endpoints: []EndpointRequirement{
 			{Method: "POST", Path: RecallEndpoint},
 		},
@@ -363,6 +376,7 @@ var Matrix = []Entry{
 	{
 		Operation:     result.OperationAuthHFLogin,
 		VersionPolicy: VersionPolicySupportedRange,
+		Special:       []SpecialPredicate{HuggingFaceLoginBody},
 		Endpoints:     []EndpointRequirement{{Method: "POST", Path: HuggingFaceAuthEndpoint}},
 	},
 	{

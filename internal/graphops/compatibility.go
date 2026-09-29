@@ -2,25 +2,12 @@ package graphops
 
 import (
 	"context"
-	"fmt"
-	"strings"
 
 	"github.com/avienor/bediz/internal/capability"
+	"github.com/avienor/bediz/internal/compatibility"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/operation"
 )
-
-type openAPIDocument struct {
-	Paths      map[string]map[string]any `json:"paths"`
-	Components struct {
-		Schemas map[string]struct {
-			AdditionalProperties bool `json:"additionalProperties"`
-			Properties           map[string]struct {
-				Const string `json:"const"`
-			} `json:"properties"`
-		} `json:"schemas"`
-	} `json:"components"`
-}
 
 // CheckInvocations verifies the operation's invocation vocabulary in live OpenAPI.
 func CheckInvocations(ctx context.Context, client *httpclient.Client, requirements []capability.InvocationRequirement) error {
@@ -29,35 +16,21 @@ func CheckInvocations(ctx context.Context, client *httpclient.Client, requiremen
 
 // CheckRequirements verifies graph vocabulary and endpoints before a source upload.
 func CheckRequirements(ctx context.Context, client *httpclient.Client, endpoints []capability.EndpointRequirement, requirements []capability.InvocationRequirement) error {
-	var document openAPIDocument
+	return CheckEntry(ctx, client, capability.Entry{Endpoints: endpoints, Invocations: requirements})
+}
+
+// CheckEntry evaluates the operation's existing OpenAPI preflight requirements.
+// The supported version and chosen models have already been checked upstream.
+func CheckEntry(ctx context.Context, client *httpclient.Client, entry capability.Entry) error {
+	var document compatibility.Document
 	if err := client.GetJSON(ctx, "/openapi.json", &document); err != nil {
 		return err
 	}
-	for _, endpoint := range endpoints {
-		if _, ok := document.Paths[endpoint.Path][strings.ToLower(endpoint.Method)]; !ok {
-			return operation.UnsupportedCapability(fmt.Sprintf("InvokeAI does not provide required endpoint %s %s", endpoint.Method, endpoint.Path))
-		}
-	}
-	for _, requirement := range requirements {
-		schema, ok := document.Components.Schemas[requirement.Schema]
-		if !ok {
-			return operation.UnsupportedCapability(fmt.Sprintf("InvokeAI does not provide required invocation schema %s for %s", requirement.Schema, requirement.Type))
-		}
-		if schema.Properties["type"].Const != requirement.Type {
-			return operation.UnsupportedCapability(fmt.Sprintf("InvokeAI invocation schema %s does not identify type %s", requirement.Schema, requirement.Type))
-		}
-		if requirement.RequiresAdditionalProperties && !schema.AdditionalProperties {
-			return operation.UnsupportedCapability(fmt.Sprintf("InvokeAI invocation schema %s does not allow required upscale metadata fields", requirement.Schema))
-		}
-		missing := make([]string, 0)
-		for _, property := range requirement.Properties {
-			if _, ok := schema.Properties[property]; !ok {
-				missing = append(missing, property)
-			}
-		}
-		if len(missing) > 0 {
-			return operation.UnsupportedCapability(fmt.Sprintf("InvokeAI invocation schema %s for %s is missing required fields: %s", requirement.Schema, requirement.Type, strings.Join(missing, ", ")))
-		}
+	entry.Models = nil
+	entry.Special = nil
+	failures := compatibility.Evaluate(entry, compatibility.Snapshot{SupportedVersion: true, OpenAPIAvailable: true, Document: document})
+	if len(failures) > 0 {
+		return operation.UnsupportedCapability(failures[0].Message)
 	}
 	return nil
 }

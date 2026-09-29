@@ -77,7 +77,7 @@ func (e execution[Receipt]) run(ctx context.Context, client *httpclient.Client, 
 	if err != nil {
 		return receipt, err
 	}
-	if err := graphops.CheckRequirements(ctx, client, entry.Endpoints, entry.Invocations); err != nil {
+	if err := graphops.CheckEntry(ctx, client, entry); err != nil {
 		return receipt, err
 	}
 	if prepared != nil {
