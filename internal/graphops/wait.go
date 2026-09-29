@@ -42,7 +42,7 @@ func Wait(ctx context.Context, client *httpclient.Client, accepted QueueReceipt,
 	}
 	outputs := []Output{}
 	for index, itemID := range accepted.ItemIDs {
-		item, err := waitForItem(ctx, waitContext, client, position, itemID)
+		item, err := waitForItem(ctx, waitContext, client, position, itemID, accepted.ItemIDs[index:])
 		if err != nil {
 			return outputs, err
 		}
@@ -55,25 +55,19 @@ func Wait(ctx context.Context, client *httpclient.Client, accepted QueueReceipt,
 	return outputs, nil
 }
 
-func waitForItem(ctx, waitContext context.Context, client *httpclient.Client, position operation.QueuePosition, itemID int) (queue.Item, error) {
-	for interval := queue.FirstPollInterval; ; interval = min(interval*2, queue.MaxPollInterval) {
-		result, err := queue.Get(waitContext, client, queue.GetRequest{
-			SchemaVersion: 1,
-			QueueID:       position.QueueID,
-			ItemID:        itemID,
-		})
+func waitForItem(ctx, waitContext context.Context, client *httpclient.Client, position operation.QueuePosition, itemID int, pending []int) (queue.Item, error) {
+	step := queue.NewPollStep(ctx, waitContext, client, position, queue.GraphOperationPoll)
+	backoff := false
+	for {
+		item, terminal, err := step.Poll(itemID, queue.PendingItems{CurrentAndLater: pending}, backoff)
 		if err != nil {
-			return queue.Item{}, waitStopped(ctx, waitContext, position, err)
+			return queue.Item{}, err
 		}
-		item := result.Item
-		if item.ItemID != itemID || item.QueueID != position.QueueID || item.BatchID != position.BatchID {
-			return queue.Item{}, &operation.InvalidQueueResultError{
-				Position: position, ItemID: itemID, Status: item.Status,
-				Detail: fmt.Sprintf("reported contradictory queue identity: item %d, queue %q, batch %q", item.ItemID, item.QueueID, item.BatchID),
-			}
+		if !terminal {
+			backoff = true
+			continue
 		}
 		switch item.Status {
-		case queue.StatusPending, queue.StatusInProgress, queue.StatusWaiting:
 		case queue.StatusCompleted:
 			return item, nil
 		case queue.StatusFailed, queue.StatusCanceled:
@@ -82,18 +76,6 @@ func waitForItem(ctx, waitContext context.Context, client *httpclient.Client, po
 				Position: position, ItemID: itemID, Status: item.Status,
 				FailureType: failureType, FailureMessage: failureMessage,
 			}
-		default:
-			return queue.Item{}, &operation.InvalidQueueResultError{
-				Position: position, ItemID: itemID, Status: item.Status,
-				Detail: fmt.Sprintf("reported status %q, which is not a tested InvokeAI queue status", item.Status),
-			}
-		}
-		timer := time.NewTimer(interval)
-		select {
-		case <-waitContext.Done():
-			timer.Stop()
-			return queue.Item{}, waitStopped(ctx, waitContext, position, nil)
-		case <-timer.C:
 		}
 	}
 }
@@ -182,17 +164,4 @@ func normalizedFailure(item queue.Item) (failureType, failureMessage string) {
 		return "", ""
 	}
 	return item.Error.Type, item.Error.Message
-}
-
-// waitStopped reports why local waiting ended. A canceled caller context is a
-// local interruption, an elapsed wait deadline is a timeout, and otherwise the
-// failed read is returned unchanged.
-func waitStopped(ctx, waitContext context.Context, position operation.QueuePosition, err error) error {
-	if ctx.Err() != nil {
-		return &operation.InterruptedError{Position: position}
-	}
-	if errors.Is(waitContext.Err(), context.DeadlineExceeded) {
-		return &operation.WaitTimeoutError{Position: position}
-	}
-	return err
 }
