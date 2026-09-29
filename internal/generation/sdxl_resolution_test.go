@@ -17,7 +17,7 @@ var sdxlVAE = generation.ModelIdentifier{Key: "sdxl-vae", Hash: "vae-hash", Name
 
 func TestResolveSDXLUsesBundledVAEAndFamilyDefaults(t *testing.T) {
 	request := generation.Request{SchemaVersion: 1, Model: sdxlMain.Key, PositivePrompt: "a lighthouse"}
-	resolved, err := generation.ResolveSDXL(request, []generation.ModelIdentifier{sdxlMain, sdxlVAE}, bytes.NewReader([]byte{1, 0, 0, 0}))
+	resolved, err := generation.Resolve(request, []generation.ModelIdentifier{sdxlMain, sdxlVAE}, bytes.NewReader([]byte{1, 0, 0, 0}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestResolveSDXLUsesBundledVAEAndFamilyDefaults(t *testing.T) {
 
 func TestResolveSDXLExplicitSettingsAndVAE(t *testing.T) {
 	request := generation.Request{SchemaVersion: 1, Model: sdxlMain.Name, PositivePrompt: "a lighthouse", NegativePrompt: "text", Width: new(768), Height: new(512), Steps: new(2), Scheduler: new("ddim"), Guidance: new(2.5), Seed: new(uint32(41)), OutputCount: new(3), Components: &generation.Components{VAE: new(sdxlVAE.Name)}}
-	resolved, err := generation.ResolveSDXL(request, []generation.ModelIdentifier{sdxlMain, sdxlVAE}, bytes.NewReader(nil))
+	resolved, err := generation.Resolve(request, []generation.ModelIdentifier{sdxlMain, sdxlVAE}, bytes.NewReader(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,14 +43,14 @@ func TestResolveSDXLSchedulerSet(t *testing.T) {
 	for _, scheduler := range approved {
 		t.Run(scheduler, func(t *testing.T) {
 			request := generation.Request{SchemaVersion: 1, Model: sdxlMain.Key, PositivePrompt: "test", Scheduler: new(scheduler), Seed: new(uint32(1))}
-			if _, err := generation.ResolveSDXL(request, []generation.ModelIdentifier{sdxlMain}, bytes.NewReader(nil)); err != nil {
+			if _, err := generation.Resolve(request, []generation.ModelIdentifier{sdxlMain}, bytes.NewReader(nil)); err != nil {
 				t.Fatal(err)
 			}
 		})
 	}
 	for _, scheduler := range []string{"anima_only", "unknown"} {
 		request := generation.Request{SchemaVersion: 1, Model: sdxlMain.Key, PositivePrompt: "test", Scheduler: new(scheduler), Seed: new(uint32(1))}
-		if _, err := generation.ResolveSDXL(request, []generation.ModelIdentifier{sdxlMain}, bytes.NewReader(nil)); err == nil || !strings.Contains(err.Error(), "scheduler") {
+		if _, err := generation.Resolve(request, []generation.ModelIdentifier{sdxlMain}, bytes.NewReader(nil)); err == nil || !strings.Contains(err.Error(), "scheduler") {
 			t.Fatalf("scheduler %q: %v", scheduler, err)
 		}
 	}
@@ -75,7 +75,7 @@ func TestResolveSDXLRejectsInvalidSettingsAndComponents(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			request := generation.Request{SchemaVersion: 1, Model: sdxlMain.Key, PositivePrompt: "test", Seed: new(uint32(1))}
 			test.edit(&request)
-			_, err := generation.ResolveSDXL(request, []generation.ModelIdentifier{sdxlMain}, bytes.NewReader(nil))
+			_, err := generation.Resolve(request, []generation.ModelIdentifier{sdxlMain}, bytes.NewReader(nil))
 			if _, ok := errors.AsType[*operation.InvalidRequestError](err); !ok {
 				t.Fatalf("error = %v, want invalid_request", err)
 			}
@@ -89,14 +89,14 @@ func TestResolveSDXLVAEErrors(t *testing.T) {
 	duplicate.Name = "same"
 	other := duplicate
 	other.Key = "other-vae"
-	_, err := generation.ResolveSDXL(request, []generation.ModelIdentifier{sdxlMain, duplicate, other}, bytes.NewReader(nil))
+	_, err := generation.Resolve(request, []generation.ModelIdentifier{sdxlMain, duplicate, other}, bytes.NewReader(nil))
 	if _, ok := errors.AsType[*operation.SelectionRequiredError](err); !ok {
 		t.Fatalf("ambiguous VAE error = %v", err)
 	}
 	request.Components.VAE = new("wrong-vae")
 	wrong := sdxlVAE
 	wrong.Key, wrong.Base = "wrong-vae", "anima"
-	_, err = generation.ResolveSDXL(request, []generation.ModelIdentifier{sdxlMain, wrong}, bytes.NewReader(nil))
+	_, err = generation.Resolve(request, []generation.ModelIdentifier{sdxlMain, wrong}, bytes.NewReader(nil))
 	if _, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); !ok {
 		t.Fatalf("incompatible VAE error = %v", err)
 	}

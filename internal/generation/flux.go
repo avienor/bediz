@@ -58,8 +58,8 @@ type fluxDecodeNode struct {
 	Board *boardField `json:"board,omitempty"`
 }
 
-// CompileFLUX produces the tested InvokeAI 6.14.1 FLUX.1 generation graph.
-func CompileFLUX(resolved Resolution) (EnqueueRequest, error) {
+// compileFLUX produces the tested InvokeAI 6.14.1 FLUX.1 generation graph.
+func compileFLUX(resolved Resolution) (EnqueueRequest, error) {
 	r := resolved.Request
 	if r.Width == nil || r.Height == nil || r.Steps == nil || r.Scheduler == nil || r.Seed == nil || r.OutputCount == nil {
 		return EnqueueRequest{}, fmt.Errorf("compile FLUX.1 graph: all generation settings must be resolved")

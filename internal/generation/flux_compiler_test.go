@@ -27,7 +27,7 @@ func TestCompileFLUXMatchesInvokeAI614Fixtures(t *testing.T) {
 	} {
 		t.Run(tc.fixture, func(t *testing.T) {
 			r := generation.Request{SchemaVersion: 1, Model: tc.main.Key, PositivePrompt: "a lighthouse", Width: new(768), Height: new(512), Steps: new(4), Scheduler: new("euler"), Guidance: tc.guidance, Seed: new(uint32(41)), OutputCount: new(1), BoardID: tc.board}
-			got, err := generation.CompileFLUX(generation.Resolution{Request: r, Models: generation.ResolvedModels{Main: tc.main, VAE: fluxVAE, T5Encoder: fluxT5, CLIPEmbed: fluxCLIP}, Seeds: []uint32{41}})
+			got, err := generation.Compile(generation.Resolution{Request: r, Models: generation.ResolvedModels{Main: tc.main, VAE: fluxVAE, T5Encoder: fluxT5, CLIPEmbed: fluxCLIP}, Seeds: []uint32{41}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -69,7 +69,7 @@ func TestCompileFLUXImageToImageMatchesInvokeAI614Fixtures(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			request := generation.Request{SchemaVersion: 1, Model: tc.main.Key, PositivePrompt: "a lighthouse", Width: new(768), Height: new(512), Steps: new(4), Scheduler: new("euler"), Guidance: tc.guidance, Seed: new(uint32(41)), OutputCount: new(1), Source: &sourceimage.Source{Type: "image", Reference: "source.png"}, Strength: new(tc.strength)}
-			compiled, err := generation.CompileFLUX(generation.Resolution{Request: request, Models: generation.ResolvedModels{Main: tc.main, VAE: fluxVAE, T5Encoder: fluxT5, CLIPEmbed: fluxCLIP}, Seeds: []uint32{41}, SourceImage: images.Reference{ImageName: "source.png", Width: tc.sourceWidth, Height: tc.sourceHeight}})
+			compiled, err := generation.Compile(generation.Resolution{Request: request, Models: generation.ResolvedModels{Main: tc.main, VAE: fluxVAE, T5Encoder: fluxT5, CLIPEmbed: fluxCLIP}, Seeds: []uint32{41}, SourceImage: images.Reference{ImageName: "source.png", Width: tc.sourceWidth, Height: tc.sourceHeight}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -167,7 +167,7 @@ func TestCompileFLUXStock614Topology(t *testing.T) {
 	} {
 		t.Run(tc.main.Variant+tc.board, func(t *testing.T) {
 			request := generation.Request{SchemaVersion: 1, Model: tc.main.Key, PositivePrompt: "a lighthouse", Width: new(768), Height: new(512), Steps: new(4), Scheduler: new("euler"), Guidance: tc.guidance, Seed: new(uint32(41)), OutputCount: new(2), BoardID: tc.board}
-			batch, err := generation.CompileFLUX(generation.Resolution{Request: request, Models: generation.ResolvedModels{Main: tc.main, VAE: fluxVAE, T5Encoder: fluxT5, CLIPEmbed: fluxCLIP}, Seeds: []uint32{41, 42}})
+			batch, err := generation.Compile(generation.Resolution{Request: request, Models: generation.ResolvedModels{Main: tc.main, VAE: fluxVAE, T5Encoder: fluxT5, CLIPEmbed: fluxCLIP}, Seeds: []uint32{41, 42}})
 			if err != nil {
 				t.Fatal(err)
 			}

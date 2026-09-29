@@ -31,7 +31,7 @@ func TestCompileSDXLMatchesInvokeAI614Fixtures(t *testing.T) {
 			if test.board {
 				request.BoardID = "board-1"
 			}
-			got, err := generation.CompileSDXL(generation.Resolution{Request: request, Models: models, Seeds: []uint32{41}})
+			got, err := generation.Compile(generation.Resolution{Request: request, Models: models, Seeds: []uint32{41}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -67,7 +67,7 @@ func TestCompileSDXLMatchesInvokeAI614Fixtures(t *testing.T) {
 
 func TestCompileSDXLImageToImageUsesSourceStrengthAndResolvedSize(t *testing.T) {
 	request := generation.Request{SchemaVersion: 1, Model: sdxlMain.Key, PositivePrompt: "a lighthouse", Width: new(1000), Height: new(744), Steps: new(24), Scheduler: new("heun"), Guidance: new(6.5), Seed: new(uint32(41)), OutputCount: new(1), Source: &sourceimage.Source{Type: "image", Reference: "source.png"}, Strength: new(0.6)}
-	compiled, err := generation.CompileSDXL(generation.Resolution{Request: request, Models: generation.ResolvedModels{Main: sdxlMain, VAE: sdxlVAE}, Seeds: []uint32{41}, SourceImage: images.Reference{ImageName: "source.png", Width: 1001, Height: 750}})
+	compiled, err := generation.Compile(generation.Resolution{Request: request, Models: generation.ResolvedModels{Main: sdxlMain, VAE: sdxlVAE}, Seeds: []uint32{41}, SourceImage: images.Reference{ImageName: "source.png", Width: 1001, Height: 750}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestCompileSDXLImageToImageMatchesInvokeAI614Fixtures(t *testing.T) {
 			if tc.board {
 				request.BoardID = "board-1"
 			}
-			compiled, err := generation.CompileSDXL(generation.Resolution{Request: request, Models: models, Seeds: []uint32{41}, SourceImage: images.Reference{ImageName: "source.png", Width: tc.sourceWidth, Height: tc.sourceHeight}})
+			compiled, err := generation.Compile(generation.Resolution{Request: request, Models: models, Seeds: []uint32{41}, SourceImage: images.Reference{ImageName: "source.png", Width: tc.sourceWidth, Height: tc.sourceHeight}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -149,7 +149,7 @@ func TestCompileSDXLImageToImageMatchesInvokeAI614Fixtures(t *testing.T) {
 
 func TestCompileSDXLAlignsBatchSeedsWithReturnedItemOrder(t *testing.T) {
 	request := generation.Request{SchemaVersion: 1, Model: sdxlMain.Key, PositivePrompt: "test", Width: new(1024), Height: new(1024), Steps: new(30), Scheduler: new("euler"), Guidance: new(7.0), Seed: new(uint32(5)), OutputCount: new(3)}
-	got, err := generation.CompileSDXL(generation.Resolution{Request: request, Models: generation.ResolvedModels{Main: sdxlMain}, Seeds: []uint32{5, 6, 7}})
+	got, err := generation.Compile(generation.Resolution{Request: request, Models: generation.ResolvedModels{Main: sdxlMain}, Seeds: []uint32{5, 6, 7}})
 	if err != nil {
 		t.Fatal(err)
 	}

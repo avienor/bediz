@@ -113,14 +113,9 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	if err != nil {
 		return ExecutionReceipt{}, err
 	}
-	alignment := 8
-	if main.Base == "flux" {
-		alignment = 16
-	}
+	effective = applyModeDefaults(effective)
+	alignment := adapter.alignment()
 	if effective.Source != nil {
-		if effective.Strength == nil {
-			effective.Strength = new(0.75)
-		}
 		if request.Source.Type == "path" {
 			if err := checkSourceSize(localWidth, localHeight, alignment); err != nil {
 				return ExecutionReceipt{}, err
@@ -134,17 +129,15 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	if err != nil {
 		return ExecutionReceipt{}, err
 	}
+	entry, err := CapabilityEntry(resolved)
+	if err != nil {
+		return ExecutionReceipt{}, err
+	}
 	if effective.Source != nil {
-		entry := capability.SDXLImageToImageEntry()
-		if main.Base == "anima" {
-			entry = capability.AnimaImageToImageEntry()
-		} else if main.Base == "flux" {
-			entry = capability.FLUXImageToImageEntry()
-		}
 		if err := graphops.CheckRequirements(ctx, client, entry.Endpoints, entry.Invocations); err != nil {
 			return ExecutionReceipt{}, err
 		}
-	} else if err := graphops.CheckInvocations(ctx, client, adapter.invocations()); err != nil {
+	} else if err := graphops.CheckInvocations(ctx, client, entry.Invocations); err != nil {
 		return ExecutionReceipt{}, err
 	}
 	var source sourceimage.Resolved
@@ -164,7 +157,7 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 		}
 		resolved.SourceImage = source.Image
 	}
-	enqueueRequest, err := adapter.compile(resolved)
+	enqueueRequest, err := Compile(resolved)
 	if err != nil {
 		if source.Uploaded {
 			return ExecutionReceipt{}, &sourceimage.UploadedError{Source: source.Image, Err: err}

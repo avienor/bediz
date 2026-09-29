@@ -11,21 +11,6 @@ import (
 	"github.com/avienor/bediz/internal/operation"
 )
 
-// ResolveFLUX resolves a supported FLUX.1 main model and its three components.
-func ResolveFLUX(request Request, inventory []ModelIdentifier, random io.Reader) (Resolution, error) {
-	if err := validateCommonRequest(request); err != nil {
-		return Resolution{}, err
-	}
-	main, err := ResolveFamilyMain(inventory, request.Model)
-	if err != nil {
-		return Resolution{}, err
-	}
-	if main.Base != "flux" {
-		return Resolution{}, operation.UnsupportedCapability(fmt.Sprintf("model %q is not a FLUX.1 main model", main.Key))
-	}
-	return resolveFLUX(request, main, inventory, random)
-}
-
 func validateFLUXMain(main ModelIdentifier) error {
 	if !capability.SupportsFLUXMain(main.Variant, main.Format) {
 		return operation.UnsupportedCapability(fmt.Sprintf("FLUX.1 model %q has unsupported variant %q or format %q", main.Key, main.Variant, main.Format))
@@ -33,7 +18,7 @@ func validateFLUXMain(main ModelIdentifier) error {
 	return nil
 }
 
-func resolveFLUX(request Request, main ModelIdentifier, inventory []ModelIdentifier, random io.Reader) (Resolution, error) {
+func resolveFLUX(request Request, main ModelIdentifier, inventory []ModelIdentifier, random io.Reader, alignment int) (Resolution, error) {
 	if err := validateFLUXMain(main); err != nil {
 		return Resolution{}, err
 	}
@@ -70,8 +55,8 @@ func resolveFLUX(request Request, main ModelIdentifier, inventory []ModelIdentif
 	if resolved.OutputCount == nil {
 		resolved.OutputCount = new(1)
 	}
-	if *resolved.Width < 1 || *resolved.Width%16 != 0 || *resolved.Height < 1 || *resolved.Height%16 != 0 {
-		return Resolution{}, operation.InvalidRequest("width and height must be positive multiples of 16")
+	if err := validateGenerationDimensions(*resolved.Width, *resolved.Height, alignment); err != nil {
+		return Resolution{}, err
 	}
 	if *resolved.Steps < 1 {
 		return Resolution{}, operation.InvalidRequest("steps must be positive")

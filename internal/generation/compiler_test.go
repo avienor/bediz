@@ -36,7 +36,7 @@ func TestCompileAnimaProducesInvokeAI614Graph(t *testing.T) {
 		Qwen3Encoder: generation.ModelIdentifier{Key: "encoder-key", Hash: "blake3:encoder", Name: "Qwen3 Encoder", Base: "any", Type: "qwen3_encoder"},
 	}
 
-	got, err := generation.CompileAnima(generation.AnimaResolution{Request: request, Models: models, Seeds: []uint32{42}})
+	got, err := generation.Compile(generation.Resolution{Request: request, Models: models, Seeds: []uint32{42}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestCompileAnimaAlignsBatchSeedsWithInvokeAIEnqueueOrder(t *testing.T) {
 		Qwen3Encoder: generation.ModelIdentifier{Key: "encoder-key", Hash: "encoder-hash", Name: "Qwen3 Encoder", Base: "any", Type: "qwen3_encoder"},
 	}
 
-	got, err := generation.CompileAnima(generation.AnimaResolution{Request: request, Models: models, Seeds: []uint32{5, 6, 7}})
+	got, err := generation.Compile(generation.Resolution{Request: request, Models: models, Seeds: []uint32{5, 6, 7}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestCompileAnimaImageToImageMatchesInvokeAI614Fixtures(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			request := generation.Request{SchemaVersion: 1, Model: "main-key", PositivePrompt: "a lighthouse in a storm", NegativePrompt: "text", Width: new(768), Height: new(1024), Steps: new(24), Scheduler: new("heun"), Guidance: new(4.25), Seed: new(uint32(42)), OutputCount: new(1), BoardID: "board-1", Source: &sourceimage.Source{Type: "image", Reference: "source.png"}, Strength: &tc.strength}
-			compiled, err := generation.CompileAnima(generation.AnimaResolution{Request: request, Models: models, Seeds: []uint32{42}, SourceImage: images.Reference{ImageName: "source.png", Width: tc.sourceWidth, Height: tc.sourceHeight}})
+			compiled, err := generation.Compile(generation.Resolution{Request: request, Models: models, Seeds: []uint32{42}, SourceImage: images.Reference{ImageName: "source.png", Width: tc.sourceWidth, Height: tc.sourceHeight}})
 			if err != nil {
 				t.Fatal(err)
 			}
