@@ -913,6 +913,127 @@
         "output": {
           "$ref": "#/components/schemas/SDXLLoRALoaderOutput"
         }
+      },
+      "AnimaLoRALoaderInvocation": {
+        "category": "model",
+        "class": "invocation",
+        "classification": "prototype",
+        "description": "Apply a LoRA model to an Anima transformer and/or Qwen3 text encoder.",
+        "node_pack": "invokeai",
+        "properties": {
+          "id": {
+            "description": "The id of this instance of an invocation. Must be unique among all instances of invocations.",
+            "field_kind": "node_attribute",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_intermediate": {
+            "default": false,
+            "description": "Whether or not this is an intermediate invocation.",
+            "field_kind": "node_attribute",
+            "input": "direct",
+            "orig_required": true,
+            "title": "Is Intermediate",
+            "type": "boolean",
+            "ui_hidden": false,
+            "ui_type": "IsIntermediate"
+          },
+          "use_cache": {
+            "default": true,
+            "description": "Whether or not to use the cache",
+            "field_kind": "node_attribute",
+            "title": "Use Cache",
+            "type": "boolean"
+          },
+          "lora": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelIdentifierField"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "LoRA model to load",
+            "field_kind": "input",
+            "input": "any",
+            "orig_required": true,
+            "title": "LoRA",
+            "ui_model_base": [
+              "anima"
+            ],
+            "ui_model_type": [
+              "lora"
+            ]
+          },
+          "weight": {
+            "default": 0.75,
+            "description": "The weight at which the LoRA is applied to each model",
+            "field_kind": "input",
+            "input": "any",
+            "orig_default": 0.75,
+            "orig_required": false,
+            "title": "Weight",
+            "type": "number"
+          },
+          "transformer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TransformerField"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Transformer",
+            "field_kind": "input",
+            "input": "connection",
+            "orig_default": null,
+            "orig_required": false,
+            "title": "Anima Transformer"
+          },
+          "qwen3_encoder": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Qwen3EncoderField"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Qwen3 tokenizer and text encoder",
+            "field_kind": "input",
+            "input": "connection",
+            "orig_default": null,
+            "orig_required": false,
+            "title": "Qwen3 Encoder"
+          },
+          "type": {
+            "const": "anima_lora_loader",
+            "default": "anima_lora_loader",
+            "field_kind": "node_attribute",
+            "title": "type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ],
+        "tags": [
+          "lora",
+          "model",
+          "anima"
+        ],
+        "title": "Apply LoRA - Anima",
+        "type": "object",
+        "version": "1.0.0",
+        "output": {
+          "$ref": "#/components/schemas/AnimaLoRALoaderOutput"
+        }
       }
     }
   }

@@ -109,6 +109,7 @@ type coreMetadataNode struct {
 	Qwen3Encoder   modelReference `json:"qwen3_encoder"`
 	Strength       *float64       `json:"strength,omitempty"`
 	InitImage      string         `json:"init_image,omitempty"`
+	Loras          []loRAMetadata `json:"loras,omitempty"`
 }
 
 type animaImageToLatentsNode struct {
@@ -188,15 +189,29 @@ func compileAnima(resolved Resolution) (EnqueueRequest, error) {
 			Board: new(boardField{BoardID: request.BoardID}),
 		}
 	}
+	modelOutputSource := "model_loader"
+	var loraEdges []Edge
+	metadata := nodes["metadata"].(coreMetadataNode)
+	for index, lora := range resolved.Loras {
+		id := fmt.Sprintf("lora_%d", index)
+		nodes[id] = loRALoaderNode{ID: id, IsIntermediate: true, UseCache: true, Type: "anima_lora_loader", LoRA: reference(lora.Model), Weight: lora.Weight}
+		metadata.Loras = append(metadata.Loras, loRAMetadata{Model: reference(lora.Model), Weight: lora.Weight})
+		loraEdges = append(loraEdges,
+			edge(modelOutputSource, "transformer", id, "transformer"),
+			edge(modelOutputSource, "qwen3_encoder", id, "qwen3_encoder"),
+		)
+		modelOutputSource = id
+	}
+	nodes["metadata"] = metadata
 
 	edges := []Edge{
-		edge("model_loader", "transformer", "denoise", "transformer"),
-		edge("model_loader", "qwen3_encoder", "positive_conditioning", "qwen3_encoder"),
+		edge(modelOutputSource, "transformer", "denoise", "transformer"),
+		edge(modelOutputSource, "qwen3_encoder", "positive_conditioning", "qwen3_encoder"),
 		edge("model_loader", "vae", "decode", "vae"),
 		edge("positive_prompt", "value", "positive_conditioning", "prompt"),
 		edge("positive_conditioning", "conditioning", "positive_collection", "item"),
 		edge("positive_collection", "collection", "denoise", "positive_conditioning"),
-		edge("model_loader", "qwen3_encoder", "negative_conditioning", "qwen3_encoder"),
+		edge(modelOutputSource, "qwen3_encoder", "negative_conditioning", "qwen3_encoder"),
 		edge("negative_conditioning", "conditioning", "negative_collection", "item"),
 		edge("negative_collection", "collection", "denoise", "negative_conditioning"),
 		edge("seed", "value", "denoise", "seed"),
@@ -205,6 +220,7 @@ func compileAnima(resolved Resolution) (EnqueueRequest, error) {
 		edge("positive_prompt", "value", "metadata", "positive_prompt"),
 		edge("metadata", "metadata", "decode", "metadata"),
 	}
+	edges = append(edges, loraEdges...)
 	if request.Source != nil {
 		if resolved.SourceImage.ImageName == "" || request.Strength == nil {
 			return EnqueueRequest{}, fmt.Errorf("compile Anima image-to-image graph: source and strength must be resolved")

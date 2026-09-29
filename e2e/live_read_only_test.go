@@ -308,6 +308,7 @@ func TestLiveGate(t *testing.T) {
 	validateTarget(t, target)
 	binary := buildBinary(t)
 	var animaModels liveAnimaModelKeys
+	var animaLoRA string
 	var sdxlMain string
 	var sdxlLoRA string
 	var upscaleModel string
@@ -388,11 +389,11 @@ func TestLiveGate(t *testing.T) {
 				t.Errorf("doctor returned an unsatisfied or incomplete model requirement: %#v", requirement)
 			}
 		}
-		wantOperations := []string{"auth.huggingface.login", "auth.huggingface.logout", "auth.huggingface.status", "boards.create", "boards.get", "boards.list", "generate", "generate", "generate", "generate", "generate", "generate", "generate", "images.delete", "images.download", "images.get", "images.list", "images.upload", "models.delete", "models.install", "models.install", "models.install", "models.install", "models.install", "models.list", "models.scan", "models.status", "queue.cancel", "queue.clear", "queue.get", "queue.list", "queue.wait", "recall", "upscale", "upscale"}
+		wantOperations := []string{"auth.huggingface.login", "auth.huggingface.logout", "auth.huggingface.status", "boards.create", "boards.get", "boards.list", "generate", "generate", "generate", "generate", "generate", "generate", "generate", "generate", "images.delete", "images.download", "images.get", "images.list", "images.upload", "models.delete", "models.install", "models.install", "models.install", "models.install", "models.install", "models.list", "models.scan", "models.status", "queue.cancel", "queue.clear", "queue.get", "queue.list", "queue.wait", "recall", "upscale", "upscale"}
 		operations := make([]string, 0, len(data.Capabilities))
 		generateFamilies := map[string]bool{}
 		generateModes := map[string]bool{}
-		loraRow := false
+		loraRows := map[string]bool{}
 		upscaleFamilies := map[string]bool{}
 		for _, capability := range data.Capabilities {
 			if capability.Compatible == nil || !*capability.Compatible || capability.Failures == nil || len(capability.Failures) != 0 {
@@ -402,7 +403,7 @@ func TestLiveGate(t *testing.T) {
 			if capability.Operation == "generate" {
 				generateFamilies[capability.Family] = true
 				if capability.Setting == "loras" {
-					loraRow = capability.Family == "sdxl" && capability.Mode == "" && capability.UISync == ""
+					loraRows[capability.Family] = capability.Mode == "" && capability.UISync == ""
 				} else {
 					generateModes[capability.Family+"/"+capability.Mode] = true
 				}
@@ -426,8 +427,8 @@ func TestLiveGate(t *testing.T) {
 		if !generateModes["anima/txt2img"] || !generateModes["anima/img2img"] || !generateModes["sdxl/txt2img"] || !generateModes["sdxl/img2img"] || !generateModes["flux/txt2img"] || !generateModes["flux/img2img"] || len(generateModes) != 6 {
 			t.Errorf("doctor generate modes = %#v, want text and image modes for all three families", generateModes)
 		}
-		if !loraRow {
-			t.Error("doctor did not report a compatible SDXL LoRA setting row")
+		if !loraRows["anima"] || !loraRows["sdxl"] || len(loraRows) != 2 {
+			t.Errorf("doctor LoRA setting rows = %#v, want Anima and SDXL", loraRows)
 		}
 		if data.UISync["generate"] != "partial" || data.UISync["upscale"] != "partial" {
 			t.Errorf("doctor UI synchronization = %#v, want partial generation and upscale", data.UISync)
@@ -457,6 +458,9 @@ func TestLiveGate(t *testing.T) {
 			}
 			if model.Name == "alienzkin-sdxl" && model.Base == "sdxl" && model.Type == "lora" {
 				sdxlLoRA = model.Key
+			}
+			if model.Name == "Anima_Detail_Tweaker" && model.Base == "anima" && model.Type == "lora" {
+				animaLoRA = model.Key
 			}
 		}
 	}) {
@@ -772,6 +776,64 @@ func TestLiveGate(t *testing.T) {
 		}
 		if err := json.Unmarshal(response.Body, &metadata); err != nil || len(metadata.Loras) != 1 || metadata.Loras[0].Model.Key != sdxlLoRA || metadata.Loras[0].Weight != 1 {
 			t.Fatalf("SDXL LoRA metadata = %#v, error = %v", metadata, err)
+		}
+	}) {
+		return
+	}
+	if !t.Run("Anima LoRA generation records metadata and self-cleans", func(t *testing.T) {
+		if animaLoRA == "" {
+			t.Fatal("install the consented Anima_Detail_Tweaker LoRA recorded in docs/agents/live-verification.md")
+		}
+		envelope := runJSONCommand(t, binary, target, "generate", "--model", animaModels.Main,
+			"--prompt", "a detailed green jewel on white background", "--width", "768", "--height", "768",
+			"--steps", "2", "--seed", "52", "--lora", animaLoRA+"=1")
+		registerGeneratedImageCleanup(t, binary, target, envelope.Data)
+		assertSuccessEnvelope(t, envelope, "generate", "ui_sync_partial")
+		var receipt struct {
+			SubmittedRequest struct {
+				Loras []struct {
+					Model  string  `json:"model"`
+					Weight float64 `json:"weight"`
+				} `json:"loras"`
+			} `json:"submitted_request"`
+			ResolvedSettings struct {
+				Seeds []uint32 `json:"seeds"`
+				Loras []struct {
+					ModelKey string  `json:"model_key"`
+					Weight   float64 `json:"weight"`
+				} `json:"loras"`
+			} `json:"resolved_settings"`
+			Outputs []struct {
+				Image imageReference `json:"image"`
+				Seed  uint32         `json:"seed"`
+			} `json:"outputs"`
+			Warnings []uiSyncWarning `json:"warnings"`
+		}
+		if err := json.Unmarshal(envelope.Data, &receipt); err != nil {
+			t.Fatal(err)
+		}
+		if len(receipt.SubmittedRequest.Loras) != 1 || receipt.SubmittedRequest.Loras[0].Model != animaLoRA || receipt.SubmittedRequest.Loras[0].Weight != 1 ||
+			len(receipt.ResolvedSettings.Loras) != 1 || receipt.ResolvedSettings.Loras[0].ModelKey != animaLoRA || receipt.ResolvedSettings.Loras[0].Weight != 1 ||
+			!slices.Equal(receipt.ResolvedSettings.Seeds, []uint32{52}) || len(receipt.Outputs) != 1 || receipt.Outputs[0].Seed != 52 ||
+			len(receipt.Warnings) != 1 || !slices.Contains(receipt.Warnings[0].Details.NotRestored, "loras") {
+			t.Fatalf("Anima LoRA receipt = %#v", receipt)
+		}
+		assertGeneratedImageReference(t, target, receipt.Outputs[0].Image, 768, 768)
+		response := requestImageBackend(t, t.Context(), http.MethodGet, target, receipt.Outputs[0].Image.ImageName, "metadata")
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("Anima LoRA metadata: %s: %s", response.Status, response.Body)
+		}
+		var metadata struct {
+			Seed  uint32 `json:"seed"`
+			Loras []struct {
+				Model struct {
+					Key string `json:"key"`
+				} `json:"model"`
+				Weight float64 `json:"weight"`
+			} `json:"loras"`
+		}
+		if err := json.Unmarshal(response.Body, &metadata); err != nil || metadata.Seed != 52 || len(metadata.Loras) != 1 || metadata.Loras[0].Model.Key != animaLoRA || metadata.Loras[0].Weight != 1 {
+			t.Fatalf("Anima LoRA metadata = %#v, error = %v", metadata, err)
 		}
 	}) {
 		return

@@ -42,7 +42,7 @@ func resolveLoRAs(request []LoRA, inventory []ModelIdentifier, base string) ([]R
 }
 
 func validateLoRAFamily(request []LoRA, base string) error {
-	if len(request) > 0 && base != "sdxl" {
+	if len(request) > 0 && base != "sdxl" && base != "anima" {
 		return operation.UnsupportedCapability(fmt.Sprintf("LoRAs are not supported for %s generation", base))
 	}
 	return nil

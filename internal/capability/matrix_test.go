@@ -38,6 +38,7 @@ func TestMatrixAdvertisesOnlyImplementedOperations(t *testing.T) {
 		result.OperationGenerate,
 		result.OperationGenerate,
 		result.OperationGenerate,
+		result.OperationGenerate,
 		result.OperationUpscale,
 		result.OperationUpscale,
 		result.OperationRecall,

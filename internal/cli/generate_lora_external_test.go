@@ -185,13 +185,72 @@ func TestGenerateLoRAFlagsPreserveCommasSplitAtLastEqualsAndMatchDocument(t *tes
 
 func TestGenerateOtherFamiliesRejectLoRAsBeforeSourceUpload(t *testing.T) {
 	for _, main := range []map[string]any{
-		{"key": "anima-main", "hash": "hash", "name": "Anima", "base": "anima", "type": "main"},
 		{"key": "flux-main", "hash": "hash", "name": "FLUX", "base": "flux", "type": "main", "variant": "dev", "format": "checkpoint"},
 	} {
 		t.Run(main["base"].(string), func(t *testing.T) {
 			isolateUserConfigDir(t)
 			server, requests, _ := img2imgServer(t, 768, 768, sdxlOpenAPIFixture(t), []map[string]any{main})
 			code, envelope := runImg2Img(t, "--no-wait", "--model", main["key"].(string), "--prompt", "test", "--image-path", sourcePNG(t, 768, 768), "--lora", "anything", "--url", server.URL)
+			if code != 4 || envelope["error"].(map[string]any)["code"] != "unsupported_capability" || countRequest(*requests, "POST /api/v1/images/upload") != 0 || countRequest(*requests, "POST /api/v1/queue/default/enqueue_batch") != 0 {
+				t.Fatalf("code=%d envelope=%#v requests=%#v", code, envelope, *requests)
+			}
+		})
+	}
+}
+
+func TestGenerateAnimaLoRARecordsReceiptAndSynchronization(t *testing.T) {
+	isolateUserConfigDir(t)
+	inventory := append(animaModelInventory(), map[string]any{"key": "anima-lora", "hash": "lora-hash", "name": "Detail Tweaker", "base": "anima", "type": "lora", "default_settings": map[string]any{"weight": 1.25}})
+	server, requests, graphs := img2imgServer(t, 768, 768, sdxlOpenAPIFixture(t), inventory)
+	code, envelope := runImg2Img(t, "--no-wait", "--model", "main-key", "--prompt", "a lighthouse", "--seed", "41", "--lora", "Detail Tweaker", "--url", server.URL)
+	if code != 0 || countRequest(*requests, "POST /api/v1/queue/default/enqueue_batch") != 1 || len(*graphs) != 1 {
+		t.Fatalf("code=%d envelope=%#v requests=%#v", code, envelope, *requests)
+	}
+	data := envelope["data"].(map[string]any)
+	submitted := data["submitted_request"].(map[string]any)["loras"].([]any)[0].(map[string]any)
+	resolved := data["resolved_settings"].(map[string]any)["loras"].([]any)[0].(map[string]any)
+	if submitted["model"] != "Detail Tweaker" || submitted["weight"] != nil || resolved["model_key"] != "anima-lora" || resolved["weight"] != 1.25 {
+		t.Fatalf("receipt LoRAs: submitted=%#v resolved=%#v", submitted, resolved)
+	}
+	fields := envelope["warnings"].([]any)[0].(map[string]any)["details"].(map[string]any)["not_restored"].([]any)
+	if fields[len(fields)-1] != "loras" {
+		t.Fatalf("not_restored = %#v", fields)
+	}
+	code, envelope = runImg2Img(t, "--no-wait", "--model", "main-key", "--prompt", "a lighthouse", "--seed", "41", "--image-path", sourcePNG(t, 768, 768), "--strength", "0.6", "--lora", "anima-lora=1", "--url", server.URL)
+	if code != 0 || countRequest(*requests, "POST /api/v1/images/upload") != 1 || countRequest(*requests, "POST /api/v1/queue/default/enqueue_batch") != 2 {
+		t.Fatalf("image-to-image: code=%d envelope=%#v requests=%#v", code, envelope, *requests)
+	}
+	nodes := (*graphs)["batch"].(map[string]any)["graph"].(map[string]any)["nodes"].(map[string]any)
+	if nodes["metadata"].(map[string]any)["generation_mode"] != "anima_img2img" || nodes["lora_0"].(map[string]any)["weight"] != float64(1) {
+		t.Fatalf("image-to-image LoRA graph = %#v", nodes)
+	}
+	fields = envelope["warnings"].([]any)[0].(map[string]any)["details"].(map[string]any)["not_restored"].([]any)
+	if !reflect.DeepEqual(fields[len(fields)-3:], []any{"source_image", "strength", "loras"}) {
+		t.Fatalf("image-to-image not_restored = %#v", fields)
+	}
+}
+
+func TestGenerateAnimaLoRARejectsWrongBaseAndMissingVocabularyBeforeUpload(t *testing.T) {
+	for _, test := range []struct{ name, schema, property, base, modelType string }{
+		{"wrong base", "", "", "sdxl", "lora"},
+		{"wrong type", "", "", "anima", "main"},
+		{"missing loader", "AnimaLoRALoaderInvocation", "", "anima", "lora"},
+		{"missing loader property", "AnimaLoRALoaderInvocation", "qwen3_encoder", "anima", "lora"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			isolateUserConfigDir(t)
+			openAPI := sdxlOpenAPIFixture(t)
+			if test.schema != "" {
+				schemas := openAPI["components"].(map[string]any)["schemas"].(map[string]any)
+				if test.property == "" {
+					delete(schemas, test.schema)
+				} else {
+					delete(schemas[test.schema].(map[string]any)["properties"].(map[string]any), test.property)
+				}
+			}
+			inventory := append(animaModelInventory(), map[string]any{"key": "anima-lora", "hash": "lora-hash", "name": "Detail Tweaker", "base": test.base, "type": test.modelType})
+			server, requests, _ := img2imgServer(t, 768, 768, openAPI, inventory)
+			code, envelope := runImg2Img(t, "--no-wait", "--model", "main-key", "--prompt", "test", "--image-path", sourcePNG(t, 768, 768), "--lora", "anima-lora", "--url", server.URL)
 			if code != 4 || envelope["error"].(map[string]any)["code"] != "unsupported_capability" || countRequest(*requests, "POST /api/v1/images/upload") != 0 || countRequest(*requests, "POST /api/v1/queue/default/enqueue_batch") != 0 {
 				t.Fatalf("code=%d envelope=%#v requests=%#v", code, envelope, *requests)
 			}

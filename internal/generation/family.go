@@ -147,10 +147,16 @@ func (animaAdapter) compile(resolved Resolution) (EnqueueRequest, error) {
 }
 
 func (animaAdapter) capabilityEntry(request Request) capability.Entry {
+	var entry capability.Entry
 	if request.Source != nil {
-		return capability.AnimaImageToImageEntry()
+		entry = capability.AnimaImageToImageEntry()
+	} else {
+		entry = capability.AnimaGenerationEntry()
 	}
-	return capability.AnimaGenerationEntry()
+	if len(request.Loras) > 0 {
+		return capability.WithAnimaLoRA(entry)
+	}
+	return entry
 }
 
 func (animaAdapter) componentKeys(resolved Resolution) map[string]string {
@@ -194,6 +200,9 @@ func (animaAdapter) synchronization(settings ResolvedSettings) (SyncSettings, []
 	fields := []string{"scheduler", "guidance", "vae", "qwen3_encoder", "output_count", "board_id"}
 	if settings.Strength != nil {
 		fields = append(fields, "source_image", "strength")
+	}
+	if len(settings.Loras) > 0 {
+		fields = append(fields, "loras")
 	}
 	return SyncSettings{
 		Model: settings.ModelKey, PositivePrompt: settings.PositivePrompt, NegativePrompt: settings.NegativePrompt,

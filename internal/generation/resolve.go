@@ -137,10 +137,15 @@ func resolveAnima(request Request, mainModel ModelIdentifier, inventory []ModelI
 	if err != nil {
 		return Resolution{}, fmt.Errorf("resolve Qwen3 encoder: %w", err)
 	}
+	loras, err := resolveLoRAs(request.Loras, inventory, mainModel.Base)
+	if err != nil {
+		return Resolution{}, err
+	}
 	return Resolution{
 		Request: resolved,
 		Models:  ResolvedModels{Main: mainModel, VAE: vae, Qwen3Encoder: encoder},
 		Seeds:   seeds,
+		Loras:   loras,
 	}, nil
 }
 

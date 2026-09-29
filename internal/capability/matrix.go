@@ -361,6 +361,7 @@ var Matrix = []Entry{
 	},
 	AnimaGenerationEntry(),
 	AnimaImageToImageEntry(),
+	AnimaLoRAEntry(),
 	SDXLGenerationEntry(),
 	SDXLImageToImageEntry(),
 	SDXLLoRAEntry(),
@@ -601,15 +602,36 @@ func SDXLImageToImageEntry() Entry {
 	return entry
 }
 
-// WithSDXLLoRA adds the tested LoRA vocabulary to either SDXL Generation Mode.
-func WithSDXLLoRA(entry Entry) Entry {
+func withLoRAMetadata(entry Entry) Entry {
 	entry.Invocations = slices.Clone(entry.Invocations)
 	for index := range entry.Invocations {
 		if entry.Invocations[index].Type == "core_metadata" {
 			entry.Invocations[index].Properties = append(slices.Clone(entry.Invocations[index].Properties), "loras")
 		}
 	}
+	return entry
+}
+
+// WithSDXLLoRA adds the tested LoRA vocabulary to either SDXL Generation Mode.
+func WithSDXLLoRA(entry Entry) Entry {
+	entry = withLoRAMetadata(entry)
 	entry.Invocations = append(entry.Invocations, InvocationRequirement{Schema: "SDXLLoRALoaderInvocation", Type: "sdxl_lora_loader", Properties: []string{"id", "is_intermediate", "use_cache", "type", "lora", "weight", "unet", "clip", "clip2"}})
+	return entry
+}
+
+// WithAnimaLoRA adds the tested LoRA vocabulary to either Anima Generation Mode.
+func WithAnimaLoRA(entry Entry) Entry {
+	entry = withLoRAMetadata(entry)
+	entry.Invocations = append(entry.Invocations, InvocationRequirement{Schema: "AnimaLoRALoaderInvocation", Type: "anima_lora_loader", Properties: []string{"id", "is_intermediate", "use_cache", "type", "lora", "weight", "transformer", "qwen3_encoder"}})
+	return entry
+}
+
+// AnimaLoRAEntry is the setting row, inheriting text-to-image requirements.
+func AnimaLoRAEntry() Entry {
+	entry := WithAnimaLoRA(AnimaGenerationEntry())
+	entry.Mode = ""
+	entry.Setting = "loras"
+	entry.UISync = ""
 	return entry
 }
 

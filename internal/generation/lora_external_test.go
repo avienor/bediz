@@ -143,12 +143,147 @@ func TestResolveLoRARejectsInvalidLocalAndModelSelections(t *testing.T) {
 }
 
 func TestResolveLoRARejectsUnregisteredFamilies(t *testing.T) {
-	for _, main := range []generation.ModelIdentifier{{Key: "anima-main", Hash: "hash", Name: "Anima", Base: "anima", Type: "main"}, {Key: "flux-main", Hash: "hash", Name: "FLUX", Base: "flux", Type: "main", Variant: "dev", Format: "checkpoint"}} {
+	for _, main := range []generation.ModelIdentifier{{Key: "flux-main", Hash: "hash", Name: "FLUX", Base: "flux", Type: "main", Variant: "dev", Format: "checkpoint"}} {
 		request := generation.Request{SchemaVersion: 1, Model: main.Key, PositivePrompt: "test", Seed: new(uint32(1)), Loras: []generation.LoRA{{Model: "anything"}}}
 		_, err := generation.Resolve(request, []generation.ModelIdentifier{main}, bytes.NewReader(nil))
 		if _, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); !ok {
 			t.Fatalf("%s: error = %v", main.Base, err)
 		}
+	}
+}
+
+func TestResolveAnimaLoRAUsesMatchingInstalledModel(t *testing.T) {
+	main := generation.ModelIdentifier{Key: "anima-main", Hash: "main-hash", Name: "Anima", Base: "anima", Type: "main"}
+	vae := generation.ModelIdentifier{Key: "anima-vae", Hash: "vae-hash", Name: "Anima VAE", Base: "anima", Type: "vae"}
+	encoder := generation.ModelIdentifier{Key: "qwen3", Hash: "encoder-hash", Name: "Qwen3", Base: "any", Type: "qwen3_encoder"}
+	lora := generation.ModelIdentifier{Key: "anima-lora", Hash: "lora-hash", Name: "Detail Tweaker", Base: "anima", Type: "lora", DefaultSettings: &generation.ModelDefaultSettings{Weight: new(1.25)}}
+	request := generation.Request{SchemaVersion: 1, Model: main.Key, PositivePrompt: "test", Seed: new(uint32(41)), Loras: []generation.LoRA{{Model: lora.Name}}}
+	resolved, err := generation.Resolve(request, []generation.ModelIdentifier{main, vae, encoder, lora}, bytes.NewReader(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolved.Loras) != 1 || resolved.Loras[0].Model.Key != lora.Key || resolved.Loras[0].Weight != 1.25 {
+		t.Fatalf("resolved LoRAs = %#v", resolved.Loras)
+	}
+}
+
+func TestCompileAnimaChainsLoRAsThroughBothTextEncoders(t *testing.T) {
+	main := generation.ModelIdentifier{Key: "main-key", Hash: "blake3:main", Name: "Anima Main", Base: "anima", Type: "main"}
+	vae := generation.ModelIdentifier{Key: "vae-key", Hash: "blake3:vae", Name: "Anima VAE", Base: "anima", Type: "vae"}
+	encoder := generation.ModelIdentifier{Key: "encoder-key", Hash: "blake3:encoder", Name: "Qwen3 Encoder", Base: "any", Type: "qwen3_encoder"}
+	first := generation.ModelIdentifier{Key: "lora-a", Hash: "hash-a", Name: "Detail Tweaker", Base: "anima", Type: "lora"}
+	second := generation.ModelIdentifier{Key: "lora-b", Hash: "hash-b", Name: "Second LoRA", Base: "anima", Type: "lora"}
+	request := generation.Request{SchemaVersion: 1, Model: main.Key, PositivePrompt: "a lighthouse", NegativePrompt: "text", Width: new(768), Height: new(768), Steps: new(24), Scheduler: new("heun"), Guidance: new(4.25), Seed: new(uint32(42)), OutputCount: new(1), Loras: []generation.LoRA{{Model: first.Key, Weight: new(1.0)}, {Model: second.Key, Weight: new(0.5)}}}
+	resolved, err := generation.Resolve(request, []generation.ModelIdentifier{main, vae, encoder, first, second}, bytes.NewReader(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := generation.Compile(resolved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(compiled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value map[string]any
+	if err := json.Unmarshal(encoded, &value); err != nil {
+		t.Fatal(err)
+	}
+	graph := value["batch"].(map[string]any)["graph"].(map[string]any)
+	nodes := graph["nodes"].(map[string]any)
+	for index, model := range []generation.ModelIdentifier{first, second} {
+		id := []string{"lora_0", "lora_1"}[index]
+		node, ok := nodes[id].(map[string]any)
+		if !ok || node["type"] != "anima_lora_loader" || node["lora"].(map[string]any)["key"] != model.Key {
+			t.Fatalf("LoRA node %s = %#v", id, nodes[id])
+		}
+	}
+	metadata := nodes["metadata"].(map[string]any)["loras"].([]any)
+	if len(metadata) != 2 || metadata[0].(map[string]any)["weight"] != 1.0 || metadata[1].(map[string]any)["weight"] != 0.5 {
+		t.Fatalf("LoRA metadata = %#v", metadata)
+	}
+	want := map[string]bool{}
+	for _, connection := range []string{
+		"model_loader:transformer>lora_0:transformer", "model_loader:qwen3_encoder>lora_0:qwen3_encoder",
+		"lora_0:transformer>lora_1:transformer", "lora_0:qwen3_encoder>lora_1:qwen3_encoder",
+		"lora_1:transformer>denoise:transformer", "lora_1:qwen3_encoder>positive_conditioning:qwen3_encoder",
+		"lora_1:qwen3_encoder>negative_conditioning:qwen3_encoder",
+	} {
+		want[connection] = false
+	}
+	for _, raw := range graph["edges"].([]any) {
+		connection := raw.(map[string]any)
+		from := connection["source"].(map[string]any)
+		to := connection["destination"].(map[string]any)
+		key := from["node_id"].(string) + ":" + from["field"].(string) + ">" + to["node_id"].(string) + ":" + to["field"].(string)
+		if _, ok := want[key]; ok {
+			want[key] = true
+		}
+		if from["node_id"] == "model_loader" && to["node_id"] != "lora_0" && (from["field"] == "transformer" || from["field"] == "qwen3_encoder") {
+			t.Errorf("unrouted model output: %s", key)
+		}
+	}
+	for connection, found := range want {
+		if !found {
+			t.Errorf("missing edge %s", connection)
+		}
+	}
+}
+
+func TestCompileAnimaLoRAMatchesInvokeAI614EnqueueFixtures(t *testing.T) {
+	main := generation.ModelIdentifier{Key: "main-key", Hash: "blake3:main", Name: "Anima Main", Base: "anima", Type: "main"}
+	vae := generation.ModelIdentifier{Key: "vae-key", Hash: "blake3:vae", Name: "Anima VAE", Base: "anima", Type: "vae"}
+	encoder := generation.ModelIdentifier{Key: "encoder-key", Hash: "blake3:encoder", Name: "Qwen3 Encoder", Base: "any", Type: "qwen3_encoder"}
+	first := generation.ModelIdentifier{Key: "lora-a", Hash: "hash-a", Name: "Detail Tweaker", Base: "anima", Type: "lora"}
+	second := generation.ModelIdentifier{Key: "lora-b", Hash: "hash-b", Name: "Second LoRA", Base: "anima", Type: "lora"}
+	for _, test := range []struct {
+		name, fixture string
+		two, img2img  bool
+	}{
+		{"one", "testdata/anima_6_14_lora_one_enqueue.json", false, false},
+		{"two", "testdata/anima_6_14_lora_two_enqueue.json", true, false},
+		{"image-to-image", "testdata/anima_6_14_lora_img2img_enqueue.json", false, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := generation.Request{SchemaVersion: 1, Model: main.Key, PositivePrompt: "a lighthouse in a storm", NegativePrompt: "text", Width: new(768), Height: new(1024), Steps: new(24), Scheduler: new("heun"), Guidance: new(4.25), Seed: new(uint32(42)), OutputCount: new(1), BoardID: "board-1", Loras: []generation.LoRA{{Model: first.Key, Weight: new(1.0)}}}
+			if test.two {
+				request.Loras = append(request.Loras, generation.LoRA{Model: second.Key, Weight: new(0.5)})
+			}
+			if test.img2img {
+				request.Source = &sourceimage.Source{Type: "image", Reference: "source.png"}
+				request.Strength = new(0.6)
+			}
+			resolved, err := generation.Resolve(request, []generation.ModelIdentifier{main, vae, encoder, first, second}, bytes.NewReader(nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.img2img {
+				resolved.SourceImage = images.Reference{ImageName: "source.png", Width: 768, Height: 1024}
+			}
+			compiled, err := generation.Compile(resolved)
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := json.Marshal(compiled)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixture, err := os.ReadFile(test.fixture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got, want any
+			if err := json.Unmarshal(encoded, &got); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(fixture, &want); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("enqueue differs from %s\ngot: %s\nwant: %s", test.fixture, encoded, fixture)
+			}
+		})
 	}
 }
 
@@ -206,13 +341,19 @@ func TestCompileSDXLLoRAMatchesInvokeAI614EnqueueFixtures(t *testing.T) {
 				gotGraph := got["batch"].(map[string]any)["graph"].(map[string]any)
 				wantGraph := want["batch"].(map[string]any)["graph"].(map[string]any)
 				for key, value := range gotGraph["nodes"].(map[string]any) {
-					if !reflect.DeepEqual(value, wantGraph["nodes"].(map[string]any)[key]) { t.Errorf("node %s differs: got=%#v want=%#v", key, value, wantGraph["nodes"].(map[string]any)[key]) }
+					if !reflect.DeepEqual(value, wantGraph["nodes"].(map[string]any)[key]) {
+						t.Errorf("node %s differs: got=%#v want=%#v", key, value, wantGraph["nodes"].(map[string]any)[key])
+					}
 				}
-				gotEdges := gotGraph["edges"].([]any); wantEdges := wantGraph["edges"].([]any)
-				for index := range min(len(gotEdges),len(wantEdges)) {
-					if !reflect.DeepEqual(gotEdges[index],wantEdges[index]) { t.Errorf("edge %d differs: got=%#v want=%#v",index,gotEdges[index],wantEdges[index]); break }
+				gotEdges := gotGraph["edges"].([]any)
+				wantEdges := wantGraph["edges"].([]any)
+				for index := range min(len(gotEdges), len(wantEdges)) {
+					if !reflect.DeepEqual(gotEdges[index], wantEdges[index]) {
+						t.Errorf("edge %d differs: got=%#v want=%#v", index, gotEdges[index], wantEdges[index])
+						break
+					}
 				}
-				t.Fatalf("enqueue differs from %s: got edges=%d want edges=%d", test.fixture,len(gotEdges),len(wantEdges))
+				t.Fatalf("enqueue differs from %s: got edges=%d want edges=%d", test.fixture, len(gotEdges), len(wantEdges))
 			}
 		})
 	}

@@ -34,31 +34,20 @@ type sdxlDenoiseNode struct {
 
 type sdxlMetadataNode struct {
 	nodeAttributes
-	GenerationMode       string             `json:"generation_mode"`
-	NegativePrompt       string             `json:"negative_prompt"`
-	Width                int                `json:"width"`
-	Height               int                `json:"height"`
-	CFGScale             float64            `json:"cfg_scale"`
-	CFGRescaleMultiplier float64            `json:"cfg_rescale_multiplier"`
-	Steps                int                `json:"steps"`
-	Scheduler            string             `json:"scheduler"`
-	RandDevice           string             `json:"rand_device"`
-	Model                modelReference     `json:"model"`
-	VAE                  *modelReference    `json:"vae,omitempty"`
-	Strength             *float64           `json:"strength,omitempty"`
-	InitImage            string             `json:"init_image,omitempty"`
-	Loras                []sdxlLoRAMetadata `json:"loras,omitempty"`
-}
-
-type sdxlLoRAMetadata struct {
-	Model  modelReference `json:"model"`
-	Weight float64        `json:"weight"`
-}
-
-type sdxlLoRALoaderNode struct {
-	nodeAttributes
-	LoRA   modelReference `json:"lora"`
-	Weight float64        `json:"weight"`
+	GenerationMode       string          `json:"generation_mode"`
+	NegativePrompt       string          `json:"negative_prompt"`
+	Width                int             `json:"width"`
+	Height               int             `json:"height"`
+	CFGScale             float64         `json:"cfg_scale"`
+	CFGRescaleMultiplier float64         `json:"cfg_rescale_multiplier"`
+	Steps                int             `json:"steps"`
+	Scheduler            string          `json:"scheduler"`
+	RandDevice           string          `json:"rand_device"`
+	Model                modelReference  `json:"model"`
+	VAE                  *modelReference `json:"vae,omitempty"`
+	Strength             *float64        `json:"strength,omitempty"`
+	InitImage            string          `json:"init_image,omitempty"`
+	Loras                []loRAMetadata  `json:"loras,omitempty"`
 }
 
 type sdxlDecodeNode struct {
@@ -109,8 +98,8 @@ func compileSDXL(resolved Resolution) (EnqueueRequest, error) {
 	var loraEdges []Edge
 	for index, lora := range resolved.Loras {
 		id := fmt.Sprintf("lora_%d", index)
-		nodes[id] = sdxlLoRALoaderNode{ID: id, IsIntermediate: true, UseCache: true, Type: "sdxl_lora_loader", LoRA: reference(lora.Model), Weight: lora.Weight}
-		metadata.Loras = append(metadata.Loras, sdxlLoRAMetadata{Model: reference(lora.Model), Weight: lora.Weight})
+		nodes[id] = loRALoaderNode{ID: id, IsIntermediate: true, UseCache: true, Type: "sdxl_lora_loader", LoRA: reference(lora.Model), Weight: lora.Weight}
+		metadata.Loras = append(metadata.Loras, loRAMetadata{Model: reference(lora.Model), Weight: lora.Weight})
 		for _, field := range []string{"unet", "clip", "clip2"} {
 			loraEdges = append(loraEdges, edge(modelOutputSource, field, id, field))
 		}

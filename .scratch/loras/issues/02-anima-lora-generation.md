@@ -65,3 +65,13 @@
 - [ ] `generate` with an Anima main model and `loras` applies them through one tested enqueue in both Generation Modes, as recorded.
 - [ ] `doctor`, the V1 spec, the live-verification guide, and `CHANGELOG.md` reflect the behavior verified live.
 - [ ] The independent review found no acceptance-blocking issue.
+
+## Comments
+
+- 2026-09-29: Confirmed local InvokeAI `6.14.1` at `http://127.0.0.1:9090`; the live `AnimaLoRALoaderInvocation` exposes `lora`, `weight`, `transformer`, `qwen3_encoder`, and the common node properties. The installed frontend bundle's `anima_lora_collection_loader` branch reroutes the denoiser and both positive and negative text encoders, matching the documented single-loader chain's consumers.
+- `bediz models list --type lora --json` initially showed only SDXL LoRAs. `bediz models install --source-type url --source https://huggingface.co/LyliaEngine/Anima_Detail_Tweaker/resolve/main/Anima_Detail_Tweaker.safetensors --json` created job 2; `bediz models status --job-id 2 --json` completed with model key `5e9b17b5-e986-4cb8-83ef-a982326ab283`. `models list --type lora --json` confirmed `type: lora`, `base: anima`.
+- `bediz doctor --json` reported `ready: true` and compatible `generate/anima/loras`; its loader schema and `core_metadata.loras` properties were available.
+- Waited 768 × 768 Anima text-to-image with seed `41827`, 24 steps, and the same prompt produced `cab5cb50-165d-4769-959e-5bdd0005bc66.png` without LoRA (queue item 158) and `c85cb7ed-71c0-4bff-ba3c-9b84eee4ce8c.png` with `Anima_Detail_Tweaker` at `1.0` (item 159). The outputs differ visibly in cloak and facial detail. The LoRA image's InvokeAI metadata has seed `41827` and `loras: [{model: <complete Anima LoRA identifier>, weight: 1.0}]`; the LoRA-less receipt omits `loras`.
+- Waited 768 × 768 image-to-image with the LoRA at `1.0`, source `cab5cb50-165d-4769-959e-5bdd0005bc66.png`, seed `41828`, and strength `0.6` produced `03625502-2dfa-451c-ac44-9930b46f2d90.png` (item 160). Its InvokeAI metadata records `anima_img2img`, source, seed, strength, and the LoRA. These three named images remain in the gallery as ad hoc verification outputs.
+- `BEDIZ_E2E_URL=http://127.0.0.1:9090 go test -count=1 -v ./e2e` passed, including the new Anima LoRA generation and metadata case; the gate cleaned up its own images.
+- `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go mod verify` passed.
