@@ -42,7 +42,7 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 	for i, entry := range report.Capabilities {
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "models.scan", "models.install", "models.install", "models.install", "models.install", "models.install", "models.status", "models.delete", "images.list", "images.get", "images.upload", "images.download", "images.delete", "queue.list", "queue.get", "queue.wait", "queue.cancel", "queue.clear", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "generate", "generate", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
+	wantOperations := []string{"models.list", "models.scan", "models.install", "models.install", "models.install", "models.install", "models.install", "models.status", "models.delete", "images.list", "images.get", "images.upload", "images.download", "images.delete", "queue.list", "queue.get", "queue.wait", "queue.cancel", "queue.clear", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "generate", "generate", "generate", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if !slices.Equal(operations, wantOperations) {
 		t.Fatalf("reported operations = %q, want implemented operations %q", operations, wantOperations)
 	}
@@ -152,6 +152,47 @@ func TestAnimaLoRACapabilityIsolatedFromOtherRows(t *testing.T) {
 			}
 			if !found {
 				t.Fatal("Anima LoRA row absent")
+			}
+		})
+	}
+}
+
+func TestFLUXLoRACapabilityIsolatedFromOtherRows(t *testing.T) {
+	for _, property := range []string{"", "lora", "weight", "transformer", "clip", "t5_encoder", "id", "is_intermediate", "use_cache", "type"} {
+		t.Run(property, func(t *testing.T) {
+			document := openAPIFixture(t)
+			schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
+			if property == "" {
+				delete(schemas, "FluxLoRALoaderInvocation")
+			} else {
+				delete(schemas["FluxLoRALoaderInvocation"].(map[string]any)["properties"].(map[string]any), property)
+			}
+			server := newCustomInvokeAIServer(t, "6.14.1", document, baselineModels)
+			defer server.Close()
+			client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			report := Run(t.Context(), client, version.Info{Version: "test"})
+			if !report.Ready || len(report.Issues) != 0 {
+				t.Fatalf("mode readiness changed: %#v", report.Issues)
+			}
+			found := false
+			for _, row := range report.Capabilities {
+				if row.Operation != result.OperationGenerate {
+					continue
+				}
+				if row.Family == "flux" && row.Setting == "loras" {
+					found = true
+					if row.Mode != "" || row.UISync != "" || row.Compatible || !slices.Equal(row.Failures, []string{"incompatible_invocation:flux_lora_loader"}) {
+						t.Fatalf("FLUX LoRA row = %#v", row)
+					}
+				} else if !row.Compatible {
+					t.Fatalf("other generation row changed = %#v", row)
+				}
+			}
+			if !found {
+				t.Fatal("FLUX LoRA row absent")
 			}
 		})
 	}

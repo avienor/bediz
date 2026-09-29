@@ -69,7 +69,7 @@ func fluxDoctorModes(report map[string]any) map[string]map[string]any {
 	modes := map[string]map[string]any{}
 	for _, raw := range report["capabilities"].([]any) {
 		entry := raw.(map[string]any)
-		if entry["operation"] == "generate" && entry["family"] == "flux" {
+		if entry["operation"] == "generate" && entry["family"] == "flux" && entry["setting"] == nil {
 			modes[entry["mode"].(string)] = entry
 		}
 	}

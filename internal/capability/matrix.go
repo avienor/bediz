@@ -367,6 +367,7 @@ var Matrix = []Entry{
 	SDXLLoRAEntry(),
 	FLUXGenerationEntry(),
 	FLUXImageToImageEntry(),
+	FLUXLoRAEntry(),
 	SDXLUpscaleEntry(),
 	SD1UpscaleEntry(),
 	RecallEntry([]RecallFieldRequirement{SDXLCFGRecallField}),
@@ -623,6 +624,22 @@ func WithSDXLLoRA(entry Entry) Entry {
 func WithAnimaLoRA(entry Entry) Entry {
 	entry = withLoRAMetadata(entry)
 	entry.Invocations = append(entry.Invocations, InvocationRequirement{Schema: "AnimaLoRALoaderInvocation", Type: "anima_lora_loader", Properties: []string{"id", "is_intermediate", "use_cache", "type", "lora", "weight", "transformer", "qwen3_encoder"}})
+	return entry
+}
+
+// WithFLUXLoRA adds the tested LoRA vocabulary to either FLUX.1 Generation Mode.
+func WithFLUXLoRA(entry Entry) Entry {
+	entry = withLoRAMetadata(entry)
+	entry.Invocations = append(entry.Invocations, InvocationRequirement{Schema: "FluxLoRALoaderInvocation", Type: "flux_lora_loader", Properties: []string{"id", "is_intermediate", "use_cache", "type", "lora", "weight", "transformer", "clip", "t5_encoder"}})
+	return entry
+}
+
+// FLUXLoRAEntry is the setting row, inheriting text-to-image requirements.
+func FLUXLoRAEntry() Entry {
+	entry := WithFLUXLoRA(FLUXGenerationEntry())
+	entry.Mode = ""
+	entry.Setting = "loras"
+	entry.UISync = ""
 	return entry
 }
 

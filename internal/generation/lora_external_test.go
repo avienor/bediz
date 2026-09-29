@@ -143,7 +143,7 @@ func TestResolveLoRARejectsInvalidLocalAndModelSelections(t *testing.T) {
 }
 
 func TestResolveLoRARejectsUnregisteredFamilies(t *testing.T) {
-	for _, main := range []generation.ModelIdentifier{{Key: "flux-main", Hash: "hash", Name: "FLUX", Base: "flux", Type: "main", Variant: "dev", Format: "checkpoint"}} {
+	for _, main := range []generation.ModelIdentifier{{Key: "flux2-main", Hash: "hash", Name: "FLUX.2", Base: "flux2", Type: "main", Variant: "dev", Format: "checkpoint"}} {
 		request := generation.Request{SchemaVersion: 1, Model: main.Key, PositivePrompt: "test", Seed: new(uint32(1)), Loras: []generation.LoRA{{Model: "anything"}}}
 		_, err := generation.Resolve(request, []generation.ModelIdentifier{main}, bytes.NewReader(nil))
 		if _, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); !ok {

@@ -185,7 +185,7 @@ func TestGenerateLoRAFlagsPreserveCommasSplitAtLastEqualsAndMatchDocument(t *tes
 
 func TestGenerateOtherFamiliesRejectLoRAsBeforeSourceUpload(t *testing.T) {
 	for _, main := range []map[string]any{
-		{"key": "flux-main", "hash": "hash", "name": "FLUX", "base": "flux", "type": "main", "variant": "dev", "format": "checkpoint"},
+		{"key": "flux2-main", "hash": "hash", "name": "FLUX.2", "base": "flux2", "type": "main", "variant": "dev", "format": "checkpoint"},
 	} {
 		t.Run(main["base"].(string), func(t *testing.T) {
 			isolateUserConfigDir(t)

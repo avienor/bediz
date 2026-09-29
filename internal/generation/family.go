@@ -59,10 +59,16 @@ func (fluxAdapter) alignment() int { return 16 }
 
 func (fluxAdapter) compile(resolved Resolution) (EnqueueRequest, error) { return compileFLUX(resolved) }
 func (fluxAdapter) capabilityEntry(request Request) capability.Entry {
+	var entry capability.Entry
 	if request.Source != nil {
-		return capability.FLUXImageToImageEntry()
+		entry = capability.FLUXImageToImageEntry()
+	} else {
+		entry = capability.FLUXGenerationEntry()
 	}
-	return capability.FLUXGenerationEntry()
+	if len(request.Loras) > 0 {
+		return capability.WithFLUXLoRA(entry)
+	}
+	return entry
 }
 func (fluxAdapter) componentKeys(resolved Resolution) map[string]string {
 	return map[string]string{"vae": resolved.Models.VAE.Key, "t5_encoder": resolved.Models.T5Encoder.Key, "clip_embed": resolved.Models.CLIPEmbed.Key}
@@ -81,6 +87,9 @@ func (fluxAdapter) synchronization(settings ResolvedSettings) (SyncSettings, []s
 	fields = append(fields, "vae", "t5_encoder", "clip_embed", "output_count", "board_id")
 	if settings.Strength != nil {
 		fields = append(fields, "source_image", "strength")
+	}
+	if len(settings.Loras) > 0 {
+		fields = append(fields, "loras")
 	}
 	return SyncSettings{Model: settings.ModelKey, PositivePrompt: settings.PositivePrompt, NegativePrompt: settings.NegativePrompt, Width: settings.Width, Height: settings.Height, Steps: settings.Steps, Seed: settings.Seeds[0]}, fields
 }

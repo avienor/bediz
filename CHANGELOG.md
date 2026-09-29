@@ -6,6 +6,7 @@ Each release lists the changes that affect users of the `bediz` binary, its JSON
 
 ### Added
 
+- FLUX.1 dev and schnell text-to-image and image-to-image generation accept ordered LoRAs with metadata, receipts, and a distinct `doctor` capability row.
 - Anima text-to-image and image-to-image generation accept ordered LoRAs with metadata, receipts, and a distinct `doctor` capability row.
 - SDXL text-to-image and image-to-image generation accept ordered LoRAs through `loras` or repeatable `--lora`, with per-model default weights, metadata, receipts, and a distinct `doctor` capability row.
 - `doctor` reports `models.install` readiness for Hugging Face sources, server paths, and Source Tokens with source-specific failures.

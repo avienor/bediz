@@ -46,6 +46,7 @@ type fluxMetadataNode struct {
 	VAE            modelReference `json:"vae"`
 	Strength       *float64       `json:"strength,omitzero"`
 	InitImage      string         `json:"init_image,omitempty"`
+	Loras          []loRAMetadata `json:"loras,omitempty"`
 }
 
 type fluxEncodeNode struct {
@@ -85,10 +86,23 @@ func compileFLUX(resolved Resolution) (EnqueueRequest, error) {
 	if r.BoardID != "" {
 		nodes["decode"] = fluxDecodeNode{nodeAttributes: nodeAttributes{ID: "decode", IsIntermediate: false, UseCache: false, Type: "flux_vae_decode"}, Board: new(boardField{BoardID: r.BoardID})}
 	}
+	modelOutputSource := "model_loader"
+	var loraEdges []Edge
+	metadata := nodes["metadata"].(fluxMetadataNode)
+	for index, lora := range resolved.Loras {
+		id := fmt.Sprintf("lora_%d", index)
+		nodes[id] = loRALoaderNode{ID: id, IsIntermediate: true, UseCache: true, Type: "flux_lora_loader", LoRA: reference(lora.Model), Weight: lora.Weight}
+		metadata.Loras = append(metadata.Loras, loRAMetadata{Model: reference(lora.Model), Weight: lora.Weight})
+		for _, field := range []string{"transformer", "clip", "t5_encoder"} {
+			loraEdges = append(loraEdges, edge(modelOutputSource, field, id, field))
+		}
+		modelOutputSource = id
+	}
+	nodes["metadata"] = metadata
 	edges := []Edge{
-		edge("model_loader", "transformer", "denoise", "transformer"),
-		edge("model_loader", "clip", "positive_conditioning", "clip"),
-		edge("model_loader", "t5_encoder", "positive_conditioning", "t5_encoder"),
+		edge(modelOutputSource, "transformer", "denoise", "transformer"),
+		edge(modelOutputSource, "clip", "positive_conditioning", "clip"),
+		edge(modelOutputSource, "t5_encoder", "positive_conditioning", "t5_encoder"),
 		edge("model_loader", "max_seq_len", "positive_conditioning", "t5_max_seq_len"),
 		edge("positive_prompt", "value", "positive_conditioning", "prompt"),
 		edge("positive_conditioning", "conditioning", "denoise", "positive_text_conditioning"),
@@ -121,5 +135,6 @@ func compileFLUX(resolved Resolution) (EnqueueRequest, error) {
 		nodes["i2l"] = encoder
 		edges = append(edges, edge("model_loader", "vae", "i2l", "vae"), edge("i2l", "latents", "denoise", "latents"))
 	}
+	edges = append(edges, loraEdges...)
 	return EnqueueRequest{Batch: Batch{Origin: "generate", Destination: "generate", Graph: Graph{ID: "bediz_flux_v1", Nodes: nodes, Edges: edges}, Data: graphops.SeedBatchData("seed", "value", resolved.Seeds), Runs: 1}}, nil
 }

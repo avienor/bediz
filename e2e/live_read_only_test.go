@@ -389,7 +389,7 @@ func TestLiveGate(t *testing.T) {
 				t.Errorf("doctor returned an unsatisfied or incomplete model requirement: %#v", requirement)
 			}
 		}
-		wantOperations := []string{"auth.huggingface.login", "auth.huggingface.logout", "auth.huggingface.status", "boards.create", "boards.get", "boards.list", "generate", "generate", "generate", "generate", "generate", "generate", "generate", "generate", "images.delete", "images.download", "images.get", "images.list", "images.upload", "models.delete", "models.install", "models.install", "models.install", "models.install", "models.install", "models.list", "models.scan", "models.status", "queue.cancel", "queue.clear", "queue.get", "queue.list", "queue.wait", "recall", "upscale", "upscale"}
+		wantOperations := []string{"auth.huggingface.login", "auth.huggingface.logout", "auth.huggingface.status", "boards.create", "boards.get", "boards.list", "generate", "generate", "generate", "generate", "generate", "generate", "generate", "generate", "generate", "images.delete", "images.download", "images.get", "images.list", "images.upload", "models.delete", "models.install", "models.install", "models.install", "models.install", "models.install", "models.list", "models.scan", "models.status", "queue.cancel", "queue.clear", "queue.get", "queue.list", "queue.wait", "recall", "upscale", "upscale"}
 		operations := make([]string, 0, len(data.Capabilities))
 		generateFamilies := map[string]bool{}
 		generateModes := map[string]bool{}
@@ -427,8 +427,8 @@ func TestLiveGate(t *testing.T) {
 		if !generateModes["anima/txt2img"] || !generateModes["anima/img2img"] || !generateModes["sdxl/txt2img"] || !generateModes["sdxl/img2img"] || !generateModes["flux/txt2img"] || !generateModes["flux/img2img"] || len(generateModes) != 6 {
 			t.Errorf("doctor generate modes = %#v, want text and image modes for all three families", generateModes)
 		}
-		if !loraRows["anima"] || !loraRows["sdxl"] || len(loraRows) != 2 {
-			t.Errorf("doctor LoRA setting rows = %#v, want Anima and SDXL", loraRows)
+		if !loraRows["anima"] || !loraRows["sdxl"] || !loraRows["flux"] || len(loraRows) != 3 {
+			t.Errorf("doctor LoRA setting rows = %#v, want Anima, SDXL, and FLUX.1", loraRows)
 		}
 		if data.UISync["generate"] != "partial" || data.UISync["upscale"] != "partial" {
 			t.Errorf("doctor UI synchronization = %#v, want partial generation and upscale", data.UISync)
