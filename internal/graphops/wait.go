@@ -76,6 +76,11 @@ func waitForItem(ctx, waitContext context.Context, client *httpclient.Client, po
 				Position: position, ItemID: itemID, Status: item.Status,
 				FailureType: failureType, FailureMessage: failureMessage,
 			}
+		default:
+			return queue.Item{}, &operation.InvalidQueueResultError{
+				Position: position, ItemID: itemID, Status: item.Status,
+				Detail: fmt.Sprintf("reported status %q, which is not a tested InvokeAI queue status", item.Status),
+			}
 		}
 	}
 }

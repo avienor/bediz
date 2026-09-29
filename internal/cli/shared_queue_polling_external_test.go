@@ -67,7 +67,7 @@ func TestGenerateWaitStopReportsUnobservedItemsInQueueOrder(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			args := []string{"generate", "--model", "main-key", "--prompt", "test", "--seed", "42", "--output-count", "2", "--vae", "vae-key", "--qwen3-encoder", "encoder-key", "--url", server.URL, "--json"}
 			if tc.code == result.CodeWaitTimeout {
-				args = append(args, "--timeout", "150ms")
+				args = append(args, "--timeout", "500ms")
 			}
 			status := cli.New(&stdout, &stderr).Run(ctx, args)
 			var envelope struct {

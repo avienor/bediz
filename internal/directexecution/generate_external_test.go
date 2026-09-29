@@ -371,7 +371,7 @@ func TestGenerateWaitFailuresKeepUploadedSourceWithoutProfileWarnings(t *testing
 		{name: "canceled item", response: `{"item_id":19,"queue_id":"default","batch_id":"batch-a","status":"canceled"}`, wantCode: "invokeai_operation_failed"},
 		{name: "unknown status", response: `{"item_id":19,"queue_id":"default","batch_id":"batch-a","status":"unknown"}`, wantCode: "invalid_invokeai_response"},
 		{name: "malformed item", response: `{`, wantCode: "invalid_invokeai_response"},
-		{name: "timeout", options: directexecution.Options{Timeout: time.Nanosecond}, wantCode: "wait_timeout"},
+		{name: "timeout", response: `{"item_id":19,"queue_id":"default","batch_id":"batch-a","status":"pending"}`, options: directexecution.Options{Timeout: time.Nanosecond}, wantCode: "wait_timeout"},
 		{name: "interruption", interrupt: true, wantCode: "interrupted"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

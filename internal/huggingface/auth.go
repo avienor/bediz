@@ -111,11 +111,12 @@ func compatible(ctx context.Context, client *httpclient.Client, method string) e
 	if !found {
 		return operation.UnsupportedCapability("InvokeAI Hugging Face authentication requirements are unavailable")
 	}
-	for _, failure := range compatibility.Evaluate(entry, compatibility.Snapshot{SupportedVersion: true, OpenAPIAvailable: true, Document: document}) {
-		if failure.Code == "incompatible_hf_login_schema:token" {
-			return operation.UnsupportedCapability("InvokeAI Hugging Face login token schema is incompatible")
-		}
-		return operation.UnsupportedCapability("InvokeAI Hugging Face authentication endpoint is unavailable")
+	failures := compatibility.Evaluate(entry, compatibility.Snapshot{SupportedVersion: true, OpenAPIAvailable: true, Document: document})
+	if len(failures) == 0 {
+		return nil
 	}
-	return nil
+	if failures[0].Code == "incompatible_hf_login_schema:token" {
+		return operation.UnsupportedCapability("InvokeAI Hugging Face login token schema is incompatible")
+	}
+	return operation.UnsupportedCapability("InvokeAI Hugging Face authentication endpoint is unavailable")
 }

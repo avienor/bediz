@@ -75,8 +75,8 @@ func submit(ctx context.Context, client *httpclient.Client, request Request, add
 		}
 		additionalRequirements = append(additionalRequirements, field.Requirement)
 	}
-	for _, failure := range compatibility.Evaluate(capability.RecallEntry(additionalRequirements), compatibility.Snapshot{SupportedVersion: true, OpenAPIAvailable: true, Document: openAPI}) {
-		if field, ok := strings.CutPrefix(failure.Code, "incompatible_recall_schema:"); ok && field != "request_body" {
+	if failures := compatibility.Evaluate(capability.RecallEntry(additionalRequirements), compatibility.Snapshot{SupportedVersion: true, OpenAPIAvailable: true, Document: openAPI}); len(failures) > 0 {
+		if field, ok := strings.CutPrefix(failures[0].Code, "incompatible_recall_schema:"); ok && field != "request_body" {
 			return Result{}, operation.UnsupportedCapability(fmt.Sprintf("InvokeAI Recall schema does not support %s as a patch field", field))
 		}
 		return Result{}, operation.UnsupportedCapability("InvokeAI Recall endpoint does not expose the tested request schema")
