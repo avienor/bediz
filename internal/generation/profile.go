@@ -1,11 +1,11 @@
 package generation
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/avienor/bediz/internal/graphops"
 	"github.com/avienor/bediz/internal/operation"
+	"github.com/avienor/bediz/internal/profileexecution"
 	"github.com/avienor/bediz/internal/profiles"
 	"github.com/avienor/bediz/internal/result"
 )
@@ -19,9 +19,7 @@ type ProfileLoadError struct {
 func (e *ProfileLoadError) Error() string { return fmt.Sprintf("load profile %q: %v", e.Name, e.Err) }
 func (e *ProfileLoadError) Unwrap() error { return e.Err }
 
-func profileLoadError(name string, err error) error {
-	return &ProfileLoadError{Name: name, Err: err}
-}
+func profileLoadError(name string, err error) error { return &ProfileLoadError{Name: name, Err: err} }
 
 // ProfilePreferenceError retains skipped component preferences when a later
 // step fails before an accepted enqueue.
@@ -65,39 +63,13 @@ func applyProfileComponents(request Request, profile profiles.Generate, main Mod
 	if request.Components != nil {
 		resolved = *request.Components
 	}
-	var warnings []result.Warning
-	preferences := []struct {
-		kind        string
-		selector    *string
-		selected    **string
-		requirement graphops.ComponentRequirement
-	}{
-		{"vae", profile.Components.VAE, &resolved.VAE, graphops.ComponentRequirement{Kind: "vae", Base: main.Base, ModelType: "vae"}},
-		{"qwen3_encoder", profile.Components.Qwen3Encoder, &resolved.Qwen3Encoder, qwen3EncoderRequirement},
-		{"t5_encoder", profile.Components.T5Encoder, &resolved.T5Encoder, fluxT5Requirement},
-		{"clip_embed", profile.Components.CLIPEmbed, &resolved.CLIPEmbed, fluxCLIPRequirement},
+	preferences := []profileexecution.Preference{
+		{Kind: "vae", Selector: profile.Components.VAE, Selected: &resolved.VAE, Requirement: graphops.ComponentRequirement{Kind: "vae", Base: main.Base, ModelType: "vae"}},
+		{Kind: "qwen3_encoder", Selector: profile.Components.Qwen3Encoder, Selected: &resolved.Qwen3Encoder, Requirement: qwen3EncoderRequirement},
+		{Kind: "t5_encoder", Selector: profile.Components.T5Encoder, Selected: &resolved.T5Encoder, Requirement: fluxT5Requirement},
+		{Kind: "clip_embed", Selector: profile.Components.CLIPEmbed, Selected: &resolved.CLIPEmbed, Requirement: fluxCLIPRequirement},
 	}
-	for _, preference := range preferences {
-		if preference.selector == nil || *preference.selected != nil {
-			continue
-		}
-		component, err := graphops.ResolveUniqueCompatible(inventory, *preference.selector, preference.requirement)
-		if err == nil {
-			*preference.selected = new(component.Key)
-			continue
-		}
-		reason := "not_found"
-		if _, ok := errors.AsType[*operation.SelectionRequiredError](err); ok {
-			reason = "ambiguous"
-		} else if _, ok := errors.AsType[*operation.UnsupportedCapabilityError](err); ok {
-			reason = "incompatible"
-		}
-		warnings = append(warnings, result.Warning{
-			Code:    "profile_preference_skipped",
-			Message: fmt.Sprintf("profile %q %s preference could not be used; automatic component resolution continues", request.Profile, preference.kind),
-			Details: map[string]any{"profile": request.Profile, "component": preference.kind, "reason": reason},
-		})
-	}
+	warnings := profileexecution.ApplyPreferences(request.Profile, inventory, "automatic component resolution continues", preferences)
 	request.Components = &resolved
 	return request, warnings
 }

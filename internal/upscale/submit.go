@@ -2,19 +2,14 @@ package upscale
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
-	"math"
 	"slices"
 
-	"github.com/avienor/bediz/internal/capability"
 	"github.com/avienor/bediz/internal/graphops"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/images"
 	"github.com/avienor/bediz/internal/operation"
-	"github.com/avienor/bediz/internal/profiles"
 	"github.com/avienor/bediz/internal/result"
-	"github.com/avienor/bediz/internal/sourceimage"
 )
 
 type QueueReceipt = graphops.QueueReceipt
@@ -51,110 +46,6 @@ type ExecutionReceipt struct {
 	Warnings         []result.Warning `json:"warnings"`
 }
 
-// Submit validates the complete operation, then sends one enqueue mutation. A
-// path source is checked locally before any request and uploaded once, only
-// after every validation and resolution step, immediately before the enqueue.
-func Submit(ctx context.Context, client *httpclient.Client, request Request) (ExecutionReceipt, error) {
-	if err := validateRequest(request, false); err != nil {
-		return ExecutionReceipt{}, err
-	}
-	effective := request
-	var profileUpscale *profiles.Upscale
-	if request.Profile != "" {
-		if !profiles.ValidName(request.Profile) {
-			return ExecutionReceipt{}, operation.InvalidRequest("invalid profile name")
-		}
-		profile, err := profiles.Get(request.Profile)
-		if err != nil {
-			return ExecutionReceipt{}, &ProfileLoadError{Name: request.Profile, Err: err}
-		}
-		if profile.Upscale == nil {
-			return ExecutionReceipt{}, operation.InvalidRequest("profile has no upscale section")
-		}
-		profileUpscale = profile.Upscale
-		if effective.Model == "" && profileUpscale.Model != nil {
-			effective.Model = *profileUpscale.Model
-		}
-		effective = applyProfileSettings(effective, *profileUpscale)
-	}
-	if err := ValidateRequest(effective); err != nil {
-		return ExecutionReceipt{}, err
-	}
-	prepared, err := sourceimage.Prepare(request.Source)
-	if err != nil {
-		return ExecutionReceipt{}, err
-	}
-	defer func() { _ = prepared.Close() }()
-	if err := capability.RequireSupportedVersion(ctx, client); err != nil {
-		return ExecutionReceipt{}, err
-	}
-	inventory, err := graphops.Inventory(ctx, client)
-	if err != nil {
-		return ExecutionReceipt{}, err
-	}
-	var profileWarnings []result.Warning
-	if profileUpscale != nil {
-		main, err := ResolveMain(inventory, effective.Model)
-		if err != nil {
-			return ExecutionReceipt{}, err
-		}
-		effective, profileWarnings = applyProfileComponents(effective, *profileUpscale, main, inventory)
-	}
-	resolved, err := Resolve(effective, inventory, rand.Reader)
-	if err != nil {
-		return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
-	}
-	family, _ := familyFor(resolved.Models.Main.Base)
-	if err := graphops.CheckInvocations(ctx, client, family.entry().Invocations); err != nil {
-		return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
-	}
-	source, err := prepared.Resolve(ctx, client)
-	if err != nil {
-		return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
-	}
-	receipt, err := submitSource(ctx, client, request, resolved, source.Image, source.Uploaded, profileWarnings)
-	if err != nil && source.Uploaded {
-		return receipt, &sourceimage.UploadedError{Source: source.Image, Err: withProfileWarnings(err, profileWarnings)}
-	}
-	return receipt, withProfileWarnings(err, profileWarnings)
-}
-
-func submitSource(ctx context.Context, client *httpclient.Client, request Request, resolved Resolution, source images.Reference, uploaded bool, warnings []result.Warning) (ExecutionReceipt, error) {
-	if source.Width < 1 || source.Height < 1 || source.Width > math.MaxInt / *resolved.Request.Scale || source.Height > math.MaxInt / *resolved.Request.Scale {
-		return ExecutionReceipt{}, &httpclient.InvalidResponseError{Err: fmt.Errorf("source image has invalid dimensions %d × %d", source.Width, source.Height)}
-	}
-	outputWidth := source.Width * *resolved.Request.Scale / 8 * 8
-	outputHeight := source.Height * *resolved.Request.Scale / 8 * 8
-	graph, err := Compile(resolved, source)
-	if err != nil {
-		return ExecutionReceipt{}, err
-	}
-	queueReceipt, err := graphops.Enqueue(ctx, client, graph, 1)
-	if err != nil {
-		return ExecutionReceipt{}, err
-	}
-	componentKeys := map[string]string{
-		"upscale_model":   resolved.Models.UpscaleModel.Key,
-		"tile_controlnet": resolved.Models.TileControlNet.Key,
-	}
-	if resolved.Models.VAE.Key != "" {
-		componentKeys["vae"] = resolved.Models.VAE.Key
-	}
-	return ExecutionReceipt{
-		SubmittedRequest: request, SourceImage: source, SourceUploaded: uploaded,
-		ResolvedSettings: ResolvedSettings{
-			Profile:        request.Profile,
-			PositivePrompt: resolved.Request.PositivePrompt, NegativePrompt: resolved.Request.NegativePrompt,
-			Scale: *resolved.Request.Scale, Creativity: *resolved.Request.Creativity, Structure: *resolved.Request.Structure,
-			Steps: *resolved.Request.Steps, Scheduler: *resolved.Request.Scheduler, Guidance: *resolved.Request.Guidance,
-			TileSize: *resolved.Request.TileSize, TileOverlap: *resolved.Request.TileOverlap,
-			OutputWidth: outputWidth, OutputHeight: outputHeight, BoardID: resolved.Request.BoardID,
-			ModelKey: resolved.Models.Main.Key, ComponentKeys: componentKeys, Seeds: []uint32{resolved.Seed},
-		},
-		Queue: queueReceipt, Outputs: []Output{}, Warnings: append([]result.Warning{}, warnings...),
-	}, nil
-}
-
 // ScaleNotAppliedError means InvokeAI completed an image that does not match
 // the expected scale. The failed output is retained for inspection, but it is
 // never returned in a successful execution receipt.
@@ -174,16 +65,7 @@ func (e *ScaleNotAppliedError) Error() string {
 
 // Wait inspects the accepted queue item, checks its seed and output image, and
 // reports a scale failure when the completed dimensions differ from the receipt.
-// A failure after an uploaded source also reports that source.
 func Wait(ctx context.Context, client *httpclient.Client, accepted ExecutionReceipt, options WaitOptions) (ExecutionReceipt, error) {
-	receipt, err := wait(ctx, client, accepted, options)
-	if err != nil && accepted.SourceUploaded {
-		return receipt, &sourceimage.UploadedError{Source: accepted.SourceImage, Err: err}
-	}
-	return receipt, err
-}
-
-func wait(ctx context.Context, client *httpclient.Client, accepted ExecutionReceipt, options WaitOptions) (ExecutionReceipt, error) {
 	if len(accepted.Queue.ItemIDs) != 1 || len(accepted.ResolvedSettings.Seeds) != 1 {
 		return accepted, operation.InvalidRequest("upscale wait requires one accepted queue item and seed")
 	}

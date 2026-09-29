@@ -10,6 +10,7 @@ import (
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/images"
 	"github.com/avienor/bediz/internal/operation"
+	"github.com/avienor/bediz/internal/profileexecution"
 	"github.com/avienor/bediz/internal/profiles"
 	"github.com/avienor/bediz/internal/result"
 	"github.com/avienor/bediz/internal/sourceimage"
@@ -69,12 +70,9 @@ func Prepare(request Request) (*Preparation, error) {
 	effective := request
 	var profileGenerate *profiles.Generate
 	if request.Profile != "" {
-		if !profiles.ValidName(request.Profile) {
-			return nil, operation.InvalidRequest("invalid profile name")
-		}
-		profile, err := profiles.Get(request.Profile)
+		profile, err := profileexecution.Load(request.Profile, profileLoadError)
 		if err != nil {
-			return nil, profileLoadError(request.Profile, err)
+			return nil, err
 		}
 		if profile.Generate == nil {
 			return nil, operation.InvalidRequest("profile has no generate section")

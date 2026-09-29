@@ -6,9 +6,9 @@ import (
 	"io"
 	"time"
 
+	"github.com/avienor/bediz/internal/directexecution"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/result"
-	"github.com/avienor/bediz/internal/synchronization"
 	"github.com/avienor/bediz/internal/upscale"
 	"github.com/spf13/cobra"
 )
@@ -154,15 +154,7 @@ func (c *CLI) executeUpscale(ctx context.Context, jsonOutput bool, command *cobr
 		requestPath:       options.requestPath,
 		operationFlagsSet: fieldsSet,
 		invoke: func(ctx context.Context, client *httpclient.Client, request upscale.Request) (upscale.ExecutionReceipt, error) {
-			accepted, err := upscale.Submit(ctx, client, request)
-			if err != nil {
-				return accepted, err
-			}
-			accepted = synchronization.SynchronizeUpscale(ctx, client, accepted)
-			if options.noWait {
-				return accepted, nil
-			}
-			return upscale.Wait(ctx, client, accepted, upscale.WaitOptions{Timeout: options.waitTimeout})
+			return directexecution.Upscale(ctx, client, request, directexecution.Options{NoWait: options.noWait, Timeout: options.waitTimeout})
 		},
 		render:   renderUpscaleReceipt,
 		warnings: func(receipt upscale.ExecutionReceipt) []result.Warning { return receipt.Warnings },
