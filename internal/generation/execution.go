@@ -1,9 +1,8 @@
 package generation
 
 import (
-	"context"
-	"crypto/rand"
 	"fmt"
+	"io"
 	"slices"
 
 	"github.com/avienor/bediz/internal/capability"
@@ -47,22 +46,38 @@ type ExecutionReceipt struct {
 	SourceUploaded   *bool             `json:"source_uploaded,omitempty"`
 }
 
-func Submit(ctx context.Context, client *httpclient.Client, request Request) (ExecutionReceipt, error) {
+// Preparation holds generation-specific validation and resolution state. Direct
+// Execution owns the network lifecycle and closes its prepared Source Image.
+type Preparation struct {
+	request         Request
+	effective       Request
+	profileGenerate *profiles.Generate
+	source          *sourceimage.Prepared
+	localWidth      int
+	localHeight     int
+	adapter         familyAdapter
+	resolved        Resolution
+}
+
+// Prepare validates the request and profile and checks a local Source Image
+// before network access. A non-nil preparation must be closed through Source,
+// even when reading the local image dimensions fails.
+func Prepare(request Request) (*Preparation, error) {
 	if err := validateCommonRequest(request); err != nil {
-		return ExecutionReceipt{}, err
+		return nil, err
 	}
 	effective := request
 	var profileGenerate *profiles.Generate
 	if request.Profile != "" {
 		if !profiles.ValidName(request.Profile) {
-			return ExecutionReceipt{}, operation.InvalidRequest("invalid profile name")
+			return nil, operation.InvalidRequest("invalid profile name")
 		}
 		profile, err := profiles.Get(request.Profile)
 		if err != nil {
-			return ExecutionReceipt{}, profileLoadError(request.Profile, err)
+			return nil, profileLoadError(request.Profile, err)
 		}
 		if profile.Generate == nil {
-			return ExecutionReceipt{}, operation.InvalidRequest("profile has no generate section")
+			return nil, operation.InvalidRequest("profile has no generate section")
 		}
 		profileGenerate = profile.Generate
 		if effective.Model == "" && profileGenerate.Model != nil {
@@ -70,38 +85,40 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 		}
 	}
 	if effective.Model == "" {
-		return ExecutionReceipt{}, operation.InvalidRequest("model is required")
+		return nil, operation.InvalidRequest("model is required")
 	}
-	var prepared *sourceimage.Prepared
-	var localWidth, localHeight int
+	preparation := &Preparation{request: request, effective: effective, profileGenerate: profileGenerate}
 	if request.Source != nil {
 		var err error
-		prepared, err = sourceimage.Prepare(*request.Source)
+		preparation.source, err = sourceimage.Prepare(*request.Source)
 		if err != nil {
-			return ExecutionReceipt{}, err
+			return preparation, err
 		}
-		defer func() { _ = prepared.Close() }()
 		if request.Source.Type == "path" {
-			localWidth, localHeight, err = prepared.LocalDimensions()
+			preparation.localWidth, preparation.localHeight, err = preparation.source.LocalDimensions()
 			if err != nil {
-				return ExecutionReceipt{}, err
+				return preparation, err
 			}
 		}
 	}
-	if err := capability.RequireSupportedVersion(ctx, client); err != nil {
-		return ExecutionReceipt{}, err
-	}
-	inventory, err := graphops.Inventory(ctx, client)
-	if err != nil {
-		return ExecutionReceipt{}, err
-	}
+	return preparation, nil
+}
+
+// Source returns the checked Source Image, or nil for text-to-image.
+func (p *Preparation) Source() *sourceimage.Prepared { return p.source }
+
+// Resolve applies family and profile settings and components, returning the
+// requirements to check before upload or enqueue. Warnings also accompany a
+// resolution failure so Direct Execution can retain them at its interface.
+func (p *Preparation) Resolve(inventory []ModelIdentifier, random io.Reader) (capability.Entry, []result.Warning, error) {
+	request, effective, profileGenerate := p.request, p.effective, p.profileGenerate
 	main, err := ResolveFamilyMain(inventory, effective.Model)
 	if err != nil {
-		return ExecutionReceipt{}, err
+		return capability.Entry{}, nil, err
 	}
 	if profileGenerate != nil {
 		if err := validateProfileApplicability(request.Profile, *profileGenerate, main); err != nil {
-			return ExecutionReceipt{}, err
+			return capability.Entry{}, nil, err
 		}
 		effective = applyProfileSettings(effective, *profileGenerate)
 	}
@@ -111,70 +128,65 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 	}
 	adapter, err := adapterForBase(main.Base)
 	if err != nil {
-		return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
+		return capability.Entry{}, profileWarnings, err
 	}
 	effective = applyModeDefaults(effective)
 	alignment := adapter.alignment()
 	if effective.Source != nil {
 		if request.Source.Type == "path" {
-			if err := checkSourceSize(localWidth, localHeight, alignment); err != nil {
-				return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
+			if err := checkSourceSize(p.localWidth, p.localHeight, alignment); err != nil {
+				return capability.Entry{}, profileWarnings, err
 			}
 			if effective.Width == nil {
-				effective.Width, effective.Height = new(localWidth/alignment*alignment), new(localHeight/alignment*alignment)
+				effective.Width, effective.Height = new(p.localWidth/alignment*alignment), new(p.localHeight/alignment*alignment)
 			}
 		}
 	}
-	resolved, err := adapter.resolve(effective, main, inventory, rand.Reader)
+	resolved, err := adapter.resolve(effective, main, inventory, random)
 	if err != nil {
-		return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
+		return capability.Entry{}, profileWarnings, err
 	}
 	entry, err := CapabilityEntry(resolved)
 	if err != nil {
-		return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
+		return capability.Entry{}, profileWarnings, err
 	}
-	if effective.Source != nil {
-		if err := graphops.CheckRequirements(ctx, client, entry.Endpoints, entry.Invocations); err != nil {
-			return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
-		}
-	} else if err := graphops.CheckInvocations(ctx, client, entry.Invocations); err != nil {
-		return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
+	if effective.Source == nil {
+		// Text-to-image keeps its existing invocation-only preflight.
+		entry.Endpoints = nil
 	}
-	var source sourceimage.Resolved
-	if prepared != nil {
-		source, err = prepared.Resolve(ctx, client)
-		if err != nil {
-			return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
-		}
-		if source.Uploaded && (source.Image.Width != localWidth || source.Image.Height != localHeight) {
-			err := &httpclient.InvalidResponseError{Err: fmt.Errorf("uploaded source dimensions %d × %d differ from local image dimensions %d × %d", source.Image.Width, source.Image.Height, localWidth, localHeight)}
-			return ExecutionReceipt{}, &sourceimage.UploadedError{Source: source.Image, Err: withProfileWarnings(err, profileWarnings)}
+	p.adapter, p.resolved = adapter, resolved
+	return entry, profileWarnings, nil
+}
+
+// Compile checks the resolved Source Image and compiles the family's graph.
+func (p *Preparation) Compile(source sourceimage.Resolved) (EnqueueRequest, int, error) {
+	resolved := p.resolved
+	if p.source != nil {
+		alignment := p.adapter.alignment()
+		if source.Uploaded && (source.Image.Width != p.localWidth || source.Image.Height != p.localHeight) {
+			return EnqueueRequest{}, 0, &httpclient.InvalidResponseError{Err: fmt.Errorf("uploaded source dimensions %d × %d differ from local image dimensions %d × %d", source.Image.Width, source.Image.Height, p.localWidth, p.localHeight)}
 		}
 		if err := checkSourceSize(source.Image.Width, source.Image.Height, alignment); err != nil {
-			return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
+			return EnqueueRequest{}, 0, err
 		}
-		if request.Width == nil {
+		if p.request.Width == nil {
 			resolved.Request.Width, resolved.Request.Height = new(source.Image.Width/alignment*alignment), new(source.Image.Height/alignment*alignment)
 		}
 		resolved.SourceImage = source.Image
 	}
 	enqueueRequest, err := Compile(resolved)
 	if err != nil {
-		if source.Uploaded {
-			return ExecutionReceipt{}, &sourceimage.UploadedError{Source: source.Image, Err: withProfileWarnings(err, profileWarnings)}
-		}
-		return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
+		return EnqueueRequest{}, 0, err
 	}
-	queueReceipt, err := graphops.Enqueue(ctx, client, enqueueRequest, *resolved.Request.OutputCount)
-	if err != nil {
-		if source.Uploaded {
-			return ExecutionReceipt{}, &sourceimage.UploadedError{Source: source.Image, Err: withProfileWarnings(err, profileWarnings)}
-		}
-		return ExecutionReceipt{}, withProfileWarnings(err, profileWarnings)
-	}
+	p.resolved = resolved
+	return enqueueRequest, *resolved.Request.OutputCount, nil
+}
 
+// Receipt records the accepted generation using its complete resolved settings.
+func (p *Preparation) Receipt(queueReceipt QueueReceipt, source sourceimage.Resolved, profileWarnings []result.Warning) ExecutionReceipt {
+	request, resolved := p.request, p.resolved
 	receipt := ExecutionReceipt{
-		Family:           main.Base,
+		Family:           resolved.Models.Main.Base,
 		SubmittedRequest: request,
 		ResolvedSettings: ResolvedSettings{
 			Profile:        request.Profile,
@@ -188,7 +200,7 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 			OutputCount:    *resolved.Request.OutputCount,
 			BoardID:        resolved.Request.BoardID,
 			ModelKey:       resolved.Models.Main.Key,
-			ComponentKeys:  adapter.componentKeys(resolved),
+			ComponentKeys:  p.adapter.componentKeys(resolved),
 			Seeds:          slices.Clone(resolved.Seeds),
 			Strength:       resolved.Request.Strength,
 		},
@@ -196,11 +208,11 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Ex
 		Outputs:  []Output{},
 		Warnings: append([]result.Warning{}, profileWarnings...),
 	}
-	if prepared != nil {
+	if p.source != nil {
 		receipt.SourceImage = &source.Image
 		receipt.SourceUploaded = new(source.Uploaded)
 	}
-	return receipt, nil
+	return receipt
 }
 
 func checkSourceSize(width, height, alignment int) error {

@@ -1,4 +1,4 @@
-package synchronization
+package directexecution
 
 import (
 	"context"
@@ -14,11 +14,6 @@ import (
 // resolved settings, the generation outcome, or the single enqueue.
 func Synchronize(ctx context.Context, client *httpclient.Client, receipt generation.ExecutionReceipt) generation.ExecutionReceipt {
 	return synchronizeFamily(ctx, client, receipt, receipt.Family)
-}
-
-// SynchronizeAnima preserves the Anima-specific public entry point.
-func SynchronizeAnima(ctx context.Context, client *httpclient.Client, receipt generation.ExecutionReceipt) generation.ExecutionReceipt {
-	return synchronizeFamily(ctx, client, receipt, "anima")
 }
 
 func synchronizeFamily(ctx context.Context, client *httpclient.Client, receipt generation.ExecutionReceipt, family string) generation.ExecutionReceipt {

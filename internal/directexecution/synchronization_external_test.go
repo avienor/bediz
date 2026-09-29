@@ -1,4 +1,4 @@
-package synchronization_test
+package directexecution_test
 
 import (
 	"net/http"
@@ -7,10 +7,10 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/avienor/bediz/internal/directexecution"
 	"github.com/avienor/bediz/internal/generation"
 	"github.com/avienor/bediz/internal/httpclient"
 	"github.com/avienor/bediz/internal/result"
-	"github.com/avienor/bediz/internal/synchronization"
 )
 
 func TestFailedRecallPreservesExistingReceiptWarning(t *testing.T) {
@@ -23,6 +23,7 @@ func TestFailedRecallPreservesExistingReceiptWarning(t *testing.T) {
 		t.Fatal(err)
 	}
 	receipt := generation.ExecutionReceipt{
+		Family:           "anima",
 		ResolvedSettings: generation.ResolvedSettings{ModelKey: "main-key", Seeds: []uint32{42}},
 		Queue:            generation.QueueReceipt{BatchID: "existing-batch"},
 		Warnings:         []result.Warning{{Code: "existing_warning", Message: "Keep this warning"}},
@@ -32,7 +33,7 @@ func TestFailedRecallPreservesExistingReceiptWarning(t *testing.T) {
 		{Code: "existing_warning", Message: "Keep this warning"},
 		{Code: "ui_sync_failed", Message: "Generation was accepted, but the UI Recall patch could not be confirmed."},
 	}
-	got := synchronization.SynchronizeAnima(t.Context(), client, receipt)
+	got := directexecution.Synchronize(t.Context(), client, receipt)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("synchronized receipt = %#v, want %#v", got, want)
 	}
@@ -63,6 +64,7 @@ func TestSuccessfulRecallPreservesExistingReceiptWarning(t *testing.T) {
 		t.Fatal(err)
 	}
 	receipt := generation.ExecutionReceipt{
+		Family:           "anima",
 		ResolvedSettings: generation.ResolvedSettings{ModelKey: "main-key", Width: 768, Height: 1024, Steps: 24, Seeds: []uint32{42}},
 		Queue:            generation.QueueReceipt{BatchID: "existing-batch"},
 		Warnings:         []result.Warning{{Code: "existing_warning", Message: "Keep this warning"}},
@@ -78,7 +80,7 @@ func TestSuccessfulRecallPreservesExistingReceiptWarning(t *testing.T) {
 			}},
 		},
 	}
-	got := synchronization.SynchronizeAnima(t.Context(), client, receipt)
+	got := directexecution.Synchronize(t.Context(), client, receipt)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("synchronized receipt = %#v, want %#v", got, want)
 	}
