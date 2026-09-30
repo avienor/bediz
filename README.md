@@ -1,5 +1,8 @@
 # Bediz
 
+> [!NOTE]
+> Bediz is in maintenance mode. v1.1.0 is the final feature release. Bug and security fixes are still welcome; new commands, model families, and InvokeAI versions are not planned.
+
 Let your AI agent make images with your local [InvokeAI](https://github.com/invoke-ai/InvokeAI), and follow every step in the InvokeAI web interface.
 
 You tell your agent what you want. The agent writes the prompt and chooses a model and settings. Bediz checks those choices, runs them on InvokeAI, and returns an exact record of what ran. The job shows up in InvokeAI's queue and gallery like any other, so you can watch it and continue the work in the web interface at any point.

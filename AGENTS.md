@@ -1,5 +1,9 @@
 # AGENTS.md
 
+## Maintenance mode
+
+Bediz is in maintenance mode after v1.1.0. Work is limited to bug and security fixes that restore the behavior `docs/spec/v1.md` documents, released as patch versions. Ask the user before starting a new command, model family, capability, or supported InvokeAI range.
+
 ## Sources of truth
 
 - Before changing commands, public JSON, compatibility, capability coverage, or other product behavior, read `docs/spec/v1.md`.
