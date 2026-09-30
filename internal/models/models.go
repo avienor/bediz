@@ -20,13 +20,15 @@ type ListRequest struct {
 }
 
 type Summary struct {
-	Key         string  `json:"key"`
-	Name        string  `json:"name"`
-	Base        string  `json:"base"`
-	Type        string  `json:"type"`
-	Format      string  `json:"format"`
-	SizeBytes   *int64  `json:"size_bytes,omitempty"`
-	Description *string `json:"description,omitempty"`
+	Key            string   `json:"key"`
+	Name           string   `json:"name"`
+	Base           string   `json:"base"`
+	Type           string   `json:"type"`
+	Format         string   `json:"format"`
+	SizeBytes      *int64   `json:"size_bytes,omitempty"`
+	Description    *string  `json:"description,omitempty"`
+	TriggerPhrases []string `json:"trigger_phrases,omitempty"`
+	DefaultWeight  *float64 `json:"default_weight,omitempty"`
 }
 
 type ListResult struct {
@@ -34,13 +36,17 @@ type ListResult struct {
 }
 
 type modelRecord struct {
-	Key         string  `json:"key"`
-	Name        string  `json:"name"`
-	Base        string  `json:"base"`
-	Type        string  `json:"type"`
-	Format      string  `json:"format"`
-	FileSize    *int64  `json:"file_size"`
-	Description *string `json:"description"`
+	Key             string   `json:"key"`
+	Name            string   `json:"name"`
+	Base            string   `json:"base"`
+	Type            string   `json:"type"`
+	Format          string   `json:"format"`
+	FileSize        *int64   `json:"file_size"`
+	Description     *string  `json:"description"`
+	TriggerPhrases  []string `json:"trigger_phrases"`
+	DefaultSettings *struct {
+		Weight *float64 `json:"weight"`
+	} `json:"default_settings"`
 }
 
 type listResponse struct {
@@ -75,14 +81,21 @@ func List(ctx context.Context, client *httpclient.Client, request ListRequest) (
 
 	result := ListResult{Models: make([]Summary, 0, len(response.Models))}
 	for _, model := range response.Models {
+		slices.Sort(model.TriggerPhrases)
+		var defaultWeight *float64
+		if model.Type == "lora" && model.DefaultSettings != nil {
+			defaultWeight = model.DefaultSettings.Weight
+		}
 		result.Models = append(result.Models, Summary{
-			Key:         model.Key,
-			Name:        model.Name,
-			Base:        model.Base,
-			Type:        model.Type,
-			Format:      model.Format,
-			SizeBytes:   model.FileSize,
-			Description: model.Description,
+			Key:            model.Key,
+			Name:           model.Name,
+			Base:           model.Base,
+			Type:           model.Type,
+			Format:         model.Format,
+			SizeBytes:      model.FileSize,
+			Description:    model.Description,
+			TriggerPhrases: model.TriggerPhrases,
+			DefaultWeight:  defaultWeight,
 		})
 	}
 	slices.SortFunc(result.Models, func(a, b Summary) int {

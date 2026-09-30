@@ -12,6 +12,7 @@ import (
 	"image/png"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
@@ -99,6 +100,7 @@ type doctorData struct {
 		Operation  string   `json:"operation"`
 		Family     string   `json:"family"`
 		Mode       string   `json:"mode"`
+		Setting    string   `json:"setting"`
 		Compatible *bool    `json:"compatible"`
 		UISync     string   `json:"ui_sync"`
 		Failures   []string `json:"failures"`
@@ -113,13 +115,15 @@ type doctorData struct {
 
 type modelsListData struct {
 	Models []struct {
-		Key         string  `json:"key"`
-		Name        string  `json:"name"`
-		Base        string  `json:"base"`
-		Type        string  `json:"type"`
-		Format      string  `json:"format"`
-		SizeBytes   *int64  `json:"size_bytes"`
-		Description *string `json:"description"`
+		Key            string   `json:"key"`
+		Name           string   `json:"name"`
+		Base           string   `json:"base"`
+		Type           string   `json:"type"`
+		Format         string   `json:"format"`
+		SizeBytes      *int64   `json:"size_bytes"`
+		Description    *string  `json:"description"`
+		TriggerPhrases []string `json:"trigger_phrases"`
+		DefaultWeight  *float64 `json:"default_weight"`
 	} `json:"models"`
 }
 
@@ -299,6 +303,30 @@ type uiSyncWarning struct {
 	} `json:"details"`
 }
 
+func TestModelsListRecordedMetadataMatchesLiveContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v2/models/" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"models":[{"key":"detail-lora","name":"Detail","base":"anima","type":"lora","format":"lycoris","trigger_phrases":["zebra","alpha"],"default_settings":{"weight":0.6}}]}`)
+	}))
+	t.Cleanup(server.Close)
+	envelope := runJSONCommand(t, buildBinary(t), server.URL, "models", "list")
+	assertSuccessEnvelope(t, envelope, "models.list")
+	var data modelsListData
+	unmarshalData(t, envelope.Data, &data)
+	if len(data.Models) != 1 || data.Models[0].Key != "detail-lora" {
+		t.Fatalf("model summaries = %#v, want the recorded LoRA", data.Models)
+	}
+	model := data.Models[0]
+	if !slices.Equal(model.TriggerPhrases, []string{"alpha", "zebra"}) || model.DefaultWeight == nil || *model.DefaultWeight != 0.6 {
+		t.Fatalf("recorded model metadata = %#v, want sorted phrases and weight 0.6", model)
+	}
+}
+
 func TestLiveGate(t *testing.T) {
 	target := strings.TrimSpace(os.Getenv("BEDIZ_E2E_URL"))
 	if target == "" {
@@ -307,7 +335,9 @@ func TestLiveGate(t *testing.T) {
 	validateTarget(t, target)
 	binary := buildBinary(t)
 	var animaModels liveAnimaModelKeys
+	var animaLoRA string
 	var sdxlMain string
+	var sdxlLoRA string
 	var upscaleModel string
 	var tileControlNet string
 	var sd1Main string
@@ -386,10 +416,11 @@ func TestLiveGate(t *testing.T) {
 				t.Errorf("doctor returned an unsatisfied or incomplete model requirement: %#v", requirement)
 			}
 		}
-		wantOperations := []string{"auth.huggingface.login", "auth.huggingface.logout", "auth.huggingface.status", "boards.create", "boards.get", "boards.list", "generate", "generate", "generate", "generate", "generate", "generate", "images.delete", "images.download", "images.get", "images.list", "images.upload", "models.delete", "models.install", "models.install", "models.list", "models.scan", "models.status", "queue.cancel", "queue.clear", "queue.get", "queue.list", "queue.wait", "recall", "upscale", "upscale"}
+		wantOperations := []string{"auth.huggingface.login", "auth.huggingface.logout", "auth.huggingface.status", "boards.create", "boards.get", "boards.list", "generate", "generate", "generate", "generate", "generate", "generate", "generate", "generate", "generate", "images.delete", "images.download", "images.get", "images.list", "images.upload", "models.delete", "models.install", "models.install", "models.install", "models.install", "models.install", "models.list", "models.scan", "models.status", "queue.cancel", "queue.clear", "queue.get", "queue.list", "queue.wait", "recall", "upscale", "upscale"}
 		operations := make([]string, 0, len(data.Capabilities))
 		generateFamilies := map[string]bool{}
 		generateModes := map[string]bool{}
+		loraRows := map[string]bool{}
 		upscaleFamilies := map[string]bool{}
 		for _, capability := range data.Capabilities {
 			if capability.Compatible == nil || !*capability.Compatible || capability.Failures == nil || len(capability.Failures) != 0 {
@@ -398,8 +429,12 @@ func TestLiveGate(t *testing.T) {
 			operations = append(operations, capability.Operation)
 			if capability.Operation == "generate" {
 				generateFamilies[capability.Family] = true
-				generateModes[capability.Family+"/"+capability.Mode] = true
-				if capability.UISync != "partial" {
+				if capability.Setting == "loras" {
+					loraRows[capability.Family] = capability.Mode == "" && capability.UISync == ""
+				} else {
+					generateModes[capability.Family+"/"+capability.Mode] = true
+				}
+				if capability.Setting == "" && capability.UISync != "partial" {
 					t.Errorf("generate ui_sync = %q, want partial", capability.UISync)
 				}
 			}
@@ -418,6 +453,9 @@ func TestLiveGate(t *testing.T) {
 		}
 		if !generateModes["anima/txt2img"] || !generateModes["anima/img2img"] || !generateModes["sdxl/txt2img"] || !generateModes["sdxl/img2img"] || !generateModes["flux/txt2img"] || !generateModes["flux/img2img"] || len(generateModes) != 6 {
 			t.Errorf("doctor generate modes = %#v, want text and image modes for all three families", generateModes)
+		}
+		if !loraRows["anima"] || !loraRows["sdxl"] || !loraRows["flux"] || len(loraRows) != 3 {
+			t.Errorf("doctor LoRA setting rows = %#v, want Anima, SDXL, and FLUX.1", loraRows)
 		}
 		if data.UISync["generate"] != "partial" || data.UISync["upscale"] != "partial" {
 			t.Errorf("doctor UI synchronization = %#v, want partial generation and upscale", data.UISync)
@@ -444,6 +482,12 @@ func TestLiveGate(t *testing.T) {
 			}
 			if model.SizeBytes != nil && *model.SizeBytes < 0 {
 				t.Errorf("model %d has negative size: %d", index, *model.SizeBytes)
+			}
+			if model.Name == "alienzkin-sdxl" && model.Base == "sdxl" && model.Type == "lora" {
+				sdxlLoRA = model.Key
+			}
+			if model.Name == "Anima_Detail_Tweaker" && model.Base == "anima" && model.Type == "lora" {
+				animaLoRA = model.Key
 			}
 		}
 	}) {
@@ -704,6 +748,120 @@ func TestLiveGate(t *testing.T) {
 			t.Fatalf("SDXL Handoff warning = %#v", receipt.Warnings)
 		}
 		assertGeneratedImageReference(t, target, receipt.Outputs[0].Image, 768, 768)
+	}) {
+		return
+	}
+	if !t.Run("SDXL LoRA generation records metadata and self-cleans", func(t *testing.T) {
+		if sdxlLoRA == "" {
+			t.Fatal("install the Alien Style starter LoRA from https://huggingface.co/RalFinger/alien-style-lora-sdxl/resolve/main/alienzkin-sdxl.safetensors as recorded in docs/agents/live-verification.md")
+		}
+		envelope := runJSONCommand(t, binary, target, "generate", "--model", sdxlMain,
+			"--prompt", "alienzkin alien creature portrait", "--width", "768", "--height", "768",
+			"--steps", "2", "--seed", "51", "--lora", sdxlLoRA+"=1")
+		registerGeneratedImageCleanup(t, binary, target, envelope.Data)
+		assertSuccessEnvelope(t, envelope, "generate", "ui_sync_partial")
+		var receipt struct {
+			SubmittedRequest struct {
+				Loras []struct {
+					Model  string  `json:"model"`
+					Weight float64 `json:"weight"`
+				} `json:"loras"`
+			} `json:"submitted_request"`
+			ResolvedSettings struct {
+				Loras []struct {
+					ModelKey string  `json:"model_key"`
+					Weight   float64 `json:"weight"`
+				} `json:"loras"`
+			} `json:"resolved_settings"`
+			Outputs []struct {
+				Image imageReference `json:"image"`
+			} `json:"outputs"`
+			Warnings []struct {
+				Details struct {
+					NotRestored []string `json:"not_restored"`
+				} `json:"details"`
+			} `json:"warnings"`
+		}
+		if err := json.Unmarshal(envelope.Data, &receipt); err != nil {
+			t.Fatal(err)
+		}
+		if len(receipt.SubmittedRequest.Loras) != 1 || receipt.SubmittedRequest.Loras[0].Model != sdxlLoRA || receipt.SubmittedRequest.Loras[0].Weight != 1 || len(receipt.ResolvedSettings.Loras) != 1 || receipt.ResolvedSettings.Loras[0].ModelKey != sdxlLoRA || receipt.ResolvedSettings.Loras[0].Weight != 1 || len(receipt.Outputs) != 1 || len(receipt.Warnings) != 1 || slices.Contains(receipt.Warnings[0].Details.NotRestored, "loras") {
+			t.Fatalf("SDXL LoRA receipt = %#v", receipt)
+		}
+		assertGeneratedImageReference(t, target, receipt.Outputs[0].Image, 768, 768)
+		response := requestImageBackend(t, t.Context(), http.MethodGet, target, receipt.Outputs[0].Image.ImageName, "metadata")
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("SDXL LoRA metadata: %s: %s", response.Status, response.Body)
+		}
+		var metadata struct {
+			Loras []struct {
+				Model struct {
+					Key string `json:"key"`
+				} `json:"model"`
+				Weight float64 `json:"weight"`
+			} `json:"loras"`
+		}
+		if err := json.Unmarshal(response.Body, &metadata); err != nil || len(metadata.Loras) != 1 || metadata.Loras[0].Model.Key != sdxlLoRA || metadata.Loras[0].Weight != 1 {
+			t.Fatalf("SDXL LoRA metadata = %#v, error = %v", metadata, err)
+		}
+	}) {
+		return
+	}
+	if !t.Run("Anima LoRA generation records metadata and self-cleans", func(t *testing.T) {
+		if animaLoRA == "" {
+			t.Fatal("install the consented Anima_Detail_Tweaker LoRA recorded in docs/agents/live-verification.md")
+		}
+		envelope := runJSONCommand(t, binary, target, "generate", "--model", animaModels.Main,
+			"--prompt", "a detailed green jewel on white background", "--width", "768", "--height", "768",
+			"--steps", "2", "--seed", "52", "--lora", animaLoRA+"=1")
+		registerGeneratedImageCleanup(t, binary, target, envelope.Data)
+		assertSuccessEnvelope(t, envelope, "generate", "ui_sync_partial")
+		var receipt struct {
+			SubmittedRequest struct {
+				Loras []struct {
+					Model  string  `json:"model"`
+					Weight float64 `json:"weight"`
+				} `json:"loras"`
+			} `json:"submitted_request"`
+			ResolvedSettings struct {
+				Seeds []uint32 `json:"seeds"`
+				Loras []struct {
+					ModelKey string  `json:"model_key"`
+					Weight   float64 `json:"weight"`
+				} `json:"loras"`
+			} `json:"resolved_settings"`
+			Outputs []struct {
+				Image imageReference `json:"image"`
+				Seed  uint32         `json:"seed"`
+			} `json:"outputs"`
+			Warnings []uiSyncWarning `json:"warnings"`
+		}
+		if err := json.Unmarshal(envelope.Data, &receipt); err != nil {
+			t.Fatal(err)
+		}
+		if len(receipt.SubmittedRequest.Loras) != 1 || receipt.SubmittedRequest.Loras[0].Model != animaLoRA || receipt.SubmittedRequest.Loras[0].Weight != 1 ||
+			len(receipt.ResolvedSettings.Loras) != 1 || receipt.ResolvedSettings.Loras[0].ModelKey != animaLoRA || receipt.ResolvedSettings.Loras[0].Weight != 1 ||
+			!slices.Equal(receipt.ResolvedSettings.Seeds, []uint32{52}) || len(receipt.Outputs) != 1 || receipt.Outputs[0].Seed != 52 ||
+			len(receipt.Warnings) != 1 || slices.Contains(receipt.Warnings[0].Details.NotRestored, "loras") {
+			t.Fatalf("Anima LoRA receipt = %#v", receipt)
+		}
+		assertGeneratedImageReference(t, target, receipt.Outputs[0].Image, 768, 768)
+		response := requestImageBackend(t, t.Context(), http.MethodGet, target, receipt.Outputs[0].Image.ImageName, "metadata")
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("Anima LoRA metadata: %s: %s", response.Status, response.Body)
+		}
+		var metadata struct {
+			Seed  uint32 `json:"seed"`
+			Loras []struct {
+				Model struct {
+					Key string `json:"key"`
+				} `json:"model"`
+				Weight float64 `json:"weight"`
+			} `json:"loras"`
+		}
+		if err := json.Unmarshal(response.Body, &metadata); err != nil || metadata.Seed != 52 || len(metadata.Loras) != 1 || metadata.Loras[0].Model.Key != animaLoRA || metadata.Loras[0].Weight != 1 {
+			t.Fatalf("Anima LoRA metadata = %#v, error = %v", metadata, err)
+		}
 	}) {
 		return
 	}

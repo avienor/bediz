@@ -55,7 +55,7 @@ func (*upscaleAdapter) synchronize(ctx context.Context, client *httpclient.Clien
 		Steps:          new(settings.Steps),
 		Seed:           new(settings.Seeds[0]),
 	}
-	if _, err := recall.SubmitWithMainResolver(ctx, client, patch, upscale.ResolveMain); err != nil {
+	if _, err := recall.SubmitSynchronization(ctx, client, recall.SynchronizationRequest{Patch: patch, ResolveMain: upscale.ResolveMain}); err != nil {
 		receipt.Warnings = append(receipt.Warnings, result.Warning{
 			Code: "ui_sync_failed", Message: "Upscale was accepted, but the UI Recall patch could not be confirmed.",
 		})

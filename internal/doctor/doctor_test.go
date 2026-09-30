@@ -42,7 +42,7 @@ func TestRunReportsReadinessForImplementedCapabilities(t *testing.T) {
 	for i, entry := range report.Capabilities {
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "models.scan", "models.install", "models.install", "models.install", "models.install", "models.install", "models.status", "models.delete", "images.list", "images.get", "images.upload", "images.download", "images.delete", "queue.list", "queue.get", "queue.wait", "queue.cancel", "queue.clear", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
+	wantOperations := []string{"models.list", "models.scan", "models.install", "models.install", "models.install", "models.install", "models.install", "models.status", "models.delete", "images.list", "images.get", "images.upload", "images.download", "images.delete", "queue.list", "queue.get", "queue.wait", "queue.cancel", "queue.clear", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "generate", "generate", "generate", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if !slices.Equal(operations, wantOperations) {
 		t.Fatalf("reported operations = %q, want implemented operations %q", operations, wantOperations)
 	}
@@ -78,6 +78,162 @@ func assertCapabilityModeFailureFor(t *testing.T, report Report, family, mode, f
 		}
 	}
 	t.Fatalf("capability generate/%s/%s absent", family, mode)
+}
+
+func TestSDXLLoRACapabilityReportsLoaderFailureWithoutChangingModeRows(t *testing.T) {
+	document := openAPIFixture(t)
+	schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
+	delete(schemas, "SDXLLoRALoaderInvocation")
+	server := newCustomInvokeAIServer(t, "6.14.1", document, baselineModels)
+	defer server.Close()
+	client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := Run(t.Context(), client, version.Info{Version: "test"})
+	if !report.Ready || len(report.Issues) != 0 {
+		t.Fatalf("optional LoRA schema changed readiness: ready=%t issues=%#v", report.Ready, report.Issues)
+	}
+	found := false
+	for _, entry := range report.Capabilities {
+		if entry.Operation != result.OperationGenerate || entry.Family != "sdxl" {
+			continue
+		}
+		if entry.Setting == "loras" {
+			found = true
+			if entry.Mode != "" || entry.UISync != "" || entry.Compatible || !slices.Contains(entry.Failures, "incompatible_invocation:sdxl_lora_loader") {
+				t.Fatalf("LoRA row = %#v", entry)
+			}
+		} else if !entry.Compatible {
+			t.Fatalf("mode row changed = %#v", entry)
+		}
+	}
+	if !found {
+		t.Fatal("missing SDXL LoRA capability row")
+	}
+}
+
+func TestAnimaLoRACapabilityIsolatedFromOtherRows(t *testing.T) {
+	for _, test := range []struct{ name, schema, property string }{
+		{"missing loader", "AnimaLoRALoaderInvocation", ""},
+		{"missing loader property", "AnimaLoRALoaderInvocation", "qwen3_encoder"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			document := openAPIFixture(t)
+			schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
+			if test.property == "" {
+				delete(schemas, test.schema)
+			} else {
+				delete(schemas[test.schema].(map[string]any)["properties"].(map[string]any), test.property)
+			}
+			server := newCustomInvokeAIServer(t, "6.14.1", document, baselineModels)
+			defer server.Close()
+			client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			report := Run(t.Context(), client, version.Info{Version: "test"})
+			if !report.Ready {
+				t.Fatalf("mode readiness changed: %#v", report.Issues)
+			}
+			found := false
+			for _, row := range report.Capabilities {
+				if row.Operation != result.OperationGenerate {
+					continue
+				}
+				if row.Family == "anima" && row.Setting == "loras" {
+					found = true
+					if row.Mode != "" || row.UISync != "" || row.Compatible || !slices.Contains(row.Failures, "incompatible_invocation:anima_lora_loader") {
+						t.Fatalf("Anima LoRA row = %#v", row)
+					}
+				} else if !row.Compatible {
+					t.Fatalf("other generation row changed = %#v", row)
+				}
+			}
+			if !found {
+				t.Fatal("Anima LoRA row absent")
+			}
+		})
+	}
+}
+
+func TestFLUXLoRACapabilityIsolatedFromOtherRows(t *testing.T) {
+	for _, property := range []string{"", "lora", "weight", "transformer", "clip", "t5_encoder", "id", "is_intermediate", "use_cache", "type"} {
+		t.Run(property, func(t *testing.T) {
+			document := openAPIFixture(t)
+			schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
+			if property == "" {
+				delete(schemas, "FluxLoRALoaderInvocation")
+			} else {
+				delete(schemas["FluxLoRALoaderInvocation"].(map[string]any)["properties"].(map[string]any), property)
+			}
+			server := newCustomInvokeAIServer(t, "6.14.1", document, baselineModels)
+			defer server.Close()
+			client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			report := Run(t.Context(), client, version.Info{Version: "test"})
+			if !report.Ready || len(report.Issues) != 0 {
+				t.Fatalf("mode readiness changed: %#v", report.Issues)
+			}
+			found := false
+			for _, row := range report.Capabilities {
+				if row.Operation != result.OperationGenerate {
+					continue
+				}
+				if row.Family == "flux" && row.Setting == "loras" {
+					found = true
+					if row.Mode != "" || row.UISync != "" || row.Compatible || !slices.Equal(row.Failures, []string{"incompatible_invocation:flux_lora_loader"}) {
+						t.Fatalf("FLUX LoRA row = %#v", row)
+					}
+				} else if !row.Compatible {
+					t.Fatalf("other generation row changed = %#v", row)
+				}
+			}
+			if !found {
+				t.Fatal("FLUX LoRA row absent")
+			}
+		})
+	}
+}
+
+func TestSDXLLoRACapabilitySeparatesMetadataAndInheritedFailures(t *testing.T) {
+	for _, test := range []struct {
+		name, property string
+		modeFails      bool
+	}{
+		{"LoRA metadata", "loras", false},
+		{"inherited metadata", "model", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			document := openAPIFixture(t)
+			properties := document["components"].(map[string]any)["schemas"].(map[string]any)["CoreMetadataInvocation"].(map[string]any)["properties"].(map[string]any)
+			delete(properties, test.property)
+			server := newCustomInvokeAIServer(t, "6.14.1", document, baselineModels)
+			defer server.Close()
+			client, err := httpclient.New(server.URL, "", httpclient.Options{HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			report := Run(t.Context(), client, version.Info{Version: "test"})
+			if report.Ready == test.modeFails {
+				t.Fatalf("readiness changed incorrectly: ready=%t modeFails=%t issues=%#v", report.Ready, test.modeFails, report.Issues)
+			}
+			for _, row := range report.Capabilities {
+				if row.Operation != result.OperationGenerate {
+					continue
+				}
+				if row.Setting == "loras" {
+					if row.Compatible || !slices.Contains(row.Failures, "incompatible_invocation:core_metadata") {
+						t.Fatalf("LoRA row = %#v", row)
+					}
+				} else if row.Compatible == test.modeFails {
+					t.Fatalf("mode row = %#v", row)
+				}
+			}
+		})
+	}
 }
 
 func TestSDXLImageToImageCapabilityRequiresSourceVocabularyWithoutChangingTextMode(t *testing.T) {
@@ -211,6 +367,9 @@ func TestDoctorPreservesExistingCapabilityRowsAndOrder(t *testing.T) {
 			report := Run(t.Context(), client, version.Info{Version: "test"})
 			got := make([]CapabilityReport, 0, len(report.Capabilities)-3)
 			for _, row := range report.Capabilities {
+				if row.Setting == "loras" {
+					continue
+				}
 				if row.Operation == result.OperationModelsInstall && slices.Contains([]string{"huggingface", "path", "source_token"}, row.Family) {
 					continue
 				}
@@ -825,6 +984,17 @@ func TestRunReportsAnimaGenerationNegativeFixtures(t *testing.T) {
 					}
 
 					report := Run(t.Context(), client, version.Info{Version: "test"})
+					if schemaName == "CoreMetadataInvocation" && property == "loras" {
+						if !report.Ready || len(report.Issues) != 0 {
+							t.Fatalf("optional LoRA metadata changed readiness: %#v", report)
+						}
+						for _, entry := range report.Capabilities {
+							if entry.Operation == result.OperationGenerate && entry.Setting == "loras" && (entry.Compatible || !slices.Contains(entry.Failures, "incompatible_invocation:core_metadata")) {
+								t.Fatalf("LoRA row = %#v", entry)
+							}
+						}
+						return
+					}
 					if report.Ready {
 						t.Fatalf("report should not be ready when %s is missing from %s", property, schemaName)
 					}
@@ -1013,7 +1183,7 @@ func TestDoctorReportsSDXLOnlyWithSchemaModelAndRecallCFG(t *testing.T) {
 			report := Run(t.Context(), client, version.Info{Version: "test"})
 			var sdxl CapabilityReport
 			for _, entry := range report.Capabilities {
-				if entry.Operation == "generate" && entry.Family == "sdxl" {
+				if entry.Operation == "generate" && entry.Family == "sdxl" && entry.Mode == "txt2img" {
 					sdxl = entry
 				}
 			}

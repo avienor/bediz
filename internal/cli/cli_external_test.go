@@ -99,6 +99,7 @@ func animaOpenAPIFixture(missingSchema, missingProperty string) map[string]any {
 	}
 	recallSchema := recallOpenAPI()
 	schemas["RecallParameter"] = recallSchema["components"].(map[string]any)["schemas"].(map[string]any)["RecallParameter"]
+	schemas["LoRARecallParameter"] = recallSchema["components"].(map[string]any)["schemas"].(map[string]any)["LoRARecallParameter"]
 	paths := recallSchema["paths"].(map[string]any)
 	paths["/api/v1/app/version"] = map[string]any{"get": map[string]any{}}
 	paths["/api/v2/models/"] = map[string]any{"get": map[string]any{}}
@@ -3336,10 +3337,10 @@ func TestDoctorJSONAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 		}
 		operations[i] = entry.Operation
 	}
-	wantOperations := []string{"models.list", "models.scan", "models.install", "models.install", "models.install", "models.install", "models.install", "models.status", "models.delete", "images.list", "images.get", "images.upload", "images.download", "images.delete", "queue.list", "queue.get", "queue.wait", "queue.cancel", "queue.clear", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
+	wantOperations := []string{"models.list", "models.scan", "models.install", "models.install", "models.install", "models.install", "models.install", "models.status", "models.delete", "images.list", "images.get", "images.upload", "images.download", "images.delete", "queue.list", "queue.get", "queue.wait", "queue.cancel", "queue.clear", "boards.list", "boards.get", "boards.create", "generate", "generate", "generate", "generate", "generate", "generate", "generate", "generate", "generate", "upscale", "upscale", "recall", "auth.huggingface.status", "auth.huggingface.login", "auth.huggingface.logout"}
 	if envelope.SchemaVersion != 1 || !envelope.OK || envelope.Operation != "doctor" || !envelope.Data.Ready ||
 		!slices.Equal(operations, wantOperations) || envelope.Data.UISync["generate"] != "partial" ||
-		len(envelope.Data.OpenAPI.Invocations) != 29 || len(envelope.Data.Models.Relevant) != 12 || len(envelope.Data.Models.Requirements) != 13 {
+		len(envelope.Data.OpenAPI.Invocations) != 32 || len(envelope.Data.Models.Relevant) != 12 || len(envelope.Data.Models.Requirements) != 13 {
 		t.Fatalf("unexpected doctor envelope: %#v", envelope)
 	}
 }

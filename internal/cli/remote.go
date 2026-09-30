@@ -774,7 +774,14 @@ func (c *CLI) executeModelsList(ctx context.Context, jsonOutput bool, options mo
 
 func renderModelSummaries(list models.ListResult, w io.Writer) error {
 	for _, model := range list.Models {
-		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", model.Key, model.Name, model.Base, model.Type); err != nil {
+		line := fmt.Sprintf("%s\t%s\t%s\t%s", model.Key, model.Name, model.Base, model.Type)
+		if len(model.TriggerPhrases) > 0 {
+			line += "\ttrigger phrases: " + strings.Join(model.TriggerPhrases, ", ")
+		}
+		if model.DefaultWeight != nil {
+			line += fmt.Sprintf("\tdefault weight: %g", *model.DefaultWeight)
+		}
+		if _, err := fmt.Fprintln(w, line); err != nil {
 			return err
 		}
 	}

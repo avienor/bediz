@@ -408,7 +408,7 @@ func TestDoctorAnimaImageToImageMatchesTextModelRequirements(t *testing.T) {
 	modes := map[string]map[string]any{}
 	for _, raw := range report["capabilities"].([]any) {
 		entry := raw.(map[string]any)
-		if entry["operation"] == "generate" && entry["family"] == "anima" {
+		if entry["operation"] == "generate" && entry["family"] == "anima" && entry["setting"] == nil {
 			modes[entry["mode"].(string)] = entry
 		}
 	}

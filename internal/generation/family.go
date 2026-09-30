@@ -59,10 +59,16 @@ func (fluxAdapter) alignment() int { return 16 }
 
 func (fluxAdapter) compile(resolved Resolution) (EnqueueRequest, error) { return compileFLUX(resolved) }
 func (fluxAdapter) capabilityEntry(request Request) capability.Entry {
+	var entry capability.Entry
 	if request.Source != nil {
-		return capability.FLUXImageToImageEntry()
+		entry = capability.FLUXImageToImageEntry()
+	} else {
+		entry = capability.FLUXGenerationEntry()
 	}
-	return capability.FLUXGenerationEntry()
+	if len(request.Loras) > 0 {
+		return capability.WithFLUXLoRA(entry)
+	}
+	return entry
 }
 func (fluxAdapter) componentKeys(resolved Resolution) map[string]string {
 	return map[string]string{"vae": resolved.Models.VAE.Key, "t5_encoder": resolved.Models.T5Encoder.Key, "clip_embed": resolved.Models.CLIPEmbed.Key}
@@ -96,10 +102,16 @@ func (sdxlAdapter) compile(resolved Resolution) (EnqueueRequest, error) {
 }
 
 func (sdxlAdapter) capabilityEntry(request Request) capability.Entry {
+	var entry capability.Entry
 	if request.Source != nil {
-		return capability.SDXLImageToImageEntry()
+		entry = capability.SDXLImageToImageEntry()
+	} else {
+		entry = capability.SDXLGenerationEntry()
 	}
-	return capability.SDXLGenerationEntry()
+	if len(request.Loras) > 0 {
+		return capability.WithSDXLLoRA(entry)
+	}
+	return entry
 }
 
 func (sdxlAdapter) componentKeys(resolved Resolution) map[string]string {
@@ -138,10 +150,16 @@ func (animaAdapter) compile(resolved Resolution) (EnqueueRequest, error) {
 }
 
 func (animaAdapter) capabilityEntry(request Request) capability.Entry {
+	var entry capability.Entry
 	if request.Source != nil {
-		return capability.AnimaImageToImageEntry()
+		entry = capability.AnimaImageToImageEntry()
+	} else {
+		entry = capability.AnimaGenerationEntry()
 	}
-	return capability.AnimaGenerationEntry()
+	if len(request.Loras) > 0 {
+		return capability.WithAnimaLoRA(entry)
+	}
+	return entry
 }
 
 func (animaAdapter) componentKeys(resolved Resolution) map[string]string {
@@ -251,6 +269,9 @@ func Resolve(request Request, inventory []ModelIdentifier, random io.Reader) (Re
 	}
 	adapter, err := adapterForBase(main.Base)
 	if err != nil {
+		return Resolution{}, err
+	}
+	if err := validateLoRAFamily(request.Loras, main.Base); err != nil {
 		return Resolution{}, err
 	}
 	return adapter.resolve(applyModeDefaults(request), main, inventory, random)

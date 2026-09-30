@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/avienor/bediz/internal/capability"
@@ -37,13 +38,7 @@ func Submit(ctx context.Context, client *httpclient.Client, request Request) (Re
 // SubmitWithFields submits the common typed patch plus adapter-owned fields.
 // Each additional field must match the live InvokeAI Recall schema.
 func SubmitWithFields(ctx context.Context, client *httpclient.Client, request Request, additional []capability.RecallPatchField) (Result, error) {
-	return submit(ctx, client, request, additional, func(inventory []generation.ModelIdentifier, selector string) (generation.ModelIdentifier, error) {
-		model, err := generation.ResolveFamilyMain(inventory, selector)
-		if err != nil {
-			return model, err
-		}
-		return model, generation.ValidateRecall(model, request.Width, request.Height, request.Steps)
-	})
+	return submit(ctx, client, request, additional, nil, generationMainResolver(request))
 }
 
 // MainResolver selects the main model named by a Recall patch.
@@ -52,10 +47,38 @@ type MainResolver func(inventory []graphops.ModelIdentifier, selector string) (g
 // SubmitWithMainResolver submits the common typed patch for an operation that owns its
 // main-model rules, such as upscale, instead of the generation family registry.
 func SubmitWithMainResolver(ctx context.Context, client *httpclient.Client, request Request, resolveMain MainResolver) (Result, error) {
-	return submit(ctx, client, request, nil, resolveMain)
+	return submit(ctx, client, request, nil, nil, resolveMain)
 }
 
-func submit(ctx context.Context, client *httpclient.Client, request Request, additional []capability.RecallPatchField, resolveMain MainResolver) (Result, error) {
+// SynchronizationRequest restores the controls used by a direct execution.
+// An empty LoRA list clears the web interface's previous selection.
+type SynchronizationRequest struct {
+	Patch       Request
+	Additional  []capability.RecallPatchField
+	Loras       []generation.ResolvedLoRASetting
+	ResolveMain MainResolver
+}
+
+// SubmitSynchronization includes the exact LoRA list in an automatic Recall.
+func SubmitSynchronization(ctx context.Context, client *httpclient.Client, request SynchronizationRequest) (Result, error) {
+	resolveMain := request.ResolveMain
+	if resolveMain == nil {
+		resolveMain = generationMainResolver(request.Patch)
+	}
+	return submit(ctx, client, request.Patch, request.Additional, &request.Loras, resolveMain)
+}
+
+func generationMainResolver(request Request) MainResolver {
+	return func(inventory []generation.ModelIdentifier, selector string) (generation.ModelIdentifier, error) {
+		model, err := generation.ResolveFamilyMain(inventory, selector)
+		if err != nil {
+			return model, err
+		}
+		return model, generation.ValidateRecall(model, request.Width, request.Height, request.Steps)
+	}
+}
+
+func submit(ctx context.Context, client *httpclient.Client, request Request, additional []capability.RecallPatchField, loras *[]generation.ResolvedLoRASetting, resolveMain MainResolver) (Result, error) {
 	if err := validate(request); err != nil {
 		return Result{}, err
 	}
@@ -75,6 +98,9 @@ func submit(ctx context.Context, client *httpclient.Client, request Request, add
 		}
 		additionalRequirements = append(additionalRequirements, field.Requirement)
 	}
+	if loras != nil {
+		additionalRequirements = append(additionalRequirements, capability.LoRARecallField)
+	}
 	if failures := compatibility.Evaluate(capability.RecallEntry(additionalRequirements), compatibility.Snapshot{SupportedVersion: true, OpenAPIAvailable: true, Document: openAPI}); len(failures) > 0 {
 		if field, ok := strings.CutPrefix(failures[0].Code, "incompatible_recall_schema:"); ok && field != "request_body" {
 			return Result{}, operation.UnsupportedCapability(fmt.Sprintf("InvokeAI Recall schema does not support %s as a patch field", field))
@@ -82,6 +108,7 @@ func submit(ctx context.Context, client *httpclient.Client, request Request, add
 		return Result{}, operation.UnsupportedCapability("InvokeAI Recall endpoint does not expose the tested request schema")
 	}
 	patch := request
+	recalledLoRAs := make([]map[string]any, 0)
 	if request.Model != nil {
 		var inventory struct {
 			Models []generation.ModelIdentifier `json:"models"`
@@ -99,8 +126,28 @@ func submit(ctx context.Context, client *httpclient.Client, request Request, add
 			}
 		}
 		patch.Model = new(model.Name)
+		if loras != nil {
+			for _, lora := range *loras {
+				index := slices.IndexFunc(inventory.Models, func(candidate generation.ModelIdentifier) bool {
+					return candidate.Key == lora.ModelKey && candidate.Type == "lora"
+				})
+				if index < 0 {
+					return Result{}, operation.UnsupportedCapability("the executed LoRA is no longer installed")
+				}
+				model := inventory.Models[index]
+				for _, candidate := range inventory.Models {
+					if candidate.Type == "lora" && candidate.Name == model.Name && candidate.Key != model.Key {
+						return Result{}, operation.UnsupportedCapability(fmt.Sprintf("LoRA name %q is shared by installed models", model.Name))
+					}
+				}
+				recalledLoRAs = append(recalledLoRAs, map[string]any{"model_name": model.Name, "weight": lora.Weight})
+			}
+		}
 	}
 	body := patchBody(patch)
+	if loras != nil {
+		body["loras"] = recalledLoRAs
+	}
 	for _, field := range additional {
 		body[field.Requirement.Name] = field.Value
 	}

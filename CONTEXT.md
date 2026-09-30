@@ -48,6 +48,14 @@ _Avoid_: Local audit log, raw execution graph
 A self-contained description of one generation operation whose resolved behavior does not depend on transient browser state.
 _Avoid_: Current UI settings, implicit browser defaults
 
+**LoRA**:
+A low-rank adaptation model that InvokeAI applies on top of a compatible main model during a Generation Request. It is selected by Model Key or unique name, and its base must match the main model's Model Family.
+_Avoid_: Style preset, embedding, Control LoRA
+
+**LoRA Weight**:
+The strength with which one LoRA is applied, with InvokeAI's web-interface meaning. Zero removes its effect; negative values invert it. An omitted weight resolves to the LoRA's recorded default weight, otherwise 0.75.
+_Avoid_: Strength, Denoising Strength, scale
+
 **Generation Mode**:
 The kind of generation inferred from a Generation Request: text-to-image without a Source Image, or image-to-image with one.
 _Avoid_: Canvas mode, UI tab

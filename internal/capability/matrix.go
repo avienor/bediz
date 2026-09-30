@@ -48,7 +48,10 @@ type RecallPatchField struct {
 
 // RecallSchemaAlternative is one type branch in a Recall patch field's anyOf.
 type RecallSchemaAlternative struct {
-	Type string `json:"type"`
+	Type  string `json:"type"`
+	Items struct {
+		Ref string `json:"$ref"`
+	} `json:"items"`
 }
 
 // MatchesNullableAlternatives accepts the expected field type and null in
@@ -68,6 +71,8 @@ var RecallPatchFields = []RecallFieldRequirement{
 	{Name: "steps", Type: "integer"},
 	{Name: "seed", Type: "integer"},
 }
+
+var LoRARecallField = RecallFieldRequirement{Name: "loras", Type: "array"}
 
 var SDXLCFGRecallField = RecallFieldRequirement{Name: "cfg_scale", Type: "number"}
 
@@ -176,6 +181,7 @@ type Entry struct {
 	Operation     string
 	Family        string
 	Mode          string
+	Setting       string
 	UISync        string
 	VersionPolicy VersionPolicy
 	Endpoints     []EndpointRequirement
@@ -360,13 +366,16 @@ var Matrix = []Entry{
 	},
 	AnimaGenerationEntry(),
 	AnimaImageToImageEntry(),
+	AnimaLoRAEntry(),
 	SDXLGenerationEntry(),
 	SDXLImageToImageEntry(),
+	SDXLLoRAEntry(),
 	FLUXGenerationEntry(),
 	FLUXImageToImageEntry(),
+	FLUXLoRAEntry(),
 	SDXLUpscaleEntry(),
 	SD1UpscaleEntry(),
-	RecallEntry([]RecallFieldRequirement{SDXLCFGRecallField}),
+	RecallEntry([]RecallFieldRequirement{SDXLCFGRecallField, LoRARecallField}),
 	{
 		Operation:     result.OperationAuthHFStatus,
 		VersionPolicy: VersionPolicyCompatibleEndpoint,
@@ -424,7 +433,7 @@ func InstallPreflightEntries(sourceType string, hasSourceToken bool) ([]Entry, b
 }
 
 // RecallEntry records the common patch schema and any fields used by a
-// generation family's UI Synchronization. The doctor row includes the union.
+// direct execution's UI Synchronization. The doctor row includes the union.
 func RecallEntry(additional []RecallFieldRequirement) Entry {
 	return Entry{
 		Operation:     result.OperationRecall,
@@ -596,6 +605,64 @@ func SDXLImageToImageEntry() Entry {
 		InvocationRequirement{Schema: "ImageResizeInvocation", Type: "img_resize", Properties: append(slices.Clone(common), "image", "width", "height", "resample_mode")},
 		InvocationRequirement{Schema: "ImageToLatentsInvocation", Type: "i2l", Properties: append(slices.Clone(common), "image", "vae", "fp32", "color_compensation")},
 	)
+	return entry
+}
+
+func withLoRAMetadata(entry Entry) Entry {
+	entry.Invocations = slices.Clone(entry.Invocations)
+	for index := range entry.Invocations {
+		if entry.Invocations[index].Type == "core_metadata" {
+			entry.Invocations[index].Properties = append(slices.Clone(entry.Invocations[index].Properties), "loras")
+		}
+	}
+	return entry
+}
+
+// WithSDXLLoRA adds the tested LoRA vocabulary to either SDXL Generation Mode.
+func WithSDXLLoRA(entry Entry) Entry {
+	entry = withLoRAMetadata(entry)
+	entry.Invocations = append(entry.Invocations, InvocationRequirement{Schema: "SDXLLoRALoaderInvocation", Type: "sdxl_lora_loader", Properties: []string{"id", "is_intermediate", "use_cache", "type", "lora", "weight", "unet", "clip", "clip2"}})
+	return entry
+}
+
+// WithAnimaLoRA adds the tested LoRA vocabulary to either Anima Generation Mode.
+func WithAnimaLoRA(entry Entry) Entry {
+	entry = withLoRAMetadata(entry)
+	entry.Invocations = append(entry.Invocations, InvocationRequirement{Schema: "AnimaLoRALoaderInvocation", Type: "anima_lora_loader", Properties: []string{"id", "is_intermediate", "use_cache", "type", "lora", "weight", "transformer", "qwen3_encoder"}})
+	return entry
+}
+
+// WithFLUXLoRA adds the tested LoRA vocabulary to either FLUX.1 Generation Mode.
+func WithFLUXLoRA(entry Entry) Entry {
+	entry = withLoRAMetadata(entry)
+	entry.Invocations = append(entry.Invocations, InvocationRequirement{Schema: "FluxLoRALoaderInvocation", Type: "flux_lora_loader", Properties: []string{"id", "is_intermediate", "use_cache", "type", "lora", "weight", "transformer", "clip", "t5_encoder"}})
+	return entry
+}
+
+// FLUXLoRAEntry is the setting row, inheriting text-to-image requirements.
+func FLUXLoRAEntry() Entry {
+	entry := WithFLUXLoRA(FLUXGenerationEntry())
+	entry.Mode = ""
+	entry.Setting = "loras"
+	entry.UISync = ""
+	return entry
+}
+
+// AnimaLoRAEntry is the setting row, inheriting text-to-image requirements.
+func AnimaLoRAEntry() Entry {
+	entry := WithAnimaLoRA(AnimaGenerationEntry())
+	entry.Mode = ""
+	entry.Setting = "loras"
+	entry.UISync = ""
+	return entry
+}
+
+// SDXLLoRAEntry is the setting row, inheriting text-to-image requirements.
+func SDXLLoRAEntry() Entry {
+	entry := WithSDXLLoRA(SDXLGenerationEntry())
+	entry.Mode = ""
+	entry.Setting = "loras"
+	entry.UISync = ""
 	return entry
 }
 

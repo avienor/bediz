@@ -31,7 +31,7 @@ func synchronizeFamily(ctx context.Context, client *httpclient.Client, receipt g
 		Steps:          new(settings.Steps),
 		Seed:           new(settings.Seed),
 	}
-	if _, err := recall.SubmitWithFields(ctx, client, patch, settings.Additional); err != nil {
+	if _, err := recall.SubmitSynchronization(ctx, client, recall.SynchronizationRequest{Patch: patch, Additional: settings.Additional, Loras: receipt.ResolvedSettings.Loras}); err != nil {
 		return syncFailure(receipt)
 	}
 	receipt.Warnings = append(receipt.Warnings, result.Warning{

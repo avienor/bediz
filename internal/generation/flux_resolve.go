@@ -103,5 +103,9 @@ func resolveFLUX(request Request, main ModelIdentifier, inventory []ModelIdentif
 	if err != nil {
 		return Resolution{}, fmt.Errorf("resolve FLUX.1 CLIP Embed: %w", err)
 	}
-	return Resolution{Request: resolved, Models: ResolvedModels{Main: main, VAE: vae, T5Encoder: t5, CLIPEmbed: clip}, Seeds: seeds}, nil
+	loras, err := resolveLoRAs(request.Loras, inventory, main.Base)
+	if err != nil {
+		return Resolution{}, err
+	}
+	return Resolution{Request: resolved, Models: ResolvedModels{Main: main, VAE: vae, T5Encoder: t5, CLIPEmbed: clip}, Seeds: seeds, Loras: loras}, nil
 }

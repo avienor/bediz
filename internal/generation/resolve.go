@@ -19,6 +19,12 @@ type Resolution struct {
 	Models      ResolvedModels
 	Seeds       []uint32
 	SourceImage images.Reference
+	Loras       []ResolvedLoRA
+}
+
+type ResolvedLoRA struct {
+	Model  ModelIdentifier
+	Weight float64
 }
 
 var (
@@ -88,7 +94,11 @@ func resolveSDXL(request Request, mainModel ModelIdentifier, inventory []ModelId
 		}
 		models.VAE = vae
 	}
-	return Resolution{Request: resolved, Models: models, Seeds: seeds}, nil
+	loras, err := resolveLoRAs(request.Loras, inventory, mainModel.Base)
+	if err != nil {
+		return Resolution{}, err
+	}
+	return Resolution{Request: resolved, Models: models, Seeds: seeds, Loras: loras}, nil
 }
 
 func resolveAnima(request Request, mainModel ModelIdentifier, inventory []ModelIdentifier, random io.Reader, alignment int, entry capability.Entry) (Resolution, error) {
@@ -127,10 +137,15 @@ func resolveAnima(request Request, mainModel ModelIdentifier, inventory []ModelI
 	if err != nil {
 		return Resolution{}, fmt.Errorf("resolve Qwen3 encoder: %w", err)
 	}
+	loras, err := resolveLoRAs(request.Loras, inventory, mainModel.Base)
+	if err != nil {
+		return Resolution{}, err
+	}
 	return Resolution{
 		Request: resolved,
 		Models:  ResolvedModels{Main: mainModel, VAE: vae, Qwen3Encoder: encoder},
 		Seeds:   seeds,
+		Loras:   loras,
 	}, nil
 }
 
@@ -180,6 +195,17 @@ func validateCommonRequest(request Request) error {
 	if request.Strength != nil {
 		if request.Source == nil || math.IsNaN(*request.Strength) || math.IsInf(*request.Strength, 0) || *request.Strength <= 0 || *request.Strength > 1 {
 			return operation.InvalidField("strength", "strength requires a source and must be finite, greater than 0, and at most 1")
+		}
+	}
+	if request.Loras != nil && len(request.Loras) == 0 {
+		return operation.InvalidField("loras", "loras must be a non-empty list")
+	}
+	for index, lora := range request.Loras {
+		if lora.Model == "" {
+			return operation.InvalidField(fmt.Sprintf("loras.%d.model", index), "LoRA model selector is required")
+		}
+		if lora.Weight != nil && !validLoRAWeight(*lora.Weight) {
+			return operation.InvalidField(fmt.Sprintf("loras.%d.weight", index), "LoRA weight must be finite and between -10 and 10")
 		}
 	}
 	return nil

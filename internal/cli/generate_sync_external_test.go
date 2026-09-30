@@ -77,7 +77,7 @@ func TestGenerateNoWaitRecallsFirstResolvedSeedAfterAcceptedBatch(t *testing.T) 
 			}
 			want := map[string]any{
 				"model": "Anima Main", "positive_prompt": "lighthouse", "negative_prompt": "text",
-				"width": float64(768), "height": float64(1024), "steps": float64(24), "seed": float64(41),
+				"width": float64(768), "height": float64(1024), "steps": float64(24), "seed": float64(41), "loras": []any{},
 			}
 			if !reflect.DeepEqual(patch, want) {
 				t.Errorf("Recall patch = %#v, want %#v", patch, want)

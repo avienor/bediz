@@ -291,8 +291,9 @@ func recallOpenAPI() map[string]any {
 		}
 		properties[name] = map[string]any{"anyOf": []any{map[string]any{"type": valueType}, map[string]any{"type": "null"}}}
 	}
+	properties["loras"] = map[string]any{"anyOf": []any{map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/LoRARecallParameter"}}, map[string]any{"type": "null"}}}
 	return map[string]any{
 		"paths":      map[string]any{"/api/v1/recall/{queue_id}": map[string]any{"post": map[string]any{"requestBody": map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/RecallParameter"}}}}}}},
-		"components": map[string]any{"schemas": map[string]any{"RecallParameter": map[string]any{"properties": properties}}},
+		"components": map[string]any{"schemas": map[string]any{"RecallParameter": map[string]any{"properties": properties}, "LoRARecallParameter": map[string]any{"properties": map[string]any{"model_name": map[string]any{"type": "string"}, "weight": map[string]any{"type": "number"}}}}},
 	}
 }
