@@ -1,5 +1,7 @@
 # Contributing
 
+Bediz is in maintenance mode. Contributions that fix a bug or a security issue are welcome: a fix restores the behavior [docs/spec/v1.md](docs/spec/v1.md) documents. New commands, model families, capabilities, and InvokeAI versions are not planned; open an issue to discuss one before writing code.
+
 Read [AGENTS.md](AGENTS.md) for the project's sources of truth, architecture rules, and workflow. Product behavior is defined in [docs/spec/v1.md](docs/spec/v1.md), and the vocabulary in [CONTEXT.md](CONTEXT.md).
 
 ## Build

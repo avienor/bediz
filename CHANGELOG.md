@@ -4,6 +4,10 @@ Each release lists the changes that affect users of the `bediz` binary, its JSON
 
 ## Unreleased
 
+## v1.1.0 — 2026-09-30
+
+Final feature release, targeting InvokeAI `>= 6.14.1, < 6.15.0`. Bediz is in maintenance mode from this release: later releases contain only bug and security fixes.
+
 ### Added
 
 - `models list` reports recorded trigger phrases in sorted order and recorded LoRA default weights in JSON and human output.
