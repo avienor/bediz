@@ -57,7 +57,9 @@
 - Restored the weight and removed both phrases in the UI. Removing the last phrase stores an empty array, so a single `PATCH /api/v2/models/i/5a64f0b6-e279-4d4e-8c02-826bc2470066` with `{"trigger_phrases":null}` restored the original null exactly. A fresh GET confirmed the original null trigger phrases and null weight/min/max settings. The final `./bediz models list --type lora --json` again omitted both members for all four LoRAs.
 - Independent Standards and Spec reviewers assessed a fixed implementation snapshot against base `482d8a17b35174d65fccd44edc738b70eba1f6ef`. Both independently read the live model-config schemas and reproduced the listing with the temporary metadata before restoration. The Spec reviewer also compared every existing member across all 20 installed models and checked the SDXL LoRA filter. Standards: 0 findings; Spec: 0 findings; no acceptance-blocking issue.
 
-### PR review follow-up — 2026-09-30
+### PR review follow-up — 2026-09-30 (Europe/Istanbul, UTC+03:00)
+
+This follow-up date uses the local time zone. Commit `8dd41db` records the corrections at `2026-09-30T00:26:56+03:00`, equivalent to `2026-09-29T21:26:56Z`; the September 30 date is not a future verification date.
 
 The live E2E result type now accepts `trigger_phrases` and `default_weight`. A regression test executes the real binary against an HTTP model inventory with both recorded members and decodes its output through the live gate's strict result contract. Before the correction it failed with an unknown `trigger_phrases` member; afterward it passed and confirmed ascending phrases and weight 0.6. The model-discovery loop is unchanged.
 
@@ -78,3 +80,17 @@ BEDIZ_E2E_URL=http://127.0.0.1:9090 go test -count=1 -v ./e2e -run '^TestLiveGat
 ```
 
 The live version endpoint returned 6.14.1. The focused gate passed readiness and normalized model listing. It performed no generation, upload, model installation, or model metadata change, so there are no new ad hoc images or model values to restore. The earlier family-generation and frontend synchronization evidence remains in tickets 01–05.
+
+### Documentation review follow-up — 2026-09-30 (Europe/Istanbul, UTC+03:00)
+
+ADR-0024 now explicitly supersedes ADR-0015's V1 LoRA exclusion for Generation Requests while preserving ADR-0012's Generative Upscale scope. The earlier follow-up date is clarified with its time zone and the recorded commit timestamp. The open weight-validation comment is already addressed by `8dd41db`: the CLI only parses decimal weights, and request and recorded-default validation share `validLoRAWeight`. No Go code or public behavior changed in this follow-up.
+
+Verification passed:
+
+```sh
+go test -count=1 ./internal/cli ./internal/generation -run 'LoRA|Lora'
+go test -count=1 -v ./e2e -run '^TestModelsListRecordedMetadataMatchesLiveContract$'
+git diff --check
+```
+
+These checks use fake servers, not the live InvokeAI installation. The earlier live evidence remains unchanged.
